@@ -84,7 +84,30 @@ export class AuthService {
           return;
         }
 
-        // No existing key: generate and store
+        // No key in keytar: check whether a legacy file-based key exists and migrate it into keytar.
+        try {
+          if (fsSync.existsSync(keyFile)) {
+            const fileExisting = fsSync.readFileSync(keyFile, 'utf8').trim();
+            if (fileExisting && fileExisting.length > 0) {
+              // Normalize to hex if needed
+              let migratedKey = fileExisting;
+              if (!/^[0-9a-fA-F]{64}$/.test(migratedKey)) {
+                migratedKey = crypto.createHash('sha256').update(migratedKey).digest('hex');
+              }
+              await keytar.setPassword('yash', 'encryption-key', migratedKey);
+              this.encryptionKey = migratedKey;
+              defaultLogger.info('Migrated existing file-based encryption key into OS keyring');
+              return;
+            }
+          }
+        } catch (err) {
+          defaultLogger.warn(
+            'Failed to migrate file-based key into OS keyring, will generate a fresh key:',
+            err,
+          );
+        }
+
+        // No existing key anywhere: generate and store
         const generated = crypto.randomBytes(32).toString('hex');
         await keytar.setPassword('yash', 'encryption-key', generated);
         this.encryptionKey = generated;
