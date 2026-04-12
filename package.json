@@ -16,6 +16,7 @@
     "@biomejs/biome": "^2.4.11",
     "@playwright/test": "^1.59.1",
     "@types/bun": "latest",
+    "keytar": "^7.9.0",
     "playwright": "^1.59.1"
   },
   "peerDependencies": {
