@@ -43,6 +43,8 @@ export async function initializeServices() {
   console.log('All services initialized');
 }
 
+initializeServices().catch(console.error);
+
 Bun.serve({
   routes: {
     '/': index,

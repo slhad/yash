@@ -6,6 +6,10 @@
 - **Read project info**: `cat README.md`
 - **List files**: `ls -la`
 
+## Alias
+- [root]: workspace repository.
+- [tmp]: folder for temporary files excluded from versioning.
+
 ## Current Project State
 
 This is a minimal repository with:
