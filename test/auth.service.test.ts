@@ -16,7 +16,32 @@ describe('AuthService', () => {
       // ignore
     }
 
-    authService = new AuthService();
+    // Use a simple in-memory MockKeytar so tests are isolated from the OS keyring
+    class MockKeytar {
+      private store: Record<string, string> = {};
+      async getPassword(service: string, account: string) {
+        return this.store[`${service}:${account}`] || null;
+      }
+      async setPassword(service: string, account: string, password: string) {
+        this.store[`${service}:${account}`] = password;
+      }
+      async findCredentials(service: string) {
+        const entries: Array<{ account: string; password: string }> = [];
+        for (const k of Object.keys(this.store)) {
+          if (k.startsWith(service + ':')) {
+            const account = k.split(':')[1];
+            entries.push({ account, password: this.store[k] });
+          }
+        }
+        return entries;
+      }
+      async deletePassword(service: string, account: string) {
+        delete this.store[`${service}:${account}`];
+      }
+    }
+
+    const mockKeytar = new MockKeytar();
+    authService = new AuthService(mockKeytar as any);
     // Wait a short time for loadTokens to complete
     await new Promise((resolve) => setTimeout(resolve, 10));
   });
