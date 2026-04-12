@@ -4,36 +4,22 @@
 
 - **Check specifications**: `cat SPECS.md`
 - **Read project info**: `cat README.md`
-- **List files**: `ls -la`
+- **Read on going work**: `cat tmp/ONGOING.md 2>/dev/null||echo "No on going work, analyse codebase to find work to do"`
 
 ## Alias
 - [root]: workspace repository.
 - [tmp]: folder for temporary files excluded from versioning.
 
-## Current Project State
-
-This is a minimal repository with:
-- README.md: Project title ("Yet Another Streamer Helper")
-- SPECS.md: Technical requirements including:
-  - UI components from https://github.com/anomalyco/opentui
-  - Bun for runtime and testing (`bun run`, `bun test`)
-  - Biome for linting/formatting (`biome check --write`)
-
 ## Getting Started
 
 When beginning work in this repository:
 1. Review SPECS.md for current requirements
-2. No build/setup steps are currently defined
-3. Follow the specifications for any implementation work
+2. Follow the specifications for any implementation work
+3. All implementation should adhere to the requirements in SPECS.md
 4. **When testing TUI components**: Must use OpenCode pty_spawn/pty_write tools for proper terminal interaction
+5. **Write** on going work/parts in `[tmp]/ONGOING.md` to keep track of everything and clean it up when parts are done
 
-## Notes
-
-- Repository is intentionally minimal - specifications define the technical stack
-- No package.json, lockfiles, or build configurations exist yet
-- All implementation should adhere to the requirements in SPECS.md
-
-
+## Working with Bun
 Default to using Bun instead of Node.js.
 
 - Use `bun <file>` instead of `node <file>` or `ts-node <file>`
@@ -44,7 +30,7 @@ Default to using Bun instead of Node.js.
 - Use `bunx <package> <command>` instead of `npx <package> <command>`
 - Bun automatically loads .env, so don't use dotenv.
 
-## APIs
+### APIs
 
 - `Bun.serve()` supports WebSockets, HTTPS, and routes. Don't use `express`.
 - `bun:sqlite` for SQLite. Don't use `better-sqlite3`.
@@ -54,7 +40,7 @@ Default to using Bun instead of Node.js.
 - Prefer `Bun.file` over `node:fs`'s readFile/writeFile
 - Bun.$`ls` instead of execa.
 
-## Testing
+### Testing
 
 Use `bun test` to run tests.
 
@@ -66,7 +52,7 @@ test("hello world", () => {
 });
 ```
 
-## Frontend
+### Frontend
 
 Use HTML imports with `Bun.serve()`. Don't use `vite`. HTML imports fully support React, CSS, Tailwind.
 

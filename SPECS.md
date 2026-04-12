@@ -57,6 +57,8 @@ src/
 ## Integration tests
 - Chats webview with `playwright-cli` skill, record screenshots in [tmp]/web/
 - TUI with `vhs` skill, record demos in [tmp]/tui/
+- Use [root]/config.json (actual working) configuration to execute integration tests
+- Test websocket communication with obs-studio (ignore if connection refused, aka obs-studio is off)
 
 ## Development Commands
 - `bun run src/index.ts` - Launch the TUI application
