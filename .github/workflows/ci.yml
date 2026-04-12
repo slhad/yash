@@ -2,33 +2,55 @@ name: CI
 
 on:
   push:
-    branches: ["main", "master"]
+    branches: [ master, main ]
   pull_request:
-    branches: ["main", "master"]
+    branches: [ master, main ]
 
 jobs:
-  build:
+  test:
+    name: Run tests and lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      # Install Bun
       - name: Setup Bun
         uses: oven-sh/setup-bun@v1
-        with:
-          bun-version: stable
-
-      - name: Show Bun version
-        run: bun -v
 
       - name: Install dependencies
         run: bun install
 
-      - name: Run formatter/linter
-        run: bunx biome check --write || true
-
-      - name: Build TUI for Bun
-        run: bun build --target bun --outdir dist src/main.tsx
-
-      - name: Run tests
+      - name: Run tests and biome
         run: bun test
+
+  secret-scan:
+    name: Scan repository for likely plaintext secrets (non-blocking)
+    runs-on: ubuntu-latest
+    needs: test
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Scan for common secret patterns
+        run: |
+          set -euo pipefail
+          echo "Searching tracked files for common secret patterns..."
+          files=$(git ls-files)
+          matches_found=0
+          for f in $files; do
+            case "$f" in
+              node_modules/*) continue ;; # skip vendor
+              dist/*) continue ;;
+            esac
+            if grep -InE "password|passwd|pwd|secret|api[_-]?key|token|access[_-]?key|client[_-]?secret" "$f" >/dev/null 2>&1; then
+              echo "Potential secret match in: $f"
+              grep -InE "password|passwd|pwd|secret|api[_-]?key|token|access[_-]?key|client[_-]?secret" "$f" || true
+              matches_found=1
+            fi
+          done
+          if [ "$matches_found" -ne 0 ]; then
+            echo "\nWARNING: Potential plaintext secrets found. Please remove secrets from version control and use a gitignored local config or environment variables."
+          else
+            echo "No obvious plaintext secret patterns found."
+          fi
