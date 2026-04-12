@@ -1,0 +1,59 @@
+name: "Purge Approval"
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Mode to run: validate or execute'
+        required: true
+        default: 'validate'
+
+jobs:
+  validate:
+    if: "github.event.inputs.mode == 'validate'"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run tests
+        run: |
+          bun test || true
+      - name: Run gitleaks
+        run: |
+          if command -v gitleaks >/dev/null 2>&1; then gitleaks detect --source . --report-path gitleaks.json || true; fi
+      - name: Generate evidence
+        run: |
+          sh scripts/generate-purge-evidence.sh --mirror-dir tmp/repo-mirror.git --sim-dir tmp/repo-sim/.git || true
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: purge-validate-artifacts
+          path: |
+            tmp/evidence/**
+            gitleaks.json
+
+  execute:
+    if: "github.event.inputs.mode == 'execute'"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check approvers
+        id: approvers
+        run: |
+          echo "TODO: verify PR approvers via GitHub API or require repository policy"
+      - name: Preconditions
+        run: |
+          if [ "${{ github.event.inputs.confirm }}" != "1" ]; then echo "CONFIRM_PURGE not set"; exit 1; fi
+      - name: Run orchestrator (execute)
+        env:
+          CONFIRM_PURGE: 1
+          PROVIDE_SIGNOFF_FILE: tmp/signoffs.txt
+          PURGE_EXECUTOR_TOKEN: ${{ secrets.PURGE_EXECUTOR_TOKEN }}
+        run: |
+          sh scripts/purge-canary-orchestrator.sh --replacements tmp/replacements-curated.txt --execute
+      - name: Upload execution artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: purge-execution-artifacts
+          path: tmp/**
