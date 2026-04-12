@@ -27,6 +27,7 @@ export class AuthService {
   private useKeytar: boolean = false;
 
   private tokens: Map<string, TokenData> = new Map();
+  private refreshInterval: NodeJS.Timeout | null = null;
 
   constructor() {
     // Use environment variable, OS keyring, or persist a generated key to disk so tokens remain readable across runs.
@@ -338,5 +339,42 @@ export class AuthService {
     }
 
     return false;
+  }
+
+  /**
+   * Start a background task that checks tokens periodically and refreshes them using
+   * the provided PlatformProvider mapping. The provider implementations should
+   * implement authenticate() (or refresh behavior) to obtain a fresh access token.
+   */
+  startAutoRefresh(providers: Record<string, PlatformProvider>, intervalMs: number = 60_000): void {
+    if (this.refreshInterval) {
+      clearInterval(this.refreshInterval);
+      this.refreshInterval = null;
+    }
+
+    // Run immediately once, then on interval
+    const runOnce = async () => {
+      for (const [platform, provider] of Object.entries(providers)) {
+        try {
+          await this.refreshTokenIfNeeded(platform, provider);
+        } catch (err) {
+          defaultLogger.error(`AuthService auto-refresh error for ${platform}:`, err);
+        }
+      }
+    };
+
+    // Fire-and-forget initial run
+    void runOnce();
+
+    this.refreshInterval = setInterval(() => {
+      void runOnce();
+    }, intervalMs);
+  }
+
+  stopAutoRefresh(): void {
+    if (this.refreshInterval) {
+      clearInterval(this.refreshInterval);
+      this.refreshInterval = null;
+    }
   }
 }
