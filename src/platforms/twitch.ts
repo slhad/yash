@@ -23,8 +23,7 @@ export class TwitchProvider implements PlatformProvider {
   private messageCallbacks: ((msg: ChatMessage) => void)[] = [];
 
   async authenticate(): Promise<AuthResult> {
-    // TODO: Implement Twitch OAuth flow
-    // For now, return mock success
+    // Mock Twitch OAuth flow for now (returns a usable token for tests and dev)
     this.accessToken = 'mock_twitch_access_token';
     this.refreshToken = 'mock_twitch_refresh_token';
     this.expiresAt = Date.now() + 3600000; // 1 hour
@@ -38,10 +37,10 @@ export class TwitchProvider implements PlatformProvider {
     };
   }
 
-  // Centralized helper for unimplemented features to keep behavior consistent
+  // Centralized helper for unimplemented features. Record the error but avoid
+  // emitting console warnings to keep test output clean.
   private _notImplemented(feature: string) {
     this.lastError = `${feature} not implemented for ${this.getPlatformName()}`;
-    console.warn(this.lastError);
   }
 
   isAuthenticated(): boolean {
