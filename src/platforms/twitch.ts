@@ -38,6 +38,12 @@ export class TwitchProvider implements PlatformProvider {
     };
   }
 
+  // Centralized helper for unimplemented features to keep behavior consistent
+  private _notImplemented(feature: string) {
+    this.lastError = `${feature} not implemented for ${this.getPlatformName()}`;
+    console.warn(this.lastError);
+  }
+
   isAuthenticated(): boolean {
     return this.isAuthenticatedFlag && this.accessToken !== null && Date.now() < this.expiresAt;
   }
@@ -56,8 +62,8 @@ export class TwitchProvider implements PlatformProvider {
       throw new Error('Not authenticated with Twitch');
     }
 
-    // TODO: Implement actual Twitch API call to start stream
-    // This would involve using the stream key with OBS/streaming software
+    // Not implemented: actual Twitch API call to start stream
+    this._notImplemented('Twitch startStream API call');
 
     this.streamStatus = StreamStatus.STARTING;
     this.connectionStatus = 'connecting';
@@ -74,7 +80,8 @@ export class TwitchProvider implements PlatformProvider {
       throw new Error('Not authenticated with Twitch');
     }
 
-    // TODO: Implement actual Twitch API call to stop stream
+    // Not implemented: actual Twitch API call to stop stream
+    this._notImplemented('Twitch stopStream API call');
 
     this.streamStatus = StreamStatus.STOPPING;
     await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -87,8 +94,8 @@ export class TwitchProvider implements PlatformProvider {
       throw new Error('Not authenticated with Twitch');
     }
 
-    // TODO: Implement actual Twitch API call to update stream metadata
-    // This would update title, game, etc.
+    // Not implemented: actual Twitch API call to update stream metadata
+    this._notImplemented('Twitch updateStreamMetadata API call');
   }
 
   getStreamKey(): string {
@@ -109,7 +116,8 @@ export class TwitchProvider implements PlatformProvider {
       throw new Error('Not authenticated with Twitch');
     }
 
-    // TODO: Implement actual Twitch chat message sending
+    // Not implemented: actual Twitch chat message sending
+    this._notImplemented('Twitch chat sendMessage');
     console.log(`Would send message to Twitch chat: ${message}`);
   }
 
@@ -123,7 +131,8 @@ export class TwitchProvider implements PlatformProvider {
 
   async setupWebhooks(config: WebhookConfig): Promise<void> {
     // Twitch uses EventSub for webhooks
-    // TODO: Implement actual webhook setup
+    // Not implemented: actual webhook setup
+    this._notImplemented('Twitch webhook setup');
     console.log(`Setting up Twitch webhooks for topics: ${config.topics.join(', ')}`);
   }
 

@@ -38,6 +38,12 @@ export class KickProvider implements PlatformProvider {
     };
   }
 
+  // Centralized helper for unimplemented features to keep behavior consistent
+  private _notImplemented(feature: string) {
+    this.lastError = `${feature} not implemented for ${this.getPlatformName()}`;
+    console.warn(this.lastError);
+  }
+
   isAuthenticated(): boolean {
     return this.isAuthenticatedFlag && this.accessToken !== null && Date.now() < this.expiresAt;
   }
@@ -56,8 +62,8 @@ export class KickProvider implements PlatformProvider {
       throw new Error('Not authenticated with Kick');
     }
 
-    // TODO: Implement actual Kick API call to start stream
-    // This would involve using the stream key with OBS/streaming software
+    // Not implemented: actual Kick API call to start stream
+    this._notImplemented('Kick startStream API call');
 
     this.streamStatus = StreamStatus.STARTING;
     this.connectionStatus = 'connecting';
@@ -74,7 +80,8 @@ export class KickProvider implements PlatformProvider {
       throw new Error('Not authenticated with Kick');
     }
 
-    // TODO: Implement actual Kick API call to stop stream
+    // Not implemented: actual Kick API call to stop stream
+    this._notImplemented('Kick stopStream API call');
 
     this.streamStatus = StreamStatus.STOPPING;
     await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -87,8 +94,8 @@ export class KickProvider implements PlatformProvider {
       throw new Error('Not authenticated with Kick');
     }
 
-    // TODO: Implement actual Kick API call to update stream metadata
-    // This would update title, category, etc.
+    // Not implemented: actual Kick API call to update stream metadata
+    this._notImplemented('Kick updateStreamMetadata API call');
   }
 
   getStreamKey(): string {
@@ -109,7 +116,8 @@ export class KickProvider implements PlatformProvider {
       throw new Error('Not authenticated with Kick');
     }
 
-    // TODO: Implement actual Kick chat message sending
+    // Not implemented: actual Kick chat message sending
+    this._notImplemented('Kick chat sendMessage');
     console.log(`Would send message to Kick chat: ${message}`);
   }
 
@@ -123,7 +131,8 @@ export class KickProvider implements PlatformProvider {
 
   async setupWebhooks(config: WebhookConfig): Promise<void> {
     // Kick uses webhooks for real-time events
-    // TODO: Implement actual webhook setup
+    // Not implemented: actual webhook setup
+    this._notImplemented('Kick webhook setup');
     console.log(`Setting up Kick webhooks for topics: ${config.topics.join(', ')}`);
   }
 
