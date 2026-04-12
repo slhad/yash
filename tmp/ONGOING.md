@@ -97,5 +97,10 @@ Formatting and linting:
 - Ran `bunx biome check --write` and applied suggested safe fixes with `--unsafe` where appropriate. Changes included using template literals, optional chaining, and Node.js builtin imports (node:fs).
 - Re-ran tests after formatting — all tests still pass: 90 passed, 0 failed.
 
+WebSocket transport and tests:
+- Implemented optional WebSocket transport in `src/services/obs.service.ts` (constructor flag `useWebSocketTransport`). When enabled the service will use a WebSocket client for request/response.
+- Added `test/obs.websocket.test.ts` which uses an in-process FakeWebSocket to validate request/response behaviour without network flakiness.
+- Tests now pass with WS transport: final run shows 91 passed, 0 failed.
+
 Test results (after changes):
 - Ran tests: 89 passed, 0 failed.
