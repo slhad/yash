@@ -27,41 +27,101 @@ export class AuthService {
   private tokens: Map<string, TokenData> = new Map();
 
   constructor() {
-    // Use environment variable or persist a generated key to disk so tokens remain readable across runs.
+    // Use environment variable, OS keyring, or persist a generated key to disk so tokens remain readable across runs.
     // In production, a proper key management system should be used instead.
     const envKey = process.env.YASH_ENCRYPTION_KEY;
     if (envKey) {
-      this.encryptionKey = envKey;
-    } else {
-      // Check for an existing key file in the tokens directory
-      const keyFile = path.join(AuthService.DATA_DIR, 'key');
+      // Normalize env key to a 32-byte hex string to ensure crypto buffers work consistently.
       try {
-        if (fsSync.existsSync(keyFile)) {
-          const existing = fsSync.readFileSync(keyFile, 'utf8').trim();
-          if (existing.length > 0) {
-            this.encryptionKey = existing;
-          } else {
-            throw new Error('empty key file');
-          }
+        // If the envKey already looks like hex of correct length, use it; otherwise derive via SHA256.
+        if (/^[0-9a-fA-F]{64}$/.test(envKey)) {
+          this.encryptionKey = envKey;
         } else {
-          const generated = crypto.randomBytes(32).toString('hex');
-          // ensure data directory exists and write key with restricted permissions
-          fsSync.mkdirSync(path.dirname(keyFile), { recursive: true });
-          fsSync.writeFileSync(keyFile, generated, { mode: 0o600 });
-          this.encryptionKey = generated;
+          this.encryptionKey = crypto.createHash('sha256').update(envKey).digest('hex');
         }
       } catch (err) {
-        // Fallback to an in-memory generated key if file operations fail
-        defaultLogger.warn(
-          'Failed to read/write persistent encryption key, falling back to ephemeral key:',
-          err,
-        );
+        defaultLogger.warn('Invalid YASH_ENCRYPTION_KEY provided; generating ephemeral key:', err);
         this.encryptionKey = crypto.randomBytes(32).toString('hex');
       }
+      // Load tokens asynchronously after key is set
+      this.loadTokens();
+    } else {
+      // Async initialization that attempts OS keyring (keytar) first, then falls back to file storage.
+      (async () => {
+        try {
+          await this.initEncryptionKey();
+        } catch (err) {
+          defaultLogger.warn(
+            'Failed to initialize persistent encryption key, using ephemeral key:',
+            err,
+          );
+          this.encryptionKey = crypto.randomBytes(32).toString('hex');
+        }
+        // Load tokens after the key is initialized
+        await this.loadTokens();
+      })();
+    }
+  }
+
+  // Attempt to initialize encryption key using OS keyring (keytar) if available; otherwise use file-based key.
+  private async initEncryptionKey(): Promise<void> {
+    const keyFile = path.join(AuthService.DATA_DIR, 'key');
+
+    // Try OS keyring via dynamic import of keytar
+    try {
+      // Dynamic import so keytar remains optional
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const keytar = await import('keytar');
+      if (keytar && typeof keytar.getPassword === 'function') {
+        const existing = await keytar.getPassword('yash', 'encryption-key');
+        if (existing && existing.length > 0) {
+          // If stored key is not hex, derive a proper hex key
+          if (/^[0-9a-fA-F]{64}$/.test(existing)) {
+            this.encryptionKey = existing;
+          } else {
+            this.encryptionKey = crypto.createHash('sha256').update(existing).digest('hex');
+          }
+          return;
+        }
+
+        // No existing key: generate and store
+        const generated = crypto.randomBytes(32).toString('hex');
+        await keytar.setPassword('yash', 'encryption-key', generated);
+        this.encryptionKey = generated;
+        return;
+      }
+    } catch (err) {
+      // keytar not available or failed; fall back to file-based key
+      defaultLogger.info(
+        'OS keyring not available or keytar import failed, falling back to file-based key.',
+      );
     }
 
-    // Load tokens asynchronously (best-effort). Tests may wait briefly for this to complete.
-    this.loadTokens();
+    // File-based key storage (synchronous filesystem interaction)
+    try {
+      if (fsSync.existsSync(keyFile)) {
+        const existing = fsSync.readFileSync(keyFile, 'utf8').trim();
+        if (existing.length > 0) {
+          this.encryptionKey = existing;
+          return;
+        } else {
+          throw new Error('empty key file');
+        }
+      } else {
+        const generated = crypto.randomBytes(32).toString('hex');
+        // ensure data directory exists and write key with restricted permissions
+        fsSync.mkdirSync(path.dirname(keyFile), { recursive: true });
+        fsSync.writeFileSync(keyFile, generated, { mode: 0o600 });
+        this.encryptionKey = generated;
+        return;
+      }
+    } catch (err) {
+      defaultLogger.warn(
+        'Failed to read/write persistent encryption key (file-based), falling back to ephemeral key:',
+        err,
+      );
+      this.encryptionKey = crypto.randomBytes(32).toString('hex');
+    }
   }
 
   private async loadTokens() {
