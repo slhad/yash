@@ -1,3 +1,4 @@
+import { defaultLogger } from '../utils/logger';
 import {
   AuthResult,
   ChatMessage,
@@ -7,7 +8,6 @@ import {
   StreamStatus,
   WebhookConfig,
 } from './base';
-import { defaultLogger } from '../utils/logger';
 
 export class YouTubeProvider implements PlatformProvider {
   private accessToken: string | null = null;

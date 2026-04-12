@@ -1,4 +1,4 @@
-import { test, expect } from 'bun:test';
+import { expect, test } from 'bun:test';
 import { Logger, LogLevel } from '../src/utils/logger';
 
 test('logger respects level filtering', () => {

@@ -2,8 +2,8 @@ import * as crypto from 'node:crypto';
 import * as fsSync from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { defaultLogger } from '../utils/logger';
 import { PlatformProvider } from '../platforms/base';
+import { defaultLogger } from '../utils/logger';
 
 interface TokenData {
   accessToken: string;

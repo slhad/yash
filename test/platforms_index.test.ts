@@ -1,6 +1,6 @@
 // Smoke test for platform re-exports
 import { describe, expect, test } from 'bun:test';
-import { YouTubeProvider, TwitchProvider, KickProvider } from '../src/platforms';
+import { KickProvider, TwitchProvider, YouTubeProvider } from '../src/platforms';
 
 describe('Platform index re-exports', () => {
   test('should instantiate providers via index export', () => {
