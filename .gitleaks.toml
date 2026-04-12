@@ -1,0 +1,11 @@
+title = "YASH gitleaks config"
+[extend]
+useDefault = true
+
+[allowlist]
+paths = [
+  '''(^|/)test/''',
+  '''(^|/)config.example.json$''',
+  '''(^|/)tmp/''',
+  '''(^|/)\.github/.*''',
+]
