@@ -23,6 +23,8 @@ export class AuthService {
     process.env.YASH_DATA_DIR || path.join(process.env.HOME || '.', '.yash');
   private static TOKENS_FILE = path.join(AuthService.DATA_DIR, 'tokens.json');
   private encryptionKey: string;
+  private keytar: any | null = null;
+  private useKeytar: boolean = false;
 
   private tokens: Map<string, TokenData> = new Map();
 
@@ -72,6 +74,8 @@ export class AuthService {
       // Dynamic import so keytar remains optional
       // eslint-disable-next-line @typescript-eslint/no-var-requires
       const keytar = await import('keytar');
+      this.keytar = keytar;
+      this.useKeytar = true;
       if (keytar && typeof keytar.getPassword === 'function') {
         const existing = await keytar.getPassword('yash', 'encryption-key');
         if (existing && existing.length > 0) {
@@ -149,6 +153,37 @@ export class AuthService {
 
   private async loadTokens() {
     try {
+      // If keytar is available, prefer keyring for token storage
+      if (this.keytar && typeof this.keytar.findCredentials === 'function') {
+        try {
+          const creds = await this.keytar.findCredentials('yash.tokens');
+          if (Array.isArray(creds) && creds.length > 0) {
+            for (const cred of creds) {
+              try {
+                const account = cred.account;
+                const password = cred.password; // expected to be JSON string of EncryptedTokenData
+                const encrypted = JSON.parse(password) as EncryptedTokenData;
+                const decrypted = this.decryptToken(encrypted);
+                this.tokens.set(account, decrypted);
+              } catch (err) {
+                defaultLogger.warn(
+                  'Failed to parse/ decrypt token from keyring for account:',
+                  cred.account,
+                  err,
+                );
+              }
+            }
+            return;
+          }
+        } catch (err) {
+          // If keytar findCredentials fails, fallback to file-based tokens
+          defaultLogger.info(
+            'keytar findCredentials failed; falling back to file-based token load',
+          );
+        }
+      }
+
+      // File-based fallback
       const tokensDir = path.dirname(AuthService.TOKENS_FILE);
       await fs.mkdir(tokensDir, { recursive: true });
 
@@ -156,7 +191,7 @@ export class AuthService {
       const parsed = JSON.parse(data);
 
       for (const [platform, encrypted] of Object.entries(parsed)) {
-        const decrypted = this.decryptToken(encrypted);
+        const decrypted = this.decryptToken(encrypted as EncryptedTokenData);
         this.tokens.set(platform, decrypted);
       }
     } catch (error) {
@@ -167,6 +202,41 @@ export class AuthService {
   }
 
   private async saveTokens() {
+    // If keytar is available, store per-platform encrypted token blobs in the keyring
+    if (this.keytar && typeof this.keytar.setPassword === 'function') {
+      try {
+        // Remove any keyring entries for platforms that no longer exist
+        if (
+          typeof this.keytar.findCredentials === 'function' &&
+          typeof this.keytar.deletePassword === 'function'
+        ) {
+          try {
+            const existing = await this.keytar.findCredentials('yash.tokens');
+            for (const e of existing) {
+              if (!this.tokens.has(e.account)) {
+                await this.keytar.deletePassword('yash.tokens', e.account);
+              }
+            }
+          } catch (err) {
+            // Non-fatal: proceed to write current tokens
+            defaultLogger.warn('Failed to prune keyring token entries:', err);
+          }
+        }
+
+        for (const [platform, token] of this.tokens.entries()) {
+          const encrypted = this.encryptToken(token);
+          await this.keytar.setPassword('yash.tokens', platform, JSON.stringify(encrypted));
+        }
+        return;
+      } catch (err) {
+        defaultLogger.warn(
+          'Failed to save tokens to keyring, falling back to file-based storage:',
+          err,
+        );
+      }
+    }
+
+    // File-based fallback
     const tokensObj: Record<string, EncryptedTokenData> = {};
 
     for (const [platform, token] of this.tokens.entries()) {

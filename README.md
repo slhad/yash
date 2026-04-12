@@ -24,6 +24,7 @@ This project reads configuration from `config.json` in the repository root durin
 CI and secrets
 --------------
 - For CI, provide secrets via environment variables or a secrets manager (do not commit config.json with credentials).
+ - There is also a gitleaks GitHub Action to scan history and PRs for secrets. Review gitleaks results in CI and tune if required.
 
 Notes:
 - Use `bun --hot ./src/main.tsx` for the interactive TUI entrypoint in development.

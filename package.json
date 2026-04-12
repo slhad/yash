@@ -6,6 +6,8 @@
   "scripts": {
     "start": "bun run src/index.ts",
     "test": "bun test test/platforms.test.ts test/auth.service.test.ts test/chat.service.test.ts test/stream.service.test.ts test/obs.service.test.ts test/encryption.test.ts test/logger.test.ts test/config.test.ts test/integration.test.ts && biome check --write",
+    "setup": "sh scripts/setup-dev.sh",
+    "install-hooks": "sh scripts/install-hooks.sh",
     "test:e2e": "bun run src/index.ts &",
     "test:e2e:run": "playwright test",
     "lint": "biome check --write"
