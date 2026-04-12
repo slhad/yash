@@ -1,5 +1,6 @@
 import * as crypto from 'node:crypto';
 import * as fs from 'node:fs/promises';
+import * as fsSync from 'node:fs';
 import * as path from 'node:path';
 import { PlatformProvider } from '../platforms/base';
 
@@ -22,8 +23,40 @@ export class AuthService {
   private tokens: Map<string, TokenData> = new Map();
 
   constructor() {
-    // Use environment variable or generate a key (in production, this should be properly managed)
-    this.encryptionKey = process.env.YASH_ENCRYPTION_KEY || crypto.randomBytes(32).toString('hex'); // 256-bit key
+    // Use environment variable or persist a generated key to disk so tokens remain readable across runs.
+    // In production, a proper key management system should be used instead.
+    const envKey = process.env.YASH_ENCRYPTION_KEY;
+    if (envKey) {
+      this.encryptionKey = envKey;
+    } else {
+      // Check for an existing key file in the tokens directory
+      const keyFile = path.join(process.env.HOME || '.', '.yash', 'key');
+      try {
+        if (fsSync.existsSync(keyFile)) {
+          const existing = fsSync.readFileSync(keyFile, 'utf8').trim();
+          if (existing.length > 0) {
+            this.encryptionKey = existing;
+          } else {
+            throw new Error('empty key file');
+          }
+        } else {
+          const generated = crypto.randomBytes(32).toString('hex');
+          // ensure directory exists and write key with restricted permissions
+          fsSync.mkdirSync(path.dirname(keyFile), { recursive: true });
+          fsSync.writeFileSync(keyFile, generated, { mode: 0o600 });
+          this.encryptionKey = generated;
+        }
+      } catch (err) {
+        // Fallback to an in-memory generated key if file operations fail
+        console.warn(
+          'Failed to read/write persistent encryption key, falling back to ephemeral key:',
+          err,
+        );
+        this.encryptionKey = crypto.randomBytes(32).toString('hex');
+      }
+    }
+
+    // Load tokens asynchronously (best-effort). Tests may wait briefly for this to complete.
     this.loadTokens();
   }
 
