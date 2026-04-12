@@ -47,6 +47,7 @@ export interface AuthResult {
 }
 
 export interface PlatformProvider {
+  setStreamKey(key: string): void;
   authenticate(): Promise<AuthResult>;
   isAuthenticated(): boolean;
   logout(): Promise<void>;
