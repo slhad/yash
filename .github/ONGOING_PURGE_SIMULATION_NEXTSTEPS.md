@@ -21,3 +21,35 @@ Immediate actions (maintainers):
 
 Audit trail:
 - Keep this file updated with sign-offs and links to tmp/purge-simulation-report.txt and tmp/rotation-evidence.txt.
+
+Detailed Simulation Runbook (non-destructive)
+
+Prerequisites:
+- Ensure git-filter-repo is installed and in PATH. Confirm with: git filter-repo --version
+- Ensure your working tree is clean and you have sufficient disk space (simulation will duplicate repo history).
+
+Steps:
+1) Create a mirror and simulation clone
+   - git clone --mirror "$PWD" tmp/repo-mirror.git
+   - git clone tmp/repo-mirror.git tmp/repo-sim
+2) Prepare replacements file
+   - Ensure tmp/replacements-curated.txt has been manually pruned and vetted.
+   - Copy vetted replacements into the sim: cp tmp/replacements-curated.txt tmp/repo-sim/replacements.txt
+3) Run filter-repo in the simulation
+   - cd tmp/repo-sim
+   - git filter-repo --replace-text replacements.txt
+4) Validate simulation
+   - Run: bun test (or your test runner) inside tmp/repo-sim to ensure code still builds/tests pass.
+   - Run gitleaks against tmp/repo-sim and compare results with original repository.
+   - Inspect branches/tags: git for-each-ref --format='%(refname) %(objectname)' refs/heads refs/tags
+   - Count commits: git rev-list --all --count
+   - Compare with original mirror (tmp/repo-mirror.git) to see how many commits/objects were altered/removed.
+5) Produce report
+   - Save the above findings to tmp/purge-simulation-report.txt. Include details on:
+     * Commands run
+     * Commit counts before vs after
+     * CI/test pass/fail status
+     * gitleaks output
+     * Any manual issues found (broken imports, test failures)
+
+If simulation succeeds and maintainers approve, follow the execution steps in this document.
