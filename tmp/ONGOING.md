@@ -56,3 +56,17 @@ Next follow-ups:
 Next steps (after this change):
 1. If desired, I can now run `bun test` again and fix any regression failures (explicit request required).
 2. Consider adding more integration tests for platform and OBS interactions.
+
+Build validation:
+- I attempted a Bun build: `bun build src/main.tsx` and `bun build --target bun src/main.tsx`.
+- The bundler failed due to two issues:
+ 1) @opentui/core uses Bun builtins (`bun:ffi`) which require bundling with target 'bun' (resolved by using `--target bun`).
+ 2) Imports from `@opentui/react` in our source (`Box`, `Scrollbox`, `Text`) do not match actual exports in the installed package, causing resolution errors during bundling.
+
+Recommended next steps to fix build:
+1. Inspect `node_modules/@opentui/react` to determine the correct named exports or update our imports to match the package API.
+2. Ensure any references to Bun builtins are only bundled with `--target bun` (CI and docs should use this target when building the TUI).
+3. Add a build CI job that runs `bun build --target bun` for the TUI entrypoint to catch bundling issues early.
+
+Test results (after changes):
+- Ran tests: 89 passed, 0 failed.
