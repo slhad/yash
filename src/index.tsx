@@ -10,6 +10,7 @@ import { YouTubeProvider } from './platforms/youtube';
 import { ChatService } from './services/chat.service';
 import { ObsService } from './services/obs.service';
 import { StreamService } from './services/stream.service';
+import { defaultLogger } from './utils/logger';
 
 const youtube = new YouTubeProvider();
 const twitch = new TwitchProvider();
@@ -134,10 +135,10 @@ function transformMessage(msg: { platform: string; username: string; message: st
 async function main() {
   await Promise.all([youtube.authenticate(), twitch.authenticate(), kick.authenticate()]);
 
-  console.log('Platforms authenticated');
+  defaultLogger.info('Platforms authenticated');
 
   await obsService.connect();
-  console.log('OBS connected');
+  defaultLogger.info('OBS connected');
 
   chatService.subscribeToMessages((msg) => {
     lastMessages.push(transformMessage(msg));
@@ -164,4 +165,4 @@ async function main() {
   });
 }
 
-main().catch(console.error);
+main().catch((err) => defaultLogger.error('TUI main failed', err));

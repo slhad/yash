@@ -6,6 +6,7 @@ import { ChatService } from './services/chat.service';
 import { ObsService } from './services/obs.service';
 import { StreamService } from './services/stream.service';
 import { Dashboard } from './ui/Dashboard';
+import { defaultLogger } from './utils/logger';
 
 const youtube = new YouTubeProvider();
 const twitch = new TwitchProvider();
@@ -33,7 +34,7 @@ async function connectObs() {
   try {
     await obsService.connect();
   } catch {
-    console.log('OBS not available');
+    defaultLogger.info('OBS not available');
   }
 }
 
@@ -109,7 +110,7 @@ const init = async () => {
   await connectObs();
 
   chatService.subscribeToMessages((msg) => {
-    console.log('Chat:', transformMessage(msg));
+    defaultLogger.debug('Chat:', transformMessage(msg));
   });
 
   const container = document.getElementById('root');
@@ -119,4 +120,4 @@ const init = async () => {
   }
 };
 
-init().catch(console.error);
+init().catch((err) => defaultLogger.error('Initialization failed', err));

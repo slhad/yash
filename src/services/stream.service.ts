@@ -1,4 +1,5 @@
 import { PlatformProvider, StreamMetadata, StreamStatus } from '../platforms/base';
+import { defaultLogger } from '../utils/logger';
 
 export class StreamService {
   private providers: Map<string, PlatformProvider> = new Map();
@@ -35,7 +36,7 @@ export class StreamService {
       }
     } catch (error) {
       // If any platform fails, try to stop the ones that started
-      console.error('Failed to start stream on some platforms:', error);
+      defaultLogger.error('Failed to start stream on some platforms:', error);
 
       // Notify error status
       for (const platform of platforms) {
@@ -68,7 +69,7 @@ export class StreamService {
         }
       }
     } catch (error) {
-      console.error('Failed to stop stream on some platforms:', error);
+      defaultLogger.error('Failed to stop stream on some platforms:', error);
 
       // Notify error status
       for (const platform of platformsToStop) {
@@ -101,7 +102,7 @@ export class StreamService {
         }
       }
     } catch (error) {
-      console.error('Failed to update stream metadata on some platforms:', error);
+      defaultLogger.error('Failed to update stream metadata on some platforms:', error);
 
       // Notify error status
       for (const platform of platforms) {

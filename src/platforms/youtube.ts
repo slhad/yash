@@ -7,6 +7,7 @@ import {
   StreamStatus,
   WebhookConfig,
 } from './base';
+import { defaultLogger } from '../utils/logger';
 
 export class YouTubeProvider implements PlatformProvider {
   private accessToken: string | null = null;
@@ -134,7 +135,7 @@ export class YouTubeProvider implements PlatformProvider {
     if (!this.isAuthenticated()) {
       throw new Error('Not authenticated with YouTube');
     }
-    console.log(`Would send message to YouTube chat: ${message}`);
+    defaultLogger.info(`Would send message to YouTube chat: ${message}`);
   }
 
   onMessage(callback: (msg: ChatMessage) => void): () => void {
@@ -145,7 +146,7 @@ export class YouTubeProvider implements PlatformProvider {
   }
 
   async setupWebhooks(config: WebhookConfig): Promise<void> {
-    console.log(
+    defaultLogger.info(
       `Setting up YouTube webhooks for topics: ${config.topics.join(', ')} at ${config.url}`,
     );
   }

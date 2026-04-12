@@ -1,5 +1,6 @@
 import { Box, Button, Input, Text } from '@opentui/react';
 import React, { useState } from 'react';
+import { defaultLogger } from '../utils/logger';
 
 interface StreamControlsProps {
   platforms: string[];
@@ -47,7 +48,7 @@ export const StreamControls: React.FC<StreamControlsProps> = ({
     try {
       await onStartStream();
     } catch (error) {
-      console.error('Failed to start stream:', error);
+      defaultLogger.error('Failed to start stream:', error);
     } finally {
       setIsProcessing(false);
     }
@@ -58,7 +59,7 @@ export const StreamControls: React.FC<StreamControlsProps> = ({
     try {
       await onStopStream();
     } catch (error) {
-      console.error('Failed to stop stream:', error);
+      defaultLogger.error('Failed to stop stream:', error);
     } finally {
       setIsProcessing(false);
     }
@@ -69,7 +70,7 @@ export const StreamControls: React.FC<StreamControlsProps> = ({
     try {
       await onUpdateMetadata();
     } catch (error) {
-      console.error('Failed to update metadata:', error);
+      defaultLogger.error('Failed to update metadata:', error);
     } finally {
       setIsProcessing(false);
     }

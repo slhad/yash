@@ -7,6 +7,7 @@ import {
   StreamStatus,
   WebhookConfig,
 } from './base';
+import { defaultLogger } from '../utils/logger';
 
 // Kick provider implementation
 export class KickProvider implements PlatformProvider {
@@ -118,8 +119,7 @@ export class KickProvider implements PlatformProvider {
     // Not implemented: actual Kick chat message sending
     this._notImplemented('Kick chat sendMessage');
     // Informational: would send message in real implementation
-    // eslint-disable-next-line no-console
-    console.log(`Would send message to Kick chat: ${message}`);
+    defaultLogger.info(`Would send message to Kick chat: ${message}`);
   }
 
   onMessage(callback: (msg: ChatMessage) => void): () => void {
@@ -134,8 +134,7 @@ export class KickProvider implements PlatformProvider {
     // Kick uses webhooks for real-time events
     // Not implemented: actual webhook setup
     this._notImplemented('Kick webhook setup');
-    // eslint-disable-next-line no-console
-    console.log(`Setting up Kick webhooks for topics: ${config.topics.join(', ')}`);
+    defaultLogger.info(`Setting up Kick webhooks for topics: ${config.topics.join(', ')}`);
   }
 
   getPlatformName(): string {

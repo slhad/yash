@@ -7,6 +7,7 @@ import {
   StreamStatus,
   WebhookConfig,
 } from './base';
+import { defaultLogger } from '../utils/logger';
 
 // Twitch provider implementation
 export class TwitchProvider implements PlatformProvider {
@@ -117,7 +118,7 @@ export class TwitchProvider implements PlatformProvider {
 
     // Not implemented: actual Twitch chat message sending
     this._notImplemented('Twitch chat sendMessage');
-    console.log(`Would send message to Twitch chat: ${message}`);
+    defaultLogger.info(`Would send message to Twitch chat: ${message}`);
   }
 
   onMessage(callback: (msg: ChatMessage) => void): () => void {
@@ -132,7 +133,7 @@ export class TwitchProvider implements PlatformProvider {
     // Twitch uses EventSub for webhooks
     // Not implemented: actual webhook setup
     this._notImplemented('Twitch webhook setup');
-    console.log(`Setting up Twitch webhooks for topics: ${config.topics.join(', ')}`);
+    defaultLogger.info(`Setting up Twitch webhooks for topics: ${config.topics.join(', ')}`);
   }
 
   getPlatformName(): string {
