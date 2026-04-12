@@ -1,8 +1,8 @@
 // Basic test for AuthService
 import { beforeEach, describe, expect, test } from 'bun:test';
-import { AuthService } from './../src/services/auth.service';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { AuthService } from './../src/services/auth.service';
 
 describe('AuthService', () => {
   let authService: AuthService;
