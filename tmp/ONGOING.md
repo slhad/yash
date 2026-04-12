@@ -21,11 +21,30 @@ Committed by autonomous agent: 2026-04-12T19:39:44Z
 
 New work performed:
  - Added src/utils/config.ts to provide getConfig() used by services (small helper to read config.json).
+ - Added initial platform stubs for youtube, twitch, kick (files present but need implementation).
 
-Next steps:
- 1. Replace remaining require('../utils/config') usages with import where appropriate and run type checks.
- 2. Implement platform providers in src/platforms/ (youtube, twitch, kick) - currently missing.
- 3. Add unit tests for services that depend on config (ObsService, AuthService).
- 4. Run `biome check --write` to ensure formatting and lint rules are applied repository-wide.
+Prioritized next steps (actionable):
+1. Implement Platform Providers (high)
+   - Complete implementations in src/platforms/youtube.ts, src/platforms/twitch.ts, src/platforms/kick.ts following the PlatformProvider interface in src/platforms/base.ts.
+   - Add minimal smoke tests in test/platforms.test.ts verifying provider instantiation and basic metadata methods.
+
+2. Migrate config usage & type-check (high)
+   - Replace any CommonJS `require('../utils/config')` with ES module imports where found.
+   - Run TypeScript/Bun type-checking (if using TS compiler) or `bun run` to detect runtime import issues.
+
+3. Tests and CI (medium)
+   - Ensure unit tests for services using config (test/auth.service.test.ts, test/obs.service.test.ts) pass.
+   - Add GitHub Actions workflow to run `bun install`, `biome check --write`, and `bun test` on PRs.
+
+4. Linting and formatting (low)
+   - Run `biome check --write` and commit formatting changes.
+
+5. Documentation (low)
+   - Add CONTRIBUTING.md with development setup and Bun commands.
+   - Add small example showing how to instantiate a PlatformProvider and call AuthService.
+
+Notes and observations:
+- SPECS.md is authoritative for architecture and requirements. The project targets Bun, Biome, and OpenTUI.
+- tmp/ONGOING.md previously listed TODOs; this update makes them explicit and prioritized so contributors can pick a high-priority task.
 
 Agent: automated edit and commit
