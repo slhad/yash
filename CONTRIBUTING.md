@@ -1,38 +1,24 @@
 Contributing
 
-Thank you for contributing to YASH. This project uses Bun as the runtime and test
-runner. Please follow the minimal guidelines below to make contributions easy to
-review and consistent.
+This project uses Bun as the runtime and test runner. Keep contributions small and focused.
 
-Getting started
+Development setup
 
-- Install dependencies: `bun install`
-- Run tests: `bun test`
-- Run the app (development): `bun run src/index.ts`
+1. Install dependencies: `bun install`
+2. Run tests locally: `bun test`
+3. Run the TUI (dev): `bun run src/index.ts`
 
-Code style
+Guidelines
 
-- Formatting and linting are enforced with Biome. Run `biome check --write`
-  before creating a PR.
+- Follow the architecture in SPECS.md. Platform providers live in `src/platforms/` and must implement the `PlatformProvider` interface in `src/platforms/base.ts`.
+- Run `biome check --write` before opening a PR to format and lint code.
+- Keep commits atomic and describe the "why" in the commit message.
+- Add unit tests for new behaviors under `test/` using Bun's test harness.
 
-Commits and PRs
+Submitting PRs
 
-- Keep commits small and focused. Use present-tense, short messages that explain
-  the why (e.g. "fix: avoid noisy tests by mocking OAuth for Twitch/Kick").
-- Create a descriptive PR with a short summary and the reasoning for the
-  change. Link any related issues.
+- Create a branch per logical change.
+- Ensure CI passes (we expect a GitHub Actions workflow to run `bun install`, `biome check --write`, and `bun test`).
+- Request at least one review before merging to main.
 
-Project conventions
-
-- This project targets Bun. Use Bun APIs and avoid Node-specific packages when
-  possible.
-- Follow the architecture in SPECS.md: platform providers in `src/platforms`,
-  services in `src/services`, UI in `src/ui`.
-
-Testing
-
-- Add unit tests under `test/` and ensure they pass locally with `bun test`.
-- Integration tests that require external services should be documented and run
-  manually; CI may skip them if credentials are not present.
-
-Thank you for helping improve YASH.
+If you're unsure where to start, check `tmp/ONGOING.md` for prioritized tasks.
