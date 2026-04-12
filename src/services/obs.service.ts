@@ -10,15 +10,30 @@ export class ObsService {
   // Connection details
   private host: string = 'localhost';
   private port: number = 4455;
+  private password: string | null = null;
 
   // Callbacks for events
   private statusCallbacks: ((connected: boolean) => void)[] = [];
   private messageCallbacks: ((message: any) => void)[] = [];
 
-  constructor(host: string = 'localhost', port: number = 4455, password: string | null = null) {
-    this.host = host;
-    this.port = port;
-    this.password = password;
+  constructor(host?: string, port?: number, password?: string | null) {
+    this.loadConfigSync();
+    if (host) this.host = host;
+    if (port) this.port = port;
+    if (password !== undefined) this.password = password;
+  }
+
+  private loadConfigSync(): void {
+    try {
+      const config = require('../utils/config').getConfig();
+      if (config?.obs?.websocket) {
+        this.host = config.obs.websocket.server;
+        this.port = parseInt(config.obs.websocket.port, 10);
+        this.password = config.obs.websocket.password || null;
+      }
+    } catch {
+      // Config not loaded yet, use defaults
+    }
   }
 
   /**
