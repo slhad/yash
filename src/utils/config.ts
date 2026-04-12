@@ -1,5 +1,7 @@
 // Simple config loader used by services that need runtime configuration.
 // Returns parsed JSON from the repository root config.json with a safe fallback.
+import { defaultLogger } from './logger';
+
 export function getConfig(): any {
   try {
     // Use require so this works both in bundlers and Node-style runtimes.
@@ -9,7 +11,7 @@ export function getConfig(): any {
     const cfg = require(process.cwd() + '/config.json');
     return cfg;
   } catch (err) {
-    console.warn('Failed to load config.json from project root, returning empty config', err);
+    defaultLogger.warn('Failed to load config.json from project root, returning empty config', err);
     return {};
   }
 }

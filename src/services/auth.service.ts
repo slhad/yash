@@ -2,6 +2,7 @@ import * as crypto from 'node:crypto';
 import * as fsSync from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { defaultLogger } from '../utils/logger';
 import { PlatformProvider } from '../platforms/base';
 
 interface TokenData {
@@ -51,7 +52,7 @@ export class AuthService {
         }
       } catch (err) {
         // Fallback to an in-memory generated key if file operations fail
-        console.warn(
+        defaultLogger.warn(
           'Failed to read/write persistent encryption key, falling back to ephemeral key:',
           err,
         );
@@ -77,7 +78,7 @@ export class AuthService {
       }
     } catch (error) {
       // If file doesn't exist or is invalid, start with empty tokens
-      console.log('No existing token file found or invalid format, starting fresh');
+      defaultLogger.info('No existing token file found or invalid format, starting fresh');
       this.tokens = new Map();
     }
   }
@@ -166,7 +167,7 @@ export class AuthService {
 
     // If token expires in less than 5 minutes, attempt refresh by asking the provider
     if (Date.now() > token.expiresAt - 300000) {
-      console.log(`Token for ${platform} needs refresh`);
+      defaultLogger.info(`Token for ${platform} needs refresh`);
       try {
         // Best-effort: call provider.authenticate() to obtain a fresh token.
         // Providers should implement their own refresh logic; using authenticate()
@@ -178,7 +179,7 @@ export class AuthService {
         }
         return false;
       } catch (err) {
-        console.error(`Failed to refresh token for ${platform}:`, err);
+        defaultLogger.error(`Failed to refresh token for ${platform}:`, err);
         return false;
       }
     }

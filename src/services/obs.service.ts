@@ -3,6 +3,7 @@
 // For now, we'll create a mock implementation that demonstrates the interface
 
 import { getConfig } from '../utils/config';
+import { defaultLogger } from '../utils/logger';
 
 export class ObsService {
   private connected: boolean = false;
@@ -58,7 +59,7 @@ export class ObsService {
         // await obs.connect(`ws://${this.host}:${this.port}`, this.password);
 
         // For now, we'll simulate the connection
-        console.log(`Connecting to OBS at ws://${this.host}:${this.port}...`);
+        defaultLogger.info(`Connecting to OBS at ws://${this.host}:${this.port}...`);
 
         // Simulate connection delay
         await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -72,9 +73,9 @@ export class ObsService {
         // Set up reconnection interval
         this.setupReconnection();
 
-        console.log('Connected to OBS');
+        defaultLogger.info('Connected to OBS');
       } catch (error) {
-        console.error('Failed to connect to OBS:', error);
+        defaultLogger.error('Failed to connect to OBS:', error);
         this.connected = false;
         this.connectionPromise = null;
 
@@ -111,7 +112,7 @@ export class ObsService {
     // Notify status change
     this.notifyStatusChange(false);
 
-    console.log('Disconnected from OBS');
+    defaultLogger.info('Disconnected from OBS');
   }
 
   /**
@@ -133,7 +134,7 @@ export class ObsService {
     // return await obs.call(requestType, requestData);
 
     // For now, we'll simulate the request
-    console.log(`Sending OBS request: ${requestType}`, requestData);
+    defaultLogger.info(`Sending OBS request: ${requestType}`, requestData);
 
     // Simulate request delay
     await new Promise((resolve) => setTimeout(resolve, 100));
@@ -205,9 +206,9 @@ export class ObsService {
     // Set up reconnection attempt every 30 seconds if disconnected
     this.reconnectInterval = setInterval(() => {
       if (!this.connected) {
-        console.log('Attempting to reconnect to OBS...');
+        defaultLogger.info('Attempting to reconnect to OBS...');
         this.connect().catch((error) => {
-          console.log('Reconnection attempt failed:', error);
+          defaultLogger.error('Reconnection attempt failed:', error);
         });
       }
     }, 30000);
