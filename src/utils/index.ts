@@ -1,3 +1,5 @@
+export type { Config } from './config';
+export { getConfig, loadConfig, reloadConfig } from './config';
 export type { EncryptedData } from './encryption';
 export { Encryption, hashPassword, verifyPassword } from './encryption';
 export type { LoggerOptions } from './logger';
