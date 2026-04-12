@@ -1,4 +1,5 @@
-import { Box, Button, Input, Text } from '@opentui/react';
+import { baseComponents } from '@opentui/react';
+const { Box, Button, Input, Text } = baseComponents;
 import React, { useState } from 'react';
 import { defaultLogger } from '../utils/logger';
 

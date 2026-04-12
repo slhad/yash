@@ -1,4 +1,5 @@
-import { Box, Text } from '@opentui/react';
+import { baseComponents } from '@opentui/react';
+const { Box, Text } = baseComponents;
 import React from 'react';
 
 interface StatusBarProps {

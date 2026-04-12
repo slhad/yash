@@ -1,4 +1,5 @@
-import { Box, Scrollbox, Text } from '@opentui/react';
+import { baseComponents } from '@opentui/react';
+const { Box, Scrollbox, Text } = baseComponents;
 import React from 'react';
 
 interface ChatDisplayProps {

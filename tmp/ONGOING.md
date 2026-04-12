@@ -68,5 +68,17 @@ Recommended next steps to fix build:
 2. Ensure any references to Bun builtins are only bundled with `--target bun` (CI and docs should use this target when building the TUI).
 3. Add a build CI job that runs `bun build --target bun` for the TUI entrypoint to catch bundling issues early.
 
+Actions taken to fix build:
+1. Updated UI imports to use `baseComponents` from `@opentui/react` and destructured the required components (Box, Text, Scrollbox, Button, Input) in:
+   - src/ui/ChatDisplay.tsx
+   - src/ui/MessageInput.tsx
+   - src/ui/StatusBar.tsx
+   - src/ui/Dashboard.tsx
+   - src/ui/StreamControls.tsx
+2. Bundled the TUI with `bun build --target bun --outdir dist` successfully.
+
+Build result:
+- Bundled successfully; output written to `dist/` (main.js + assets).
+
 Test results (after changes):
 - Ran tests: 89 passed, 0 failed.
