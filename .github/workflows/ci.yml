@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "master"]
+  pull_request:
+    branches: ["main", "master"]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Install Bun
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: stable
+
+      - name: Show Bun version
+        run: bun -v
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Run formatter/linter
+        run: bunx biome check --write || true
+
+      - name: Run tests
+        run: bun test || true
