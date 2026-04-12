@@ -29,7 +29,8 @@ export class AuthService {
   private tokens: Map<string, TokenData> = new Map();
   private refreshInterval: NodeJS.Timeout | null = null;
 
-  constructor() {
+  // Allow optional keytar injection for testing
+  constructor(keytarOverride?: any) {
     // Use environment variable, OS keyring, or persist a generated key to disk so tokens remain readable across runs.
     // In production, a proper key management system should be used instead.
     const envKey = process.env.YASH_ENCRYPTION_KEY;
@@ -49,6 +50,13 @@ export class AuthService {
       // Load tokens asynchronously after key is set
       this.loadTokens();
     } else {
+      // If a test injected a keytar implementation, honor it and let initEncryptionKey
+      // use the provided keytar. Then run the async init flow as before.
+      if (keytarOverride) {
+        this.keytar = keytarOverride;
+        this.useKeytar = true;
+      }
+
       // Async initialization that attempts OS keyring (keytar) first, then falls back to file storage.
       (async () => {
         try {
@@ -69,6 +77,55 @@ export class AuthService {
   // Attempt to initialize encryption key using OS keyring (keytar) if available; otherwise use file-based key.
   private async initEncryptionKey(): Promise<void> {
     const keyFile = path.join(AuthService.DATA_DIR, 'key');
+
+    // If a keytar instance was injected (e.g., during tests), prefer it and skip the dynamic import.
+    if (this.keytar && typeof this.keytar.getPassword === 'function') {
+      try {
+        const keytar = this.keytar;
+        this.useKeytar = true;
+        const existing = await keytar.getPassword('yash', 'encryption-key');
+        if (existing && existing.length > 0) {
+          if (/^[0-9a-fA-F]{64}$/.test(existing)) {
+            this.encryptionKey = existing;
+          } else {
+            this.encryptionKey = crypto.createHash('sha256').update(existing).digest('hex');
+          }
+          return;
+        }
+
+        // No key in keytar: check whether a legacy file-based key exists and migrate it into keytar.
+        try {
+          if (fsSync.existsSync(keyFile)) {
+            const fileExisting = fsSync.readFileSync(keyFile, 'utf8').trim();
+            if (fileExisting && fileExisting.length > 0) {
+              let migratedKey = fileExisting;
+              if (!/^[0-9a-fA-F]{64}$/.test(migratedKey)) {
+                migratedKey = crypto.createHash('sha256').update(migratedKey).digest('hex');
+              }
+              await keytar.setPassword('yash', 'encryption-key', migratedKey);
+              this.encryptionKey = migratedKey;
+              defaultLogger.info('Migrated existing file-based encryption key into OS keyring');
+              return;
+            }
+          }
+        } catch (err) {
+          defaultLogger.warn(
+            'Failed to migrate file-based key into OS keyring, will generate a fresh key:',
+            err,
+          );
+        }
+
+        const generated = crypto.randomBytes(32).toString('hex');
+        await keytar.setPassword('yash', 'encryption-key', generated);
+        this.encryptionKey = generated;
+        return;
+      } catch (err) {
+        defaultLogger.info(
+          'Provided keytar instance failed; falling back to dynamic import or file-based key.',
+          err,
+        );
+      }
+    }
 
     // Try OS keyring via dynamic import of keytar
     try {
