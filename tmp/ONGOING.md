@@ -4,7 +4,7 @@ Work in progress and actionable items for the repository.
 2. Keep SPECS.md authoritative for architecture and requirements.
 3. Verify CI/test expectations: tests pass locally with Bun. (done)
 4. Next improvements:
-   - Add CONTRIBUTING.md and development workflow notes.
+   - Add CONTRIBUTING.md and development workflow notes. (done)
    - Add simple example showing platform provider usage.
    - Add linting CI step using biome.
    - Run `biome check --write` to format and lint the repo (CI will run this).
@@ -20,8 +20,9 @@ Date: 2026-04-12
 Committed by autonomous agent: 2026-04-12T19:39:44Z
 
 New work performed:
- - Added src/utils/config.ts to provide getConfig() used by services (small helper to read config.json).
- - Added initial platform stubs for youtube, twitch, kick (files present but need implementation).
+  - Added CONTRIBUTING.md with Bun development notes.
+  - Added src/utils/config.ts to provide getConfig() used by services (small helper to read config.json).
+  - Added initial platform stubs for youtube, twitch, kick (files present but need implementation).
 
 Prioritized next steps (actionable):
 1. Implement Platform Providers (high)
