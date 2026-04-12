@@ -97,12 +97,6 @@ export class ObsService {
       return;
     }
 
-    // Clear reconnection interval
-    if (this.reconnectInterval) {
-      clearInterval(this.reconnectInterval);
-      this.reconnectInterval = null;
-    }
-
     // In a real implementation, we would disconnect the obs-websocket client
     // await obs.disconnect();
 

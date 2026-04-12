@@ -44,8 +44,9 @@ Actions performed now:
 - Added `CONTRIBUTING.md`.
 - Updated `README.md` quickstart.
 - Updated CI workflow to fail if tests fail.
+ - Added reconnection unit test: `test/obs.reconnect.test.ts` to exercise reconnection logic with fake timers.
 
-Ran test suite: `bun test` — all tests passed locally (88 passed, 0 failed).
+Ran test suite: `bun test` — all tests passed locally (89 passed, 0 failed).
 
 Next follow-ups:
 1. Open a PR with these changes and request review.
