@@ -80,5 +80,12 @@ Actions taken to fix build:
 Build result:
 - Bundled successfully; output written to `dist/` (main.js + assets).
 
+CI updates:
+- Added `Build TUI for Bun` step to `.github/workflows/ci.yml` which runs `bun build --target bun --outdir dist src/main.tsx` before running tests. This prevents merging changes that break the TUI bundle.
+
+Final verification:
+- Local build: `bun build --target bun --outdir dist src/main.tsx` succeeded.
+- Tests: `bun test` passed: 89 passed, 0 failed.
+
 Test results (after changes):
 - Ran tests: 89 passed, 0 failed.

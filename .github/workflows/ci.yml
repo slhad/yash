@@ -27,5 +27,8 @@ jobs:
       - name: Run formatter/linter
         run: bunx biome check --write || true
 
+      - name: Build TUI for Bun
+        run: bun build --target bun --outdir dist src/main.tsx
+
       - name: Run tests
         run: bun test
