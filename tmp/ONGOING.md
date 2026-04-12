@@ -22,6 +22,7 @@ Committed by autonomous agent: 2026-04-12T19:39:44Z
 New work performed:
   - Added CONTRIBUTING.md with Bun development notes.
   - Added src/utils/config.ts to provide getConfig() used by services (small helper to read config.json).
+  - Added contrib/sendemail-validate.sample to provide a tracked example hook for validating patches.
   - Added initial platform stubs for youtube, twitch, kick (files present but need implementation).
 
 Prioritized next steps (actionable):
