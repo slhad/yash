@@ -1,56 +1,17 @@
-import * as fs from 'node:fs/promises';
-import * as path from 'node:path';
-
-export interface Config {
-  obs: {
-    websocket: {
-      server: string;
-      port: string;
-      password: string;
-    };
-  };
-  platforms: {
-    youtube: {
-      enabled: boolean;
-      streamKey: string;
-    };
-    twitch: {
-      enabled: boolean;
-      streamKey: string;
-    };
-    kick: {
-      enabled: boolean;
-      streamKey: string;
-    };
-  };
-  chat: {
-    maxHistorySize: number;
-    showTimestamps: boolean;
-  };
-  server: {
-    port: number;
-    host: string;
-  };
-}
-
-let cachedConfig: Config | null = null;
-
-export async function loadConfig(): Promise<Config> {
-  if (cachedConfig) {
-    return cachedConfig;
+// Simple config loader used by services that need runtime configuration.
+// Returns parsed JSON from the repository root config.json with a safe fallback.
+export function getConfig(): any {
+  try {
+    // Use require so this works both in bundlers and Node-style runtimes.
+    // Path is relative from compiled output; require with explicit root path to be safe.
+    // Using process.cwd() ensures we read the repository root config.json at runtime.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const cfg = require(process.cwd() + '/config.json');
+    return cfg;
+  } catch (err) {
+    console.warn('Failed to load config.json from project root, returning empty config', err);
+    return {};
   }
-
-  const configPath = path.join(process.cwd(), 'config.json');
-  const data = await fs.readFile(configPath, 'utf8');
-  cachedConfig = JSON.parse(data) as Config;
-  return cachedConfig;
 }
 
-export function getConfig(): Config | null {
-  return cachedConfig;
-}
-
-export async function reloadConfig(): Promise<Config> {
-  cachedConfig = null;
-  return loadConfig();
-}
+export default { getConfig };
