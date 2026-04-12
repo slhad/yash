@@ -17,7 +17,10 @@ interface EncryptedTokenData {
 }
 
 export class AuthService {
-  private static TOKENS_FILE = path.join(process.env.HOME || '.', '.yash', 'tokens.json');
+  // Allow overriding the data directory (useful for tests/CI). Default to ~/.yash
+  private static DATA_DIR =
+    process.env.YASH_DATA_DIR || path.join(process.env.HOME || '.', '.yash');
+  private static TOKENS_FILE = path.join(AuthService.DATA_DIR, 'tokens.json');
   private encryptionKey: string;
 
   private tokens: Map<string, TokenData> = new Map();
@@ -30,7 +33,7 @@ export class AuthService {
       this.encryptionKey = envKey;
     } else {
       // Check for an existing key file in the tokens directory
-      const keyFile = path.join(process.env.HOME || '.', '.yash', 'key');
+      const keyFile = path.join(AuthService.DATA_DIR, 'key');
       try {
         if (fsSync.existsSync(keyFile)) {
           const existing = fsSync.readFileSync(keyFile, 'utf8').trim();
@@ -41,7 +44,7 @@ export class AuthService {
           }
         } else {
           const generated = crypto.randomBytes(32).toString('hex');
-          // ensure directory exists and write key with restricted permissions
+          // ensure data directory exists and write key with restricted permissions
           fsSync.mkdirSync(path.dirname(keyFile), { recursive: true });
           fsSync.writeFileSync(keyFile, generated, { mode: 0o600 });
           this.encryptionKey = generated;
