@@ -11,12 +11,15 @@ export function getConfig(): any {
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const cfg = require(`${process.cwd()}/config.json`);
-    cachedConfig = cfg;
-    return cfg;
+    // Allow environment variables to override config values so CI can inject secrets safely.
+    const merged = applyEnvOverrides(cfg);
+    cachedConfig = merged;
+    return merged;
   } catch (err) {
     defaultLogger.warn('Failed to load config.json from project root, returning empty config', err);
-    cachedConfig = {};
-    return cachedConfig;
+    const merged = applyEnvOverrides({});
+    cachedConfig = merged;
+    return merged;
   }
 }
 
@@ -25,12 +28,14 @@ export async function loadConfig(): Promise<any> {
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const cfg = require(`${process.cwd()}/config.json`);
-    cachedConfig = cfg;
-    return Promise.resolve(cfg);
+    const merged = applyEnvOverrides(cfg);
+    cachedConfig = merged;
+    return Promise.resolve(merged);
   } catch (err) {
     defaultLogger.warn('Failed to load config.json from project root, returning empty config', err);
-    cachedConfig = {};
-    return Promise.resolve(cachedConfig);
+    const merged = applyEnvOverrides({});
+    cachedConfig = merged;
+    return Promise.resolve(merged);
   }
 }
 
@@ -50,6 +55,33 @@ export async function reloadConfig(): Promise<any> {
     // ignore
   }
   return loadConfig();
+}
+
+function applyEnvOverrides(cfg: any): any {
+  // Clone to avoid mutating the original
+  const config = JSON.parse(JSON.stringify(cfg || {}));
+
+  // OBS websocket overrides
+  config.obs = config.obs || {};
+  config.obs.websocket = config.obs.websocket || {};
+  if (process.env.YASH_OBS_SERVER) config.obs.websocket.server = process.env.YASH_OBS_SERVER;
+  if (process.env.YASH_OBS_PORT) config.obs.websocket.port = process.env.YASH_OBS_PORT;
+  if (process.env.YASH_OBS_PASSWORD) config.obs.websocket.password = process.env.YASH_OBS_PASSWORD;
+
+  // Platform stream key overrides (env names: YASH_PLATFORM_<PLATFORM>_STREAMKEY)
+  config.platforms = config.platforms || {};
+  ['youtube', 'twitch', 'kick'].forEach((p) => {
+    const envName = `YASH_PLATFORM_${p.toUpperCase()}_STREAMKEY`;
+    const v = process.env[envName];
+    if (v) {
+      config.platforms[p] = config.platforms[p] || {};
+      config.platforms[p].streamKey = v;
+      // If a stream key is provided via env, ensure platform is enabled
+      config.platforms[p].enabled = true;
+    }
+  });
+
+  return config;
 }
 
 export default { getConfig, loadConfig, reloadConfig };
