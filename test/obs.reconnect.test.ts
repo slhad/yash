@@ -20,6 +20,8 @@ describe('ObsService reconnection', () => {
     await obsService.disconnect();
     expect(obsService.isConnected()).toBe(false);
 
+    // Setup the reconnection interval using the service's method so fake timers apply
+    (obsService as any).setupReconnection();
     // Advance timers by reconnection interval (30000ms) to trigger reconnection attempt
     vi.advanceTimersByTime(30000);
 

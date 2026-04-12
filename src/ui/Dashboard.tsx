@@ -1,5 +1,7 @@
 import { baseComponents } from '@opentui/react';
+
 const { Box, Text } = baseComponents;
+
 import React, { useEffect, useState } from 'react';
 import { ChatDisplay } from './ChatDisplay';
 import { MessageInput } from './MessageInput';

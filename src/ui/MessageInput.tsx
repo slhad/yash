@@ -1,5 +1,7 @@
 import { baseComponents } from '@opentui/react';
+
 const { Box, Button, Input, Text } = baseComponents;
+
 import React, { useState } from 'react';
 
 interface MessageInputProps {

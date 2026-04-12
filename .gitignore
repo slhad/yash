@@ -6,6 +6,7 @@ out
 dist
 *.tgz
 test-results
+tmp
 
 # code coverage
 coverage

@@ -173,7 +173,7 @@ export class AuthService {
         // Providers should implement their own refresh logic; using authenticate()
         // is a safe fallback that most test providers already implement.
         const authResult = await provider.authenticate();
-        if (authResult && authResult.success && authResult.accessToken) {
+        if (authResult?.success && authResult.accessToken) {
           await this.saveTokensForPlatform(platform, authResult);
           return true;
         }
