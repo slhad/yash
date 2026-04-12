@@ -1,14 +1,23 @@
 // Basic test for AuthService
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { AuthService } from './../src/services/auth.service';
+import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
 
 describe('AuthService', () => {
   let authService: AuthService;
 
   beforeEach(async () => {
-    // Clear any existing token file for clean tests
+    // Clear any existing token file and key directory for clean tests
+    const yashDir = path.join(process.env.HOME || '.', '.yash');
+    try {
+      await fs.rm(yashDir, { recursive: true, force: true });
+    } catch (err) {
+      // ignore
+    }
+
     authService = new AuthService();
-    // Wait for loadTokens to complete
+    // Wait a short time for loadTokens to complete
     await new Promise((resolve) => setTimeout(resolve, 10));
   });
 
