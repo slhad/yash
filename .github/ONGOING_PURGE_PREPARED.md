@@ -1,21 +1,33 @@
-Purge-prep: git-filter-repo replacement file and instructions
-===========================================================
+Purge Preparation (safe, non-destructive)
 
-I added an executable helper at `scripts/purge-secrets.sh` that prepares a replacements file
-for `git-filter-repo`, prints manual steps to perform a mirror-based destructive purge, and
-supports an optional `--execute` mode that is double-locked (requires CONFIRM_PURGE=1).
+Summary
+-------
+This file mirrors the local tmp/ONGOING.md record describing the results of running
+scripts/prepare-purge-replacements.js and the recommended next steps prior to any
+destructive history rewrite.
 
-This is intentionally conservative. Do NOT run the destructive purge until:
-1. All secrets are rotated.
-2. You have a vetted backup of the repository.
-3. You have coordinated with all repository collaborators.
+Artifacts created (untracked)
+--------------------------------
+- tmp/replacements.txt
+- tmp/secret-locations.txt
 
-To prepare a purge file, create a secrets.txt with one secret per line and run:
+What I did
+---------
+- Executed scripts/prepare-purge-replacements.js which scanned tracked files for likely
+  secret-looking patterns and produced a list of candidate values to replace. The script
+  found 36 unique candidate values. Files are intentionally created in tmp/ and are not
+  committed.
 
-  sh scripts/purge-secrets.sh --secrets-file secrets.txt
+Recommended next steps (do NOT execute destructive actions until credentials rotated)
+------------------------------------------------------------------------------------
+1. Inspect tmp/replacements.txt and tmp/secret-locations.txt and remove false positives.
+2. Rotate any credentials that were actually exposed.
+3. Optionally enhance tmp/replacements.txt with any additional values to purge.
+4. Run `sh scripts/purge-secrets.sh --secrets-file tmp/replacements.txt` to preview the commands.
+5. If ready and CONFIRM_PURGE=1 is set, run `sh scripts/purge-secrets.sh --secrets-file tmp/replacements.txt --execute`.
 
-To execute the purge (DANGEROUS):
-
-  CONFIRM_PURGE=1 sh scripts/purge-secrets.sh --secrets-file secrets.txt --execute
-
-After purge completes, force-push rewritten history and inform collaborators to re-clone.
+Important
+---------
+- The destructive purge path uses git-filter-repo and will rewrite history. Collaborators must be
+  coordinated with and shown proof that exposed secrets were rotated prior to running the destructive step.
+- This file is an audit record only. It intentionally contains no secrets.
