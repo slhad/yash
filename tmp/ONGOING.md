@@ -57,6 +57,16 @@ Next steps (after this change):
 1. If desired, I can now run `bun test` again and fix any regression failures (explicit request required).
 2. Consider adding more integration tests for platform and OBS interactions.
 
+Easiest followups completed (no tests run):
+1. Added a GitHub PR template: `.github/PULL_REQUEST_TEMPLATE.md` to standardize PR descriptions (title: "Summary / Changes / Testing / Checklist / Notes for Reviewers").
+2. Recommend opening a single PR that groups the small fixes (config, logger test, UI import fixes, OBS WS support) so CI will run and reviewers have full context.
+
+Next steps I will commit now:
+1. Push branch and open a PR (requires remote permissions).
+2. Add CI badge after PR is merged.
+
+If you want me to push and open the PR, say: "Proceed: open PR".
+
 Build validation:
 - I attempted a Bun build: `bun build src/main.tsx` and `bun build --target bun src/main.tsx`.
 - The bundler failed due to two issues:
