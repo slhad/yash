@@ -5,6 +5,7 @@ import { YouTubeProvider } from './platforms/youtube';
 import { ChatService } from './services/chat.service';
 import { ObsService } from './services/obs.service';
 import { StreamService } from './services/stream.service';
+import { defaultLogger } from './utils/logger';
 
 export const youtube = new YouTubeProvider();
 export const twitch = new TwitchProvider();
@@ -31,19 +32,19 @@ async function authenticateAll() {
 async function connectObs() {
   try {
     await obsService.connect();
-    console.log('OBS connected');
+    defaultLogger.info('OBS connected');
   } catch {
-    console.log('OBS not available');
+    defaultLogger.info('OBS not available');
   }
 }
 
 export async function initializeServices() {
   await authenticateAll();
   await connectObs();
-  console.log('All services initialized');
+  defaultLogger.info('All services initialized');
 }
 
-initializeServices().catch(console.error);
+initializeServices().catch((err) => defaultLogger.error('Failed to initialize services', err));
 
 Bun.serve({
   routes: {
@@ -123,4 +124,4 @@ Bun.serve({
   },
 });
 
-console.log('YASH server running at http://localhost:3000');
+defaultLogger.info('YASH server running at http://localhost:3000');
