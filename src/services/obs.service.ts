@@ -2,6 +2,8 @@
 // Note: This is a TypeScript service that would use the obs-websocket-js library
 // For now, we'll create a mock implementation that demonstrates the interface
 
+import { getConfig } from '../utils/config';
+
 export class ObsService {
   private connected: boolean = false;
   private connectionPromise: Promise<void> | null = null;
@@ -25,7 +27,7 @@ export class ObsService {
 
   private loadConfigSync(): void {
     try {
-      const config = require('../utils/config').getConfig();
+      const config = getConfig();
       if (config?.obs?.websocket) {
         this.host = config.obs.websocket.server;
         this.port = parseInt(config.obs.websocket.port, 10);
