@@ -14,3 +14,7 @@ Quickstart
 3. Launch the TUI (development): `bun run src/index.ts`
 
 See SPECS.md for architecture and conventions.
+
+Developer tools
+
+- To install the example sendemail validation hook, copy `contrib/sendemail-validate.sample` to `.git/hooks/sendemail-validate` and make it executable. This script is intentionally minimal and can be extended with project-specific checks.
