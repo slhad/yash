@@ -28,4 +28,4 @@ jobs:
         run: bunx biome check --write || true
 
       - name: Run tests
-        run: bun test || true
+        run: bun test

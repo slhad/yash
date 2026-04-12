@@ -1,14 +1,12 @@
-# Contributing
+Contributing
 
-Thanks for considering contributions to YASH. Minimal setup and guidance to get started:
+Quick start for contributors:
 
 1. Install dependencies: `bun install`
-2. Run tests: `bun test`
-3. Run the TUI in development (with hot reload): `bun --hot ./src/index.tsx` or `bun --hot ./src/main.tsx` depending on entry file.
+2. Run tests locally: `bun test`
+3. Run the TUI in development with hot reload: `bun --hot ./src/main.tsx`
 
-Guidelines:
-- Keep changes small and focused. Prefer one logical fix per commit.
-- Add tests when fixing bugs or adding features.
-- Update SPECS.md if the change affects architecture or behavior.
-
-If you need help, open an issue describing the problem and steps to reproduce.
+When making changes:
+- Keep commits small and focused.
+- Include tests for bug fixes and new behavior.
+- Run `bunx biome check --write` to format the code before committing.

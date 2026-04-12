@@ -11,6 +11,9 @@ Quickstart
 
 1. Install dependencies: `bun install`
 2. Run tests: `bun test`
-3. Launch the TUI (development with hot reload): `bun --hot ./src/index.tsx` or `bun --hot ./src/main.tsx`
+3. Launch the TUI (development with hot reload): `bun --hot ./src/main.tsx`
+
+Notes:
+- Use `bun --hot ./src/main.tsx` for the interactive TUI entrypoint in development.
 
 See SPECS.md for architecture and conventions.
