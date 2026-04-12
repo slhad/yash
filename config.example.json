@@ -1,0 +1,31 @@
+{
+  "obs": {
+    "websocket": {
+      "server": "127.0.0.1",
+      "port": "4455",
+      "password": "<REPLACE_WITH_YOUR_OBS_PASSWORD>"
+    }
+  },
+  "platforms": {
+    "youtube": {
+      "enabled": true,
+      "streamKey": ""
+    },
+    "twitch": {
+      "enabled": true,
+      "streamKey": ""
+    },
+    "kick": {
+      "enabled": true,
+      "streamKey": ""
+    }
+  },
+  "chat": {
+    "maxHistorySize": 1000,
+    "showTimestamps": true
+  },
+  "server": {
+    "port": 3000,
+    "host": "localhost"
+  }
+}
