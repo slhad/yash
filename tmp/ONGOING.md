@@ -33,3 +33,15 @@ Planned next steps:
 1. Add Playwright e2e test to `e2e-tests/webview.spec.ts` (done).
 2. Update tmp/ONGOING.md with this plan (this file).
 3. Commit changes (force-add tmp and commit) — will perform now.
+
+- 2026-04-13T00:20:00Z: Added Playwright e2e test and updated GitHub Actions CI to run the e2e job. Added VHS recording helper in tmp/tui.
+
+Next hardest follow-up (new):
+- Improve OBS service reliability by adding a configurable reconnection strategy and a small unit test to validate reconnection behavior under a simulated failure. This focuses on production service reliability and is different from the prior follow-ups.
+
+Planned next steps for OBS work:
+1. Add a small unit test under test/obs.reconnect.unit.test.ts that simulates disconnection and ensures setupReconnection triggers connect attempts.
+2. Minor change to ObsService: expose reconnect interval as an optional constructor parameter for faster tests.
+3. Run `bun test` and ensure the new unit test passes.
+
+I will implement step 2 (minor code change) and step 1 (unit test), update this file, and commit (force-add tmp). Proceeding now.

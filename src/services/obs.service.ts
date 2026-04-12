@@ -9,6 +9,8 @@ export class ObsService {
   private connected: boolean = false;
   private connectionPromise: Promise<void> | null = null;
   private reconnectInterval: NodeJS.Timeout | null = null;
+  // Allow configurable reconnection interval for tests (ms)
+  private reconnectIntervalMs: number = 30000;
   // Optional WebSocket transport support
   private ws: any = null;
   private pendingRequests: Map<number, { resolve: (v: any) => void; reject: (e: any) => void }> =
@@ -31,12 +33,16 @@ export class ObsService {
     port?: number,
     password?: string | null,
     useWebSocketTransport: boolean = false,
+    reconnectIntervalMs?: number,
   ) {
     this.loadConfigSync();
     if (host) this.host = host;
     if (port) this.port = port;
     if (password !== undefined) this.password = password;
     this.useWebSocketTransport = useWebSocketTransport;
+    if (typeof reconnectIntervalMs === 'number' && reconnectIntervalMs > 0) {
+      this.reconnectIntervalMs = reconnectIntervalMs;
+    }
   }
 
   private loadConfigSync(): void {
@@ -295,7 +301,7 @@ export class ObsService {
           defaultLogger.error('Reconnection attempt failed:', error);
         });
       }
-    }, 30000);
+    }, this.reconnectIntervalMs);
   }
 
   // Convenience methods for common OBS operations
