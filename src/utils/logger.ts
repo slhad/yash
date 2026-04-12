@@ -84,4 +84,7 @@ export class Logger {
   }
 }
 
-export const defaultLogger = new Logger({ level: LogLevel.INFO, prefix: 'YASH' });
+// Default logger used by the app. Disable timestamp by default to reduce noisy
+// output in TUI/console contexts; tests create their own Logger instances and
+// control timestamp behavior explicitly.
+export const defaultLogger = new Logger({ level: LogLevel.INFO, prefix: 'YASH', timestamp: false });
