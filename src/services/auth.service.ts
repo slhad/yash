@@ -124,17 +124,29 @@ export class AuthService {
   }
 
   // Refresh token if needed (would be implemented per platform)
-  async refreshTokenIfNeeded(platform: string, _provider: PlatformProvider): Promise<boolean> {
+  async refreshTokenIfNeeded(platform: string, provider: PlatformProvider): Promise<boolean> {
     const token = this.tokens.get(platform);
     if (!token) return false;
 
-    // If token expires in less than 5 minutes, refresh it
+    // If token expires in less than 5 minutes, attempt refresh by asking the provider
     if (Date.now() > token.expiresAt - 300000) {
-      // TODO: Implement actual refresh token logic per platform
-      // This would call the provider's refresh token method
       console.log(`Token for ${platform} needs refresh`);
-      return true;
+      try {
+        // Best-effort: call provider.authenticate() to obtain a fresh token.
+        // Providers should implement their own refresh logic; using authenticate()
+        // is a safe fallback that most test providers already implement.
+        const authResult = await provider.authenticate();
+        if (authResult && authResult.success && authResult.accessToken) {
+          await this.saveTokensForPlatform(platform, authResult);
+          return true;
+        }
+        return false;
+      } catch (err) {
+        console.error(`Failed to refresh token for ${platform}:`, err);
+        return false;
+      }
     }
+
     return false;
   }
 }
