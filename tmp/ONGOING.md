@@ -86,6 +86,12 @@ CI updates:
 Final verification:
 - Local build: `bun build --target bun --outdir dist src/main.tsx` succeeded.
 - Tests: `bun test` passed: 89 passed, 0 failed.
+Final verification:
+- Local build: `bun build --target bun --outdir dist src/main.tsx` succeeded.
+- Tests: `bun test` passed: 90 passed, 0 failed (includes dist build existence check).
+
+Additional verification:
+- Added `test/dist.build.test.ts` which asserts `dist/main.js` exists and is non-empty. This test passes locally after the bundling step.
 
 Test results (after changes):
 - Ran tests: 89 passed, 0 failed.
