@@ -95,6 +95,10 @@ export class KickProvider implements PlatformProvider {
     return this.streamKey;
   }
 
+  setStreamKey(key: string): void {
+    this.streamKey = key;
+  }
+
   getStreamStatus(): StreamStatus {
     return this.streamStatus;
   }
