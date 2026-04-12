@@ -1,178 +1,154 @@
+import { Box, Button, Input, Text } from '@opentui/react';
 import React, { useState } from 'react';
 
-// StreamControls component for managing stream operations
 interface StreamControlsProps {
-  onStartStream: (platforms: string[], metadata: any) => Promise<void>;
-  onStopStream: (platforms: string[]) => Promise<void>;
-  onUpdateMetadata: (platforms: string[], metadata: any) => Promise<void>;
-  getStreamStatus: (platform: string) => string; // Returns StreamStatus as string
-  availablePlatforms: string[];
+  platforms: string[];
+  selectedPlatforms: string[];
+  onSelectPlatforms: (platforms: string[]) => void;
+  onStartStream: () => Promise<void>;
+  onStopStream: () => Promise<void>;
+  onUpdateMetadata: () => Promise<void>;
+  getStreamStatus: (platform: string) => string;
 }
 
 export const StreamControls: React.FC<StreamControlsProps> = ({
+  platforms,
+  selectedPlatforms,
+  onSelectPlatforms,
   onStartStream,
   onStopStream,
   onUpdateMetadata,
   getStreamStatus,
-  availablePlatforms,
 }) => {
-  const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>([]);
   const [streamTitle, setStreamTitle] = useState('');
   const [streamGame, setStreamGame] = useState('');
-  const [isStreaming, setIsStreaming] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
 
-  // Determine if any selected platform is currently streaming
-  const anyPlatformStreaming = selectedPlatforms.some(
-    (platform) => getStreamStatus(platform) === 'ONLINE',
-  );
+  const togglePlatform = (platform: string) => {
+    if (selectedPlatforms.includes(platform)) {
+      onSelectPlatforms(selectedPlatforms.filter((p) => p !== platform));
+    } else {
+      onSelectPlatforms([...selectedPlatforms, platform]);
+    }
+  };
 
-  const handleStartStream = async () => {
+  const toggleAll = () => {
+    if (selectedPlatforms.length === platforms.length) {
+      onSelectPlatforms([]);
+    } else {
+      onSelectPlatforms([...platforms]);
+    }
+  };
+
+  const anyOnline = selectedPlatforms.some((p) => getStreamStatus(p) === 'ONLINE');
+
+  const handleStart = async () => {
+    setIsProcessing(true);
     try {
-      setIsStreaming(true);
-      await onStartStream(selectedPlatforms, {
-        title: streamTitle || 'Untitled Stream',
-        game: streamGame || '',
-      });
+      await onStartStream();
     } catch (error) {
       console.error('Failed to start stream:', error);
-      // In a real app, we'd show an error notification
     } finally {
-      setIsStreaming(false);
+      setIsProcessing(false);
     }
   };
 
-  const handleStopStream = async () => {
+  const handleStop = async () => {
+    setIsProcessing(true);
     try {
-      setIsStreaming(true);
-      await onStopStream(selectedPlatforms);
+      await onStopStream();
     } catch (error) {
       console.error('Failed to stop stream:', error);
-      // In a real app, we'd show an error notification
     } finally {
-      setIsStreaming(false);
+      setIsProcessing(false);
     }
   };
 
-  const handleUpdateMetadata = async () => {
+  const handleUpdate = async () => {
+    setIsProcessing(true);
     try {
-      await onUpdateMetadata(selectedPlatforms, {
-        title: streamTitle || 'Untitled Stream',
-        game: streamGame || '',
-      });
-      // In a real app, we'd show a success notification
+      await onUpdateMetadata();
     } catch (error) {
-      console.error('Failed to update stream metadata:', error);
-      // In a real app, we'd show an error notification
+      console.error('Failed to update metadata:', error);
+    } finally {
+      setIsProcessing(false);
     }
   };
 
   return (
-    <div className="stream-controls">
-      <div className="controls-header">
-        <h3>Stream Controls</h3>
-        <div className="platform-selection">
-          <label>
-            <input
-              type="checkbox"
-              checked={selectedPlatforms.length === availablePlatforms.length}
-              onChange={(e) => {
-                if (e.target.checked) {
-                  setSelectedPlatforms([...availablePlatforms]);
-                } else {
-                  setSelectedPlatforms([]);
-                }
-              }}
-            />
-            Select All Platforms
-          </label>
+    <Box border="rounded" padding={1} style={{ backgroundColor: '#1a1a2e' }}>
+      <Box marginBottom={1}>
+        <Text bold>Stream Controls</Text>
+      </Box>
 
-          {availablePlatforms.length > 1 && (
-            <div className="individual-platforms">
-              {availablePlatforms.map((platform) => (
-                <label key={platform}>
-                  <input
-                    type="checkbox"
-                    checked={selectedPlatforms.includes(platform)}
-                    onChange={(e) => {
-                      if (e.target.checked) {
-                        setSelectedPlatforms([...selectedPlatforms, platform]);
-                      } else {
-                        setSelectedPlatforms(selectedPlatforms.filter((p) => p !== platform));
-                      }
-                    }}
-                  />
-                  {platform.charAt(0).toUpperCase() + platform.slice(1)}
-                </label>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
+      <Box marginBottom={1}>
+        <Button
+          onClick={toggleAll}
+          style={{
+            backgroundColor: selectedPlatforms.length === platforms.length ? 'blue' : '#333',
+          }}
+        >
+          {selectedPlatforms.length === platforms.length ? '[x] All' : '[ ] All'}
+        </Button>
+        {platforms.map((platform) => (
+          <Button
+            key={platform}
+            onClick={() => togglePlatform(platform)}
+            style={{
+              backgroundColor: selectedPlatforms.includes(platform) ? 'blue' : '#333',
+            }}
+          >
+            {selectedPlatforms.includes(platform) ? '[x]' : '[ ]'}{' '}
+            {platform.charAt(0).toUpperCase() + platform.slice(1)}
+          </Button>
+        ))}
+      </Box>
 
-      <div className="stream-status">
-        {anyPlatformStreaming ? (
-          <span className="status-indicator streaming">● Live</span>
-        ) : (
-          <span className="status-indicator offline">● Offline</span>
-        )}
-        <span className="status-text">
-          {selectedPlatforms.length > 0
-            ? `${selectedPlatforms.length} platform${selectedPlatforms.length > 1 ? 's' : ''} selected`
-            : 'No platforms selected'}
-        </span>
-      </div>
+      <Box marginBottom={1}>
+        <Text>
+          {anyOnline ? <Text color="green">● LIVE</Text> : <Text color="gray">○ Offline</Text>}
+        </Text>
+        <Text color="gray">
+          {' '}
+          {selectedPlatforms.length > 0 ? `${selectedPlatforms.length} selected` : 'None selected'}
+        </Text>
+      </Box>
 
-      {!anyPlatformStreaming && (
-        <div className="stream-metadata">
-          <div className="form-group">
-            <label>Stream Title:</label>
-            <input
-              type="text"
-              value={streamTitle}
-              onChange={(e) => setStreamTitle(e.target.value)}
-              placeholder="Enter stream title"
-              className="metadata-input"
-            />
-          </div>
-
-          <div className="form-group">
-            <label>Game/Category:</label>
-            <input
-              type="text"
-              value={streamGame}
-              onChange={(e) => setStreamGame(e.target.value)}
-              placeholder="Enter game or category"
-              className="metadata-input"
-            />
-          </div>
-        </div>
+      {!anyOnline && (
+        <Box marginBottom={1} flexDirection="column" gap={1}>
+          <Input
+            label="Title"
+            value={streamTitle}
+            onChange={setStreamTitle}
+            placeholder="Stream title"
+          />
+          <Input
+            label="Game"
+            value={streamGame}
+            onChange={setStreamGame}
+            placeholder="Game/category"
+          />
+        </Box>
       )}
 
-      <div className="control-buttons">
-        <button
-          onClick={handleStartStream}
-          disabled={selectedPlatforms.length === 0 || isStreaming}
-          className={`${anyPlatformStreaming ? 'stop-button' : 'start-button'} control-button`}
+      <Box flexDirection="row" gap={1}>
+        <Button
+          onClick={anyOnline ? handleStop : handleStart}
+          disabled={selectedPlatforms.length === 0 || isProcessing}
+          style={{
+            backgroundColor: anyOnline ? 'red' : 'green',
+          }}
         >
-          {anyPlatformStreaming ? 'Stop Stream' : 'Start Stream'}
-        </button>
-
-        <button
-          onClick={handleUpdateMetadata}
-          disabled={selectedPlatforms.length === 0 || isStreaming || !anyPlatformStreaming}
-          className="update-button control-button"
+          {anyOnline ? 'Stop' : 'Start'}
+        </Button>
+        <Button
+          onClick={handleUpdate}
+          disabled={!anyOnline || isProcessing}
+          style={{ backgroundColor: 'yellow' }}
         >
-          Update Info
-        </button>
-      </div>
-    </div>
+          Update
+        </Button>
+      </Box>
+    </Box>
   );
 };
-
-// In a real implementation with OpenTUI, this would use their components
-// For example:
-// import { Box, Text, Input, Button, Checkbox, Label } from '@opentui/components';
-//
-// export const StreamControls: React.FC<StreamControlsProps> = ({ ... }) => {
-//   // Implementation using OpenTUI components
-// };

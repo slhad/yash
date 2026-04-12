@@ -1,12 +1,25 @@
 {
   "name": "yash",
-  "module": "index.ts",
+  "module": "index.tsx",
   "type": "module",
   "private": true,
+  "scripts": {
+    "start": "bun run src/index.tsx",
+    "test": "bun test"
+  },
   "devDependencies": {
+    "@biomejs/biome": "^2.4.11",
     "@types/bun": "latest"
   },
   "peerDependencies": {
-    "typescript": "^5"
+    "typescript": "^6.0.2"
+  },
+  "dependencies": {
+    "@opentui/core": "^0.1.97",
+    "@opentui/react": "^0.1.97",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5"
   }
 }

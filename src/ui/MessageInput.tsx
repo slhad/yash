@@ -1,100 +1,89 @@
+import { Box, Button, Input, Text } from '@opentui/react';
 import React, { useState } from 'react';
 
-// MessageInput component for sending messages
 interface MessageInputProps {
   onSendMessage: (message: string, targetPlatforms: string[]) => void;
-  availablePlatforms: string[];
+  platforms: string[];
+  selectedPlatforms: string[];
+  sendToAll: boolean;
+  onToggleSendToAll: (value: boolean) => void;
+  onSelectPlatforms: (platforms: string[]) => void;
   placeholder?: string;
 }
 
 export const MessageInput: React.FC<MessageInputProps> = ({
   onSendMessage,
-  availablePlatforms,
+  platforms,
+  selectedPlatforms,
+  sendToAll,
+  onToggleSendToAll,
+  onSelectPlatforms,
   placeholder = 'Type a message...',
 }) => {
   const [message, setMessage] = useState('');
-  const [targetPlatforms, setTargetPlatforms] = useState<string[]>([]);
-  const [sendToAll, setSendToAll] = useState(true);
 
   const handleSend = async () => {
     if (message.trim()) {
-      await onSendMessage(message, sendToAll ? [] : targetPlatforms);
+      await onSendMessage(message, sendToAll ? [] : selectedPlatforms);
       setMessage('');
     }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
+  const togglePlatform = (platform: string) => {
+    if (selectedPlatforms.includes(platform)) {
+      onSelectPlatforms(selectedPlatforms.filter((p) => p !== platform));
+    } else {
+      onSelectPlatforms([...selectedPlatforms, platform]);
     }
   };
 
   return (
-    <div className="message-input-container">
-      <div className="input-controls">
-        <label>
-          <input
-            type="checkbox"
-            checked={sendToAll}
-            onChange={(e) => {
-              setSendToAll(e.target.checked);
-              if (e.target.checked) {
-                setTargetPlatforms([]);
-              }
-            }}
-          />
-          Send to All Platforms
-        </label>
+    <Box border="rounded" padding={1} style={{ backgroundColor: '#1a1a2e' }}>
+      <Box marginBottom={1}>
+        <Text bold>Send Message</Text>
+      </Box>
 
-        {!sendToAll && availablePlatforms.length > 0 && (
-          <div className="platform-selector">
-            <label>Send to:</label>
-            <select
-              multiple
-              value={targetPlatforms}
-              onChange={(e) => {
-                setTargetPlatforms(
-                  Array.from(e.target.selectedOptions).map((option) => option.value),
-                );
+      <Box marginBottom={1}>
+        <Button
+          onClick={() => onToggleSendToAll(!sendToAll)}
+          style={{
+            backgroundColor: sendToAll ? 'green' : '#333',
+          }}
+        >
+          {sendToAll ? '[x] Send to All' : '[ ] Send to All'}
+        </Button>
+      </Box>
+
+      {!sendToAll && platforms.length > 0 && (
+        <Box marginBottom={1} flexDirection="row" gap={1}>
+          <Text>Send to:</Text>
+          {platforms.map((platform) => (
+            <Button
+              key={platform}
+              onClick={() => togglePlatform(platform)}
+              style={{
+                backgroundColor: selectedPlatforms.includes(platform) ? 'blue' : '#333',
               }}
             >
-              {availablePlatforms.map((platform) => (
-                <option key={platform} value={platform}>
-                  {platform.charAt(0).toUpperCase() + platform.slice(1)}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
-      </div>
+              {selectedPlatforms.includes(platform) ? '[x]' : '[ ]'}{' '}
+              {platform.charAt(0).toUpperCase() + platform.slice(1)}
+            </Button>
+          ))}
+        </Box>
+      )}
 
-      <textarea
+      <Input
         value={message}
-        onChange={(e) => setMessage(e.target.value)}
-        onKeyDown={handleKeyDown}
+        onChange={(value) => setMessage(value)}
         placeholder={placeholder}
-        rows={3}
-        className="message-textarea"
+        onEnter={handleSend}
       />
 
-      <div className="input-actions">
-        <button onClick={handleSend} className="send-button">
+      <Box marginTop={1}>
+        <Button onClick={handleSend} style={{ backgroundColor: 'blue' }}>
           Send
-        </button>
-      </div>
-    </div>
+        </Button>
+      </Box>
+    </Box>
   );
 };
-
-// In a real implementation with OpenTUI, this would use their components
-// For example:
-// import { Box, Text, Textarea, Button, Checkbox, Select } from '@opentui/components';
-//
-// export const MessageInput: React.FC<MessageInputProps> = ({
-//   onSendMessage,
-//   availablePlatforms,
-//   placeholder
-// }) => {
-//   // Implementation using OpenTUI components
-// };
