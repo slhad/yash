@@ -31,3 +31,34 @@ jobs:
 
       - name: Run tests and biome
         run: bun test
+
+  e2e:
+    name: Run Playwright E2E
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+
+      - name: Setup Node (for Playwright tools)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps
+
+      - name: Start server in background
+        run: |
+          bun run src/index.ts &
+          # give server a moment to start
+          sleep 3
+
+      - name: Run Playwright webview test
+        run: npx playwright test e2e-tests/webview.spec.ts --reporter=list
