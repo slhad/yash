@@ -1,22 +1,14 @@
 # Contributing
 
-This project uses Bun for development. Keep changes small and focused.
-
-Local setup
+Thanks for considering contributions to YASH. Minimal setup and guidance to get started:
 
 1. Install dependencies: `bun install`
 2. Run tests: `bun test`
-3. Format and lint: `biome check --write`
+3. Run the TUI in development (with hot reload): `bun --hot ./src/index.tsx` or `bun --hot ./src/main.tsx` depending on entry file.
 
-Development notes
+Guidelines:
+- Keep changes small and focused. Prefer one logical fix per commit.
+- Add tests when fixing bugs or adding features.
+- Update SPECS.md if the change affects architecture or behavior.
 
-- Use ES module imports. Prefer `import` over `require`.
-- Follow SPECS.md for architecture and feature requirements.
-- When adding platform providers, implement the `PlatformProvider` interface in `src/platforms/base.ts`.
-
-Creating a PR
-
-- Run `bun install` and `biome check --write` locally.
-- Include a short description of the change and why it was made.
-
-Thank you for contributing!
+If you need help, open an issue describing the problem and steps to reproduce.

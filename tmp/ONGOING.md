@@ -32,3 +32,10 @@ Applied change (committed):
 Next steps (after this change):
 1. If desired, I can now run `bun test` and fix any remaining failures (you must explicitly request this).
 2. Consider adding a test that asserts `defaultLogger` configuration for future regressions.
+
+Easiest follow-ups (no tests) — prioritized:
+1. Add minimal CONTRIBUTING.md content so new contributors have setup and test instructions. (File: CONTRIBUTING.md)
+2. Update README.md quickstart to use consistent commands for Bun (use `bun --hot` where appropriate) and note how to run the TUI and server. (File: README.md)
+3. Add a tiny unit test that asserts the `defaultLogger` has `timestamp: false` to prevent future regressions. Place under `test/defaultLogger.test.ts`.
+
+I will perform items 1 and 2 now (safe doc edits). I will not add the test unless you explicitly ask.
