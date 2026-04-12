@@ -93,5 +93,9 @@ Final verification:
 Additional verification:
 - Added `test/dist.build.test.ts` which asserts `dist/main.js` exists and is non-empty. This test passes locally after the bundling step.
 
+Formatting and linting:
+- Ran `bunx biome check --write` and applied suggested safe fixes with `--unsafe` where appropriate. Changes included using template literals, optional chaining, and Node.js builtin imports (node:fs).
+- Re-ran tests after formatting — all tests still pass: 90 passed, 0 failed.
+
 Test results (after changes):
 - Ran tests: 89 passed, 0 failed.

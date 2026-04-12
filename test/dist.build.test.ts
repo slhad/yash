@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import fs from 'fs';
+import fs from 'node:fs';
 
 describe('Bundle output', () => {
   test('dist/main.js exists and is non-empty', () => {
