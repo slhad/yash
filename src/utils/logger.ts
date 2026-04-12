@@ -52,6 +52,23 @@ export class Logger {
   }
 
   private log(level: string, message: string, args: unknown[]): void {
+    // Redaction for sensitive information in logs.
+    // Patterns are intentionally conservative; extend if you add new secret keys.
+    const SENSITIVE_KEY_PATTERN =
+      /(password|passwd|pwd|secret|api[_-]?key|token|access[_-]?key|client[_-]?secret|streamKey)/i;
+
+    // JSON replacer to redact object properties whose key matches sensitive patterns.
+    const redactReplacer = (k: string, v: any) => {
+      try {
+        if (k && SENSITIVE_KEY_PATTERN.test(k)) {
+          return '***REDACTED***';
+        }
+      } catch (e) {
+        // ignore
+      }
+      return v;
+    };
+
     const parts: string[] = [];
 
     if (this.timestamp) {
@@ -68,11 +85,37 @@ export class Logger {
 
     if (args.length > 0) {
       parts.push(
-        ...args.map((arg) => (typeof arg === 'object' ? JSON.stringify(arg) : String(arg))),
+        ...args.map((arg) => {
+          if (typeof arg === 'object') {
+            try {
+              return JSON.stringify(arg, redactReplacer);
+            } catch (err) {
+              return String(arg);
+            }
+          }
+          return String(arg);
+        }),
       );
     }
 
-    const output = parts.join(' ');
+    let output = parts.join(' ');
+
+    // Additional string-level redaction for simple key:value or key=value patterns
+    // Match JSON-like keys ("password": "value") and plain key=value or key: value occurrences.
+    const jsonKeyRegex =
+      /("?(?:password|passwd|pwd|secret|api[_-]?key|token|access[_-]?key|client[_-]?secret|streamKey)"?\s*:\s*)(".*?"|'.*?'|[^,\s}]+)/gi;
+    const keyValueRegex =
+      /\b(?:password|passwd|pwd|secret|api[_-]?key|token|access[_-]?key|client[_-]?secret|streamKey)\b\s*[=:]\s*([^,\s]+)/gi;
+
+    try {
+      output = output.replace(jsonKeyRegex, '$1"***REDACTED***"');
+      output = output.replace(keyValueRegex, (match, p1) => {
+        // preserve the key and replace the value
+        return match.replace(p1, '***REDACTED***');
+      });
+    } catch (e) {
+      // Fail-safe: if redaction fails, leave the output as-is
+    }
 
     if (level === 'ERROR') {
       console.error(output);
