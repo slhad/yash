@@ -52,13 +52,20 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [sendToAll, setSendToAll] = useState(true);
 
   useEffect(() => {
-    const initStatus: Record<string, boolean> = {};
+    // Initialize status objects with the correct types for each state
+    const initAuthStatus: Record<string, boolean> = {};
+    const initStreamStatus: Record<string, string> = {};
+    const initConnectionStatus: Record<string, string> = {};
+
     platforms.forEach((platform) => {
-      initStatus[platform] = false;
+      initAuthStatus[platform] = false;
+      initStreamStatus[platform] = 'OFFLINE';
+      initConnectionStatus[platform] = 'disconnected';
     });
-    setAuthStatus(initStatus);
-    setStreamStatus(initStatus);
-    setConnectionStatus(initStatus);
+
+    setAuthStatus(initAuthStatus);
+    setStreamStatus(initStreamStatus);
+    setConnectionStatus(initConnectionStatus);
     setLastError({});
   }, [platforms]);
 
