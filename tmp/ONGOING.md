@@ -3,6 +3,7 @@ Next steps (ongoing) - do not commit
 1) Finish hardest followup (different from last two):
    - Implement unit tests for admin authentication and admin endpoints, including IP allowlist and rate-limiting behaviors. Cover AdminService create/list/revoke and audit integration.
    - Add an end-to-end test that exercises admin endpoints using generated admin tokens.
+   - Document the Admin API in README (added).
 
 2) Safety & consistency:
     - Ensure all admin endpoints use authorizeAdmin (done).

@@ -72,6 +72,50 @@ Notes:
 
 See SPECS.md for architecture and conventions.
 
+Admin API
+---------
+This repository exposes several admin-only endpoints under `/api/admin/*` for
+managing encryption keys, exporting tokens, and auditing operations. These
+endpoints are protected by `ADMIN_TOKEN` (optional) and support per-IP
+allowlisting and rate-limiting via environment variables.
+
+Endpoints (summary):
+
+- POST `/api/admin/rotate-key` : Rotate the symmetric encryption key used to
+  encrypt stored tokens. Accepts optional JSON body `{ "key": "..." }` to
+  set a specific key (not recommended). Requires admin authorization.
+- POST `/api/admin/export-key` : Export the current symmetric key encrypted
+  with a provided RSA public key PEM in the request body `{ "publicKeyPem": "..." }`.
+  Pass `{ "export": "tokens", "publicKeyPem": "..." }` to export the
+  tokens as a hybrid-encrypted package instead.
+- POST `/api/admin/keys` : Create a one-time-display admin token. Returns
+  `{ id, token, createdAt }` (token shown once).
+- GET `/api/admin/keys` : List admin keys metadata (id, label, createdAt, revoked).
+- POST `/api/admin/keys/revoke` : Revoke a key by id. Body: `{ "id": "..." }`.
+- GET  `/api/admin/audit/tail?lines=N` : Return the last N lines of the
+  append-only audit log (default 100).
+- GET  `/api/admin/audit/verify` : Verify the chained HMAC audit log and
+  return a result `{ ok: boolean, badIndex?: number }`.
+
+Authentication & environment variables
+-------------------------------------
+- `ADMIN_TOKEN` : Optional global admin bearer token. If set, clients must send
+  `Authorization: Bearer <ADMIN_TOKEN>` unless they present a valid admin key
+  created via `/api/admin/keys`.
+- `ADMIN_HMAC_KEY` : Key used to HMAC admin tokens (used by AdminService).
+- `ADMIN_ALLOWED_IPS` : Comma-separated allowlist (supports `*` and `prefix*`)
+  for client IPs.
+- `ADMIN_RATE_LIMIT_WINDOW_MS` : Rate-limit window in ms (default: 60000).
+- `ADMIN_RATE_LIMIT_REQUESTS` : Allowed requests per window (default: 30).
+
+Audit
+-----
+The admin API appends best-effort audit entries for sensitive operations. The
+audit log is stored under the data directory (default `~/.yash/audit.log`) and
+is tamper-evident via a chained HMAC scheme. Do not expose the audit file over
+untrusted channels; use the `audit/verify` endpoint to verify integrity.
+
+
 Metrics & Prometheus
 --------------------
 This project exposes lightweight in-memory metrics for CI and local debugging.
