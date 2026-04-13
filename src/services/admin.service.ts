@@ -289,8 +289,14 @@ export class AdminService {
       tag: string;
       ciphertext: string;
     },
-    options?: { overwrite?: boolean },
-  ): Promise<{ imported: string[]; skipped: string[]; errors: string[] }> {
+    options?: { overwrite?: boolean; dryRun?: boolean },
+  ): Promise<{
+    imported: string[];
+    skipped: string[];
+    errors: string[];
+    preview?: { toAdd: string[]; toReplace: string[] };
+    mergedHmacsAdded?: string[];
+  }> {
     await this.init();
 
     if (!privateKeyPem || typeof privateKeyPem !== 'string')
@@ -325,14 +331,53 @@ export class AdminService {
       const skipped: string[] = [];
       const errors: string[] = [];
 
+      // Build preview lists
+      const toAdd: string[] = [];
+      const toReplace: string[] = [];
+      for (const ik of incomingKeys) {
+        const id = ik.id || crypto.randomBytes(8).toString('hex');
+        if (this.keys.has(id)) {
+          if (options?.overwrite) toReplace.push(id);
+          else skipped.push(id);
+        } else {
+          toAdd.push(id);
+        }
+      }
+
+      // If dry-run requested, return a preview without mutating state
+      if (options?.dryRun) {
+        const hmacsToAdd: string[] = [];
+        if (hmacMeta) {
+          if (typeof hmacMeta.current === 'string' && hmacMeta.current.length > 0) {
+            if (hmacMeta.current !== this.hmacKey && !this.prevHmacKeys.includes(hmacMeta.current))
+              hmacsToAdd.push(hmacMeta.current);
+          }
+          if (Array.isArray(hmacMeta.previous)) {
+            for (const k of hmacMeta.previous) {
+              if (
+                k &&
+                k !== this.hmacKey &&
+                !this.prevHmacKeys.includes(k) &&
+                !hmacsToAdd.includes(k)
+              )
+                hmacsToAdd.push(k);
+            }
+          }
+        }
+
+        return {
+          imported: [],
+          skipped,
+          errors,
+          preview: { toAdd, toReplace },
+          mergedHmacsAdded: hmacsToAdd,
+        };
+      }
+
+      // Apply changes
       for (const ik of incomingKeys) {
         try {
           const id = ik.id || crypto.randomBytes(8).toString('hex');
-          if (this.keys.has(id) && !options?.overwrite) {
-            skipped.push(id);
-            continue;
-          }
-
           const keyObj: AdminKey = {
             id,
             label: ik.label,
@@ -342,8 +387,17 @@ export class AdminService {
             revoked: !!ik.revoked,
           };
 
-          this.keys.set(id, keyObj);
-          imported.push(id);
+          if (this.keys.has(id)) {
+            if (options?.overwrite) {
+              this.keys.set(id, keyObj);
+              imported.push(id);
+            } else {
+              skipped.push(id);
+            }
+          } else {
+            this.keys.set(id, keyObj);
+            imported.push(id);
+          }
         } catch (e: any) {
           errors.push(String(e));
         }
@@ -351,24 +405,27 @@ export class AdminService {
 
       // Merge incoming HMAC metadata so tokens signed under the source
       // instance's HMAC keys remain verifiable here.
+      const mergedHmacsAdded: string[] = [];
       if (hmacMeta) {
-        const toAdd: string[] = [];
         if (typeof hmacMeta.current === 'string' && hmacMeta.current.length > 0) {
-          if (hmacMeta.current !== this.hmacKey && !this.prevHmacKeys.includes(hmacMeta.current))
-            toAdd.push(hmacMeta.current);
+          if (hmacMeta.current !== this.hmacKey && !this.prevHmacKeys.includes(hmacMeta.current)) {
+            this.prevHmacKeys.unshift(hmacMeta.current);
+            mergedHmacsAdded.push(hmacMeta.current);
+          }
         }
         if (Array.isArray(hmacMeta.previous)) {
           for (const k of hmacMeta.previous) {
-            if (k && k !== this.hmacKey && !this.prevHmacKeys.includes(k) && !toAdd.includes(k))
-              toAdd.push(k);
+            if (k && k !== this.hmacKey && !this.prevHmacKeys.includes(k)) {
+              this.prevHmacKeys.unshift(k);
+              mergedHmacsAdded.push(k);
+            }
           }
         }
-        if (toAdd.length > 0)
-          this.prevHmacKeys = Array.from(new Set([...toAdd, ...this.prevHmacKeys]));
+        if (this.prevHmacKeys.length > 50) this.prevHmacKeys = this.prevHmacKeys.slice(0, 50);
       }
 
       await this.save();
-      return { imported, skipped, errors };
+      return { imported, skipped, errors, preview: { toAdd, toReplace }, mergedHmacsAdded };
     } catch (e: any) {
       throw e;
     }

@@ -58,5 +58,11 @@ Next steps (ongoing) - do not commit
    - Add a README section describing safe import/merge workflows and the overwrite flag behaviour.
    - Remove any debug helpers in tmp/ (tmp/debug_admin.ts) when they are no longer needed.
 
+8) CI & secret scanning (this run - easiest of the remaining hard tasks):
+   - Make the GitHub Action secret-scan job fail the build when gitleaks finds secrets (removed the `|| true` fallback).
+   - Ensure the pre-commit hook runs gitleaks when available, and a Node fallback scanner otherwise (already present in .githooks/pre-commit).
+   - Added an integration test that exercises update-roles and import endpoints via a minimal Bun server: test/admin.integration.bun.test.ts
+     (Note: tests were added but not executed as part of this change per request.)
+
 Notes:
 - tmp directory is git-ignored by .gitignore and should not be committed.
