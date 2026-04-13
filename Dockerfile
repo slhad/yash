@@ -59,12 +59,13 @@ RUN set -eux; \
     chmod +x /usr/local/bin/gosu; \
     /usr/local/bin/gosu --version || true
 
-# If HOST_UID/HOST_GID are provided as build-args, create a matching user inside
-# the image at build time to simplify mounted artifact ownership when possible.
-RUN if [ "${HOST_UID}" != "1000" ] || [ "${HOST_GID}" != "1000" ]; then \
-      groupadd -g "${HOST_GID}" hostgroup 2>/dev/null || true; \
-      useradd -u "${HOST_UID}" -g "${HOST_GID}" -m -d /home/hostuser -s /bin/bash hostuser 2>/dev/null || true; \
-    fi || true
+# Create a host-matching user/group inside the image at build time using the
+# provided HOST_UID/HOST_GID build args. This bakes a user with matching numeric
+# IDs into the image which can be used in the "bake-user" CI flow where the
+# container may be run without --user and the entrypoint drops to the baked user.
+RUN set -eux; \
+    groupadd -g "${HOST_GID}" hostgroup 2>/dev/null || true; \
+    useradd -u "${HOST_UID}" -g "${HOST_GID}" -m -d /home/hostuser -s /bin/bash hostuser 2>/dev/null || true
 
 # Install dependencies via Bun
 RUN bun install --no-save || true
