@@ -46,6 +46,8 @@ export class ObsService {
   // History of scheduled attempts (keeps past scheduling entries so tests
   // can reliably inspect previous attempt values even if scheduler advanced)
   private scheduledHistory: Array<{ delay: number; attempt: number }> = [];
+  // Optional injected random function for deterministic jitter in tests
+  private randomFn?: () => number;
 
   // add optional `useWebSocketTransport` flag as fourth argument (default false)
   constructor(
@@ -58,13 +60,10 @@ export class ObsService {
     reconnectMaxMs?: number,
     reconnectMultiplier?: number,
     reconnectMaxAttempts?: number,
+    randomFn?: () => number,
   ) {
-    // Allow optional injection of a deterministic random function via env for tests
-    const rnd = (globalThis as any).__YASH_RANDOM_FN;
-    if (rnd && typeof rnd === 'function') {
-      (Math as any)._original_random = Math.random;
-      (Math as any).random = rnd;
-    }
+    // Allow optional injection of a deterministic random function for tests
+    this.randomFn = randomFn;
     this.loadConfigSync();
     if (host) this.host = host;
     if (port) this.port = port;
@@ -394,8 +393,9 @@ export class ObsService {
       this.reconnectMaxMs,
     );
 
-    // full jitter
-    const delay = Math.floor(Math.random() * maxDelay);
+    // full jitter - use injected deterministic RNG in tests when provided
+    const r = this.randomFn ? this.randomFn() : Math.random();
+    const delay = Math.floor(r * maxDelay);
     const attemptNum = this.reconnectAttempt + 1;
 
     defaultLogger.info(`Scheduling reconnection attempt in ${delay}ms (attempt ${attemptNum})`);

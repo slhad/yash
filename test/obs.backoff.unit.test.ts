@@ -8,10 +8,8 @@ describe('ObsService backoff', () => {
     // Spy on logger to capture scheduled delay messages
     const loggerSpy = vi.spyOn(defaultLogger, 'info').mockImplementation(() => {});
 
-    // Provide deterministic random function to the instance via global hook used
-    // by ObsService when running under tests. This avoids stubbing Math.random
-    // which can interfere with parallel tests.
-    (globalThis as any).__YASH_RANDOM_FN = () => 1;
+    // Provide deterministic random function to the instance via constructor injection
+    // to avoid stubbing Math.random which can interfere with parallel tests.
 
     // Create a subclass that always fails to connect so backoff grows
     class AlwaysFailObs extends ObsService {
@@ -22,7 +20,18 @@ describe('ObsService backoff', () => {
 
     const baseMs = 10; // small base so test runs quickly
     const multiplier = 2;
-    const obs = new AlwaysFailObs('localhost', 4455, null, false, baseMs, 0, 60000, multiplier);
+    const obs = new AlwaysFailObs(
+      'localhost',
+      4455,
+      null,
+      false,
+      baseMs,
+      0,
+      60000,
+      multiplier,
+      undefined,
+      () => 1,
+    );
 
     // Start the first scheduled attempt and get the computed delay/attempt
     const info1 = (obs as any).scheduleReconnectAttempt();
@@ -33,26 +42,15 @@ describe('ObsService backoff', () => {
     expect(firstAttempt).toBe(1);
     expect(firstDelay).toBe(baseMs); // with random=1 delay == base
 
-    // Wait for the scheduled attempt to fire using polling so CI slowdown doesn't
-    // make this test flaky.
+    // Wait for the scheduled attempt to fire. Use instance history rather than
+    // global logs to avoid cross-test interference.
     const { waitFor } = await import('./_helpers/waitFor');
     await waitFor(
-      () =>
-        loggerSpy.mock.calls.some((c) =>
-          ((c[0] as string) || '').includes('Attempting to reconnect to OBS...'),
-        ),
-      firstDelay + 1000,
-    );
-
-    // Wait for the scheduled attempt to run and schedule the next attempt,
-    // then read the computed scheduling info from the instance (via logging
-    // side-effects may be unreliable across concurrent tests).
-    await waitFor(
-      () =>
-        loggerSpy.mock.calls.some((c) =>
-          ((c[0] as string) || '').includes('Attempting to reconnect to OBS...'),
-        ),
-      firstDelay + 1000,
+      () => {
+        const h = (obs as any).getScheduledHistory ? (obs as any).getScheduledHistory() : [];
+        return h.length >= 2;
+      },
+      firstDelay * 2 + 2000,
     );
 
     // The next schedule attempt should have incremented the attempt counter; poll
@@ -61,32 +59,15 @@ describe('ObsService backoff', () => {
     // Prefer reading lastScheduledInfo which is set by the instance when
     // scheduling occurs. This is more reliable than parsing logs across
     // concurrent tests.
-    const info2 = (obs as any).getLastScheduledInfo
-      ? (obs as any).getLastScheduledInfo()
-      : (obs as any).scheduleReconnectAttempt();
-    // If scheduleReconnectAttempt returned info, assert on it; otherwise ensure
-    // we observed at least two scheduling logs via the spy.
-    if (info2) {
-      const secondDelay = (info2 as any).delay as number;
-      const secondAttempt = (info2 as any).attempt as number;
-      expect(secondAttempt).toBe(2);
-      expect(secondDelay).toBe(baseMs * multiplier); // exponential growth
-    } else {
-      const allCalls = loggerSpy.mock.calls.map((c) => c[0] as string);
-      const allScheduleLogs = allCalls.filter((s) =>
-        s.includes('Scheduling reconnection attempt in'),
-      );
-      expect(allScheduleLogs.length).toBeGreaterThan(1);
-      const secondMatch = allScheduleLogs[1].match(/in (\d+)ms \(attempt (\d+)\)/);
-      expect(secondMatch).not.toBeNull();
-      const secondDelay = Number(secondMatch![1]);
-      const secondAttempt = Number(secondMatch![2]);
-      expect(secondAttempt).toBe(2);
-      expect(secondDelay).toBe(baseMs * multiplier); // exponential growth
-    }
+    // Inspect scheduled history which the service maintains
+    const hist = (obs as any).getScheduledHistory ? (obs as any).getScheduledHistory() : [];
+    expect(hist.length).toBeGreaterThanOrEqual(2);
+    const second = hist.find((e: any) => e.attempt > firstAttempt);
+    expect(second).toBeTruthy();
+    expect(second.attempt).toBe(2);
+    expect(second.delay).toBe(baseMs * multiplier); // exponential growth
 
     // cleanup
-    delete (globalThis as any).__YASH_RANDOM_FN;
     loggerSpy.mockRestore();
   });
 });

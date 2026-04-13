@@ -1,16 +1,24 @@
-import { describe, expect, test, vi } from 'bun:test';
+import { describe, expect, test } from 'bun:test';
 import { ObsService } from '../src/services/obs.service';
-import { defaultLogger } from '../src/utils/logger';
 
 describe('ObsService reconnection', () => {
   test('should attempt reconnection after disconnect (uses real timers)', async () => {
-    const loggerSpy = vi.spyOn(defaultLogger, 'info').mockImplementation(() => {});
-
-    // Provide deterministic random function to the instance via global hook used
-    // by ObsService when running under tests. This avoids stubbing Math.random
-    // which can interfere with parallel tests.
-    (globalThis as any).__YASH_RANDOM_FN = () => 0.5;
-    const obsService = new ObsService('localhost', 4455, null, false, 30000, 1000);
+    // Provide deterministic random function to the instance via constructor injection
+    // to avoid stubbing Math.random which can interfere with parallel tests.
+    // Use a small base reconnect interval so the test completes within the
+    // default test timeout window.
+    const obsService = new ObsService(
+      'localhost',
+      4455,
+      null,
+      false,
+      100, // reconnectIntervalMs (small for test)
+      1000,
+      undefined,
+      undefined,
+      undefined,
+      () => 0.5,
+    );
 
     // Connect (simulated delay inside connect is connectDelayMs)
     await obsService.connect();
@@ -27,22 +35,16 @@ describe('ObsService reconnection', () => {
     // but scheduleReconnectAttempt is idempotent and safe to call directly for the test)
     (obsService as any).scheduleReconnectAttempt();
 
-    // With deterministic Math.random stub the computed delay is known; instead of waiting
-    // a fixed long sleep, poll for the log message and for connected state. This reduces
-    // flakiness and makes the test CI-friendly.
-    await waitFor(
-      () =>
-        loggerSpy.mock.calls.some((c) =>
-          ((c[0] as string) || '').includes('Attempting to reconnect to OBS...'),
-        ),
-      20000,
-    );
+    // Wait for the instance to record a scheduled attempt (avoid parsing logs)
+    await waitFor(() => {
+      const hist = (obsService as any).getScheduledHistory
+        ? (obsService as any).getScheduledHistory()
+        : [];
+      return hist.length >= 1;
+    }, 2000);
 
-    // Wait until service reports connected (allowing internal connect delay to finish)
+    // When scheduled attempt runs it will call connect(); wait for connected state
     await waitFor(() => obsService.isConnected(), 5000);
     expect(obsService.isConnected()).toBe(true);
-
-    delete (globalThis as any).__YASH_RANDOM_FN;
-    loggerSpy.mockRestore();
   });
 });
