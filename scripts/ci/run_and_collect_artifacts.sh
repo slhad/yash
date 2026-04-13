@@ -42,7 +42,6 @@ BAKE_USER="${BAKE_USER:-false}"
 if [ "$BAKE_USER" = "true" ]; then
 	echo "Running container without --user (bake-user path)"
 	docker run -d --name "$CONTAINER_NAME" \
-		-e RUN_PLAYWRIGHT=1 \
 		-e HOST_UID="$(id -u)" \
 		-e HOST_GID="$(id -g)" \
 		-v "$(pwd)/tmp:/app/tmp" \
@@ -50,7 +49,6 @@ if [ "$BAKE_USER" = "true" ]; then
 else
 	echo "Running container with --user $(id -u):$(id -g) (runtime --user path)"
 	docker run -d --name "$CONTAINER_NAME" \
-		-e RUN_PLAYWRIGHT=1 \
 		-e HOST_UID="$(id -u)" \
 		-e HOST_GID="$(id -g)" \
 		-v "$(pwd)/tmp:/app/tmp" \
