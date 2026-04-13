@@ -121,6 +121,8 @@ jobs:
 
           # Run container as current host user so artifacts written into the mounted
           # tmp directory are owned by the runner and can be uploaded as artifacts.
+          # The Docker image builds dependencies (bun install + Playwright) at image build
+          # time to speed up CI; do not reinstall inside the container here.
           docker run --rm -e RUN_PLAYWRIGHT=1 -v "${{ github.workspace }}/tmp:/app/tmp" --user "$(id -u):$(id -g)" yash-ci:latest /bin/bash -lc '
             set -euo pipefail
 
@@ -142,15 +144,16 @@ jobs:
               exit 1
             fi
 
-            echo "Installing dependencies and Playwright browsers"
-            bun install || true
-            npx playwright install --with-deps || true
+            echo "Using pre-baked dependencies in the image; skipping in-container install"
 
             echo "Running Playwright webview test"
             npx playwright test e2e-tests/webview.spec.ts --reporter=list || exit 2
 
             echo "Running reconnection integration test"
             bun test test/obs.websocket.reconnect.test.ts --reporter=list || exit 3
+
+            echo "Running artifact verification script"
+            bash scripts/ci/verify_artifact.sh || true
 
             echo "Integration tests finished"
           '
@@ -159,8 +162,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: integration-screenshots
-          path: tmp/web/yash-home.png
+          name: integration-artifacts
+          path: tmp/**
 
   vhs:
     name: Record TUI VHS demo
