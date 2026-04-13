@@ -191,6 +191,15 @@ jobs:
           name: integration-artifacts
           path: tmp/**
 
+      - name: Generate and validate artifact manifest
+        if: always()
+        run: |
+          echo "Generating artifact manifest"
+          chmod +x scripts/ci/generate_artifact_manifest.sh scripts/ci/validate_artifact_manifest.sh || true
+          ./scripts/ci/generate_artifact_manifest.sh tmp
+          echo "Validating manifest against runner UID:GID"
+          ./scripts/ci/validate_artifact_manifest.sh tmp/artifact-manifest.json "$(id -u)" "$(id -g)" || echo "Manifest validation reported mismatches; see tmp/artifact-ownership-report.txt"
+
   vhs:
     name: Record TUI VHS demo
     needs: e2e
