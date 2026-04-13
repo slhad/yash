@@ -86,6 +86,94 @@ export class AuthService {
   }
 
   /**
+   * Rotate the encryption key used to encrypt token blobs.
+   * If `providedKey` is supplied it will be used (if not already a 64-char hex
+   * string it will be normalized via SHA256). Otherwise a new random key is
+   * generated. The method attempts to persist the new key in the OS keyring
+   * (keytar) if available; otherwise it falls back to the file-based key.
+   * After the key is updated, all in-memory tokens are re-encrypted and saved
+   * using the new key.
+   */
+  async rotateEncryptionKey(providedKey?: string): Promise<void> {
+    try {
+      await this.waitForReady(5000);
+    } catch (err) {
+      // proceed anyway
+    }
+
+    // Normalize or generate key as a 32-byte hex string
+    let newKeyHex: string;
+    if (providedKey) {
+      if (/^[0-9a-fA-F]{64}$/.test(providedKey)) {
+        newKeyHex = providedKey;
+      } else {
+        newKeyHex = crypto.createHash('sha256').update(providedKey).digest('hex');
+      }
+    } else {
+      newKeyHex = crypto.randomBytes(32).toString('hex');
+    }
+
+    const keyFile = path.join(AuthService.DATA_DIR, 'key');
+
+    let persisted = false;
+
+    // Try to persist into keytar if available
+    try {
+      if (this.keytar && typeof this.keytar.setPassword === 'function') {
+        await this.keytar.setPassword('yash', 'encryption-key', newKeyHex);
+        this.useKeytar = true;
+        persisted = true;
+      } else {
+        // Try dynamic import of keytar if not already available
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-var-requires
+          const keytar = await import('keytar');
+          this.keytar = keytar;
+          if (keytar && typeof keytar.setPassword === 'function') {
+            await keytar.setPassword('yash', 'encryption-key', newKeyHex);
+            this.useKeytar = true;
+            persisted = true;
+          }
+        } catch (err) {
+          // keytar not present; will fall through to file-based persistence
+        }
+      }
+    } catch (err) {
+      defaultLogger.warn(
+        'Failed to persist new encryption key in keytar, will try file-based persistence:',
+        err,
+      );
+    }
+
+    // File-based fallback
+    if (!persisted) {
+      try {
+        fsSync.mkdirSync(path.dirname(keyFile), { recursive: true });
+        fsSync.writeFileSync(keyFile, newKeyHex, { mode: 0o600 });
+        this.useKeytar = false;
+        persisted = true;
+      } catch (err) {
+        defaultLogger.warn(
+          'Failed to persist new encryption key to file; key will be ephemeral:',
+          err,
+        );
+      }
+    }
+
+    // Update in-memory key and re-encrypt tokens
+    this.encryptionKey = newKeyHex;
+    try {
+      await this.saveTokens();
+      defaultLogger.info(
+        'Encryption key rotated and tokens re-encrypted' + (persisted ? '' : ' (not persisted)'),
+      );
+    } catch (err) {
+      defaultLogger.error('Failed to re-save tokens after key rotation:', err);
+      throw err;
+    }
+  }
+
+  /**
    * Wait for the AuthService asynchronous initialization to complete.
    * Useful for CLI utilities or tests that need tokens/key to be ready.
    */

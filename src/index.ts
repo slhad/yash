@@ -136,6 +136,53 @@ Bun.serve({
       // response formatting. The handler accepts a header getter and URL string.
       GET: (req) => apiMetricsHandler((name: string) => req.headers.get(name), req.url),
     },
+    // Admin-only endpoint to rotate encryption key used by AuthService.
+    // Protected by an ADMIN_TOKEN environment variable. This endpoint is
+    // intentionally simple: it accepts an optional JSON body { key: "..." }
+    // to set a specific key (not recommended). Use POST and include the
+    // header Authorization: Bearer <ADMIN_TOKEN>.
+    '/api/admin/rotate-key': {
+      POST: async (req) => {
+        const admin = process.env.ADMIN_TOKEN;
+        if (!admin) {
+          return new Response(JSON.stringify({ error: 'admin token not configured' }), {
+            status: 403,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+
+        const authHeader = (req.headers.get('authorization') || '').trim();
+        if (
+          !authHeader.toLowerCase().startsWith('bearer ') ||
+          authHeader.slice(7).trim() !== admin
+        ) {
+          return new Response(JSON.stringify({ error: 'unauthorized' }), {
+            status: 401,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+
+        let body = null;
+        try {
+          body = await req.json();
+        } catch (_) {
+          // ignore parse errors; allow empty body
+        }
+
+        try {
+          await authService.rotateEncryptionKey(body?.key);
+          return new Response(JSON.stringify({ success: true }), {
+            headers: { 'Content-Type': 'application/json' },
+          });
+        } catch (err) {
+          defaultLogger.error('Admin rotate-key failed:', err);
+          return new Response(JSON.stringify({ error: 'failed' }), {
+            status: 500,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+      },
+    },
     // Prometheus text exposition endpoint. This mirrors /api/metrics but
     // returns plain-text in Prometheus exposition format so CI or Prometheus
     // can scrape it directly.
