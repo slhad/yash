@@ -42,8 +42,8 @@ describe('AuthService', () => {
 
     const mockKeytar = new MockKeytar();
     authService = new AuthService(mockKeytar as any);
-    // Wait a short time for loadTokens to complete
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    // Wait a short time for loadTokens to complete; increase buffer for CI
+    await new Promise((resolve) => setTimeout(resolve, 50));
   });
 
   test('should be instantiable', () => {

@@ -39,8 +39,8 @@ describe('AuthService with mocked keytar', () => {
 
     const mockKeytar = new MockKeytar();
     authService = new AuthService(mockKeytar as any);
-    // wait briefly for async init
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    // wait briefly for async init; give small buffer for CI
+    await new Promise((resolve) => setTimeout(resolve, 50));
   });
 
   test('uses injected keytar to store and load tokens', async () => {
