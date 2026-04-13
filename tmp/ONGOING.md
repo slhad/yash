@@ -19,6 +19,8 @@ Steps to reproduce and validate locally:
 4. Alternatively use the new wrapper which runs the container detached and
    reliably collects artifacts with fallbacks:
    ./scripts/ci/run_and_collect_artifacts.sh yash-ci:local -- "bash scripts/ci/verify_artifact.sh"
+5. The verification script now writes a CI environment snapshot to
+   tmp/ci-env.txt to aid debugging (bun/node/gosu/playwright paths and versions).
 4. Update CI workflow to run the fixer before uploading artifacts (done in
    .github/workflows/ci.yml - the step is named "Fix host artifact ownership").
 4. Inspect tmp/: ls -la tmp && cat tmp/ci-artifact-owner.txt
