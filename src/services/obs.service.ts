@@ -17,6 +17,11 @@ export class ObsService {
   private reconnectAttempt: number = 0;
   private reconnectMaxMs: number = 5 * 60 * 1000; // 5 minutes cap
   private reconnectMultiplier: number = 2; // exponential multiplier
+  // Maximum number of reconnect attempts before giving up. Null = unlimited.
+  private reconnectMaxAttempts: number | null = null;
+  // Callbacks to notify when reconnect attempts exceeded max
+  private reconnectLimitExceededCallbacks: ((attempts: number) => void)[] = [];
+  private reconnectLimitExceededEmitted: boolean = false;
   // Simulated connect delay for testability (ms)
   private connectDelayMs: number = 1000;
   // Optional WebSocket transport support
@@ -45,6 +50,7 @@ export class ObsService {
     connectDelayMs?: number,
     reconnectMaxMs?: number,
     reconnectMultiplier?: number,
+    reconnectMaxAttempts?: number,
   ) {
     this.loadConfigSync();
     if (host) this.host = host;
@@ -62,6 +68,9 @@ export class ObsService {
     }
     if (typeof reconnectMultiplier === 'number' && reconnectMultiplier > 1) {
       this.reconnectMultiplier = reconnectMultiplier;
+    }
+    if (typeof reconnectMaxAttempts === 'number' && reconnectMaxAttempts >= 0) {
+      this.reconnectMaxAttempts = reconnectMaxAttempts;
     }
   }
 
@@ -330,6 +339,20 @@ export class ObsService {
     // If already scheduled or we are connected, do nothing
     if (this.reconnectTimer || this.connected) return;
 
+    // If a maxAttempts is configured and we've already exceeded it, emit once and stop
+    if (
+      this.reconnectMaxAttempts !== null &&
+      this.reconnectAttempt >= this.reconnectMaxAttempts &&
+      !this.reconnectLimitExceededEmitted
+    ) {
+      this.reconnectLimitExceededEmitted = true;
+      this.reconnectLimitExceededCallbacks.forEach((cb) => cb(this.reconnectAttempt));
+      defaultLogger.info(
+        `Reconnect attempts exceeded max (${this.reconnectMaxAttempts}), will not retry`,
+      );
+      return;
+    }
+
     const maxDelay = Math.min(
       this.reconnectIntervalMs * Math.pow(this.reconnectMultiplier, this.reconnectAttempt),
       this.reconnectMaxMs,
@@ -356,9 +379,38 @@ export class ObsService {
         defaultLogger.error('Reconnection attempt failed:', error);
         // increase attempt count and schedule next attempt
         this.reconnectAttempt++;
+
+        // If we've hit max attempts, emit the limit-exceeded event and bail out
+        if (
+          this.reconnectMaxAttempts !== null &&
+          this.reconnectAttempt > this.reconnectMaxAttempts
+        ) {
+          if (!this.reconnectLimitExceededEmitted) {
+            this.reconnectLimitExceededEmitted = true;
+            this.reconnectLimitExceededCallbacks.forEach((cb) => cb(this.reconnectAttempt));
+            defaultLogger.info(
+              `Reconnect attempts exceeded max (${this.reconnectMaxAttempts}), will not retry`,
+            );
+          }
+          return;
+        }
+
         this.scheduleReconnectAttempt();
       });
     }, delay);
+  }
+
+  /**
+   * Subscribe to the event that indicates reconnect attempts were exhausted.
+   * Returns an unsubscribe function.
+   */
+  subscribeToReconnectLimitExceeded(callback: (attempts: number) => void): () => void {
+    this.reconnectLimitExceededCallbacks.push(callback);
+    return () => {
+      this.reconnectLimitExceededCallbacks = this.reconnectLimitExceededCallbacks.filter(
+        (c) => c !== callback,
+      );
+    };
   }
 
   // Convenience methods for common OBS operations

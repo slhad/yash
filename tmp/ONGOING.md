@@ -26,5 +26,13 @@ Next (candidate) tasks
 - Wire backoff parameters to getConfig() so they can be set from config file (medium).
 - Add CI job to run Playwright + reconnection integration tests in a hermetic environment (very hard).
 
+Done this turn
+- Implemented reconnect maxAttempts option and event subscription support. Added test: test/obs.maxAttempts.unit.test.ts
+
+Next (candidate) tasks
+- Expose backoff parameters via getConfig() and environment variables (medium).
+- Add logging metrics for reconnection attempts and failures (medium).
+- Harden integration test to run under CI runners without fake timers (hard).
+
 Notes
 - tmp/ is gitignored; file created to satisfy the workflow requirement. Will be force-added to commit per instruction.
