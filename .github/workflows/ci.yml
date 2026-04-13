@@ -110,79 +110,45 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v1
-
-      - name: Setup Node (for Playwright tools)
-        uses: actions/setup-node@v4
-        with:
-          node-version: '18'
-
-      - name: Install dependencies
-        run: bun install
-
-      - name: Install Playwright browsers
-        run: npx playwright install --with-deps
-
-      - name: Start server in background (hermetic) and wait for readiness
+      - name: Build Docker image for hermetic tests
         run: |
-          bun run src/index.ts &
-          pid=$!
-          echo "Waiting for server to respond on http://localhost:3000/api/status..."
-          for i in $(seq 1 30); do
-            if curl -sSf http://localhost:3000/api/status -o /dev/null; then
-              echo "Server is up"
-              break
-            fi
-            sleep 1
-          done
-          if ! curl -sSf http://localhost:3000/api/status -o /dev/null; then
-            echo "Server failed to start after 30s" >&2
-            ps aux | sed -n '1,200p'
-            exit 1
-          fi
+          docker build -t yash-ci:latest .
 
-      - name: Run Playwright webview test (hermetic, with retries)
-        env:
-          RUN_PLAYWRIGHT: '1'
+      - name: Run hermetic integration tests inside Docker image
         run: |
-          set -euo pipefail
-          max_attempts=3
-          attempt=1
-          until [ $attempt -gt $max_attempts ]; do
-            echo "Hermetic Playwright attempt $attempt/$max_attempts"
-            if npx playwright test e2e-tests/webview.spec.ts --reporter=list; then
-              echo "Hermetic Playwright succeeded"
-              break
-            fi
-            echo "Hermetic Playwright failed on attempt $attempt"
-            attempt=$((attempt + 1))
-            sleep 5
-          done
-          if [ $attempt -gt $max_attempts ]; then
-            echo "Hermetic Playwright failed after $max_attempts attempts" >&2
-            exit 1
-          fi
+          docker run --rm -e RUN_PLAYWRIGHT=1 -v "${{ github.workspace }}/tmp:/app/tmp" yash-ci:latest /bin/bash -lc '
+            set -euo pipefail
 
-      - name: Run reconnection integration test (with retries)
-        run: |
-          set -euo pipefail
-          max_attempts=3
-          attempt=1
-          until [ $attempt -gt $max_attempts ]; do
-            echo "Reconnection test attempt $attempt/$max_attempts"
-            if bun test test/obs.websocket.reconnect.test.ts --reporter=list; then
-              echo "Reconnection test succeeded"
-              break
+            echo "Starting server inside container"
+            bun run src/index.ts &
+            pid=$!
+
+            echo "Waiting for server readiness"
+            for i in $(seq 1 60); do
+              if curl -sSf http://localhost:3000/api/status -o /dev/null; then
+                echo "Server ready"
+                break
+              fi
+              sleep 1
+            done
+            if ! curl -sSf http://localhost:3000/api/status -o /dev/null; then
+              echo "Server failed to start" >&2
+              ps aux || true
+              exit 1
             fi
-            echo "Reconnection test failed on attempt $attempt"
-            attempt=$((attempt + 1))
-            sleep 5
-          done
-          if [ $attempt -gt $max_attempts ]; then
-            echo "Reconnection test failed after $max_attempts attempts" >&2
-            exit 1
-          fi
+
+            echo "Installing dependencies and Playwright browsers"
+            bun install || true
+            npx playwright install --with-deps || true
+
+            echo "Running Playwright webview test"
+            npx playwright test e2e-tests/webview.spec.ts --reporter=list || exit 2
+
+            echo "Running reconnection integration test"
+            bun test test/obs.websocket.reconnect.test.ts --reporter=list || exit 3
+
+            echo "Integration tests finished"
+          '
 
       - name: Upload integration artifacts
         if: always()

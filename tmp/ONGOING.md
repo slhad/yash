@@ -114,5 +114,12 @@ Next (candidate) tasks
 - Use the Docker image in CI to run flaky integration tests in a controlled environment (medium).
 - Publish the Docker image to a registry for reproducible CI runs (low).
 
+Done this turn
+- Replaced the integration-hermetic job to run inside the Docker image (yash-ci) for better hermeticity.
+
+Next (candidate) tasks
+- Verify artifact collection from container-run jobs works across GitHub-hosted runners (medium).
+- Consider moving Playwright steps into the Dockerfile to speed CI (low).
+
 Notes
 - tmp/ is gitignored; file created to satisfy the workflow requirement. Will be force-added to commit per instruction.
