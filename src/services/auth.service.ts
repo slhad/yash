@@ -349,6 +349,45 @@ export class AuthService {
   private async initEncryptionKey(): Promise<void> {
     const keyFile = path.join(AuthService.DATA_DIR, 'key');
 
+    // Helper: Try to read encryption key from HashiCorp Vault (KV v2).
+    const tryVaultGetKey = async (): Promise<string | null> => {
+      const addr = process.env.VAULT_ADDR;
+      const token = process.env.VAULT_TOKEN;
+      if (!addr || !token) return null;
+      const mount = process.env.VAULT_KV_MOUNT || 'secret';
+      const secretPath = process.env.VAULT_SECRET_PATH || 'yash';
+      const url = `${addr.replace(/\/$/, '')}/v1/${mount}/data/${secretPath}`;
+      try {
+        const res = await fetch(url, { headers: { 'X-Vault-Token': token } });
+        if (!res.ok) return null;
+        const j = await res.json();
+        const data = j?.data?.data || {};
+        // Accept several possible field names
+        return data['encryption-key'] || data['encryption_key'] || data['key'] || null;
+      } catch (e) {
+        return null;
+      }
+    };
+
+    const tryVaultSetKey = async (newKey: string): Promise<boolean> => {
+      const addr = process.env.VAULT_ADDR;
+      const token = process.env.VAULT_TOKEN;
+      if (!addr || !token) return false;
+      const mount = process.env.VAULT_KV_MOUNT || 'secret';
+      const secretPath = process.env.VAULT_SECRET_PATH || 'yash';
+      const url = `${addr.replace(/\/$/, '')}/v1/${mount}/data/${secretPath}`;
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'X-Vault-Token': token, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ data: { 'encryption-key': newKey } }),
+        });
+        return res.ok;
+      } catch (e) {
+        return false;
+      }
+    };
+
     // If a keytar instance was injected (e.g., during tests), prefer it and skip the dynamic import.
     if (this.keytar && typeof this.keytar.getPassword === 'function') {
       try {
@@ -440,6 +479,19 @@ export class AuthService {
           );
         }
 
+        // Try reading key from Vault if available
+        try {
+          const vkey = await tryVaultGetKey();
+          if (vkey && vkey.length > 0) {
+            if (/^[0-9a-fA-F]{64}$/.test(vkey)) this.encryptionKey = vkey;
+            else this.encryptionKey = crypto.createHash('sha256').update(vkey).digest('hex');
+            defaultLogger.info('Loaded encryption key from Vault');
+            return;
+          }
+        } catch (e) {
+          defaultLogger.info('Vault key read failed (continuing):', e);
+        }
+
         // No existing key anywhere: generate and store
         const generated = crypto.randomBytes(32).toString('hex');
         await keytar.setPassword('yash', 'encryption-key', generated);
@@ -469,6 +521,13 @@ export class AuthService {
         fsSync.mkdirSync(path.dirname(keyFile), { recursive: true });
         fsSync.writeFileSync(keyFile, generated, { mode: 0o600 });
         this.encryptionKey = generated;
+        // Try to persist key in Vault if configured (best-effort)
+        try {
+          const ok = await tryVaultSetKey(generated);
+          if (ok) defaultLogger.info('Persisted encryption key to Vault (best-effort)');
+        } catch (e) {
+          defaultLogger.info('Vault persist attempt failed (non-fatal)', e);
+        }
         return;
       }
     } catch (err) {
