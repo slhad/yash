@@ -271,6 +271,43 @@ Bun.serve({
         }
       },
     },
+    '/api/admin/audit/tail': {
+      GET: async (req) => {
+        const admin = process.env.ADMIN_TOKEN;
+        if (!admin)
+          return new Response(JSON.stringify({ error: 'admin token not configured' }), {
+            status: 403,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        const authHeader = (req.headers.get('authorization') || '').trim();
+        if (
+          !authHeader.toLowerCase().startsWith('bearer ') ||
+          authHeader.slice(7).trim() !== admin
+        ) {
+          return new Response(JSON.stringify({ error: 'unauthorized' }), {
+            status: 401,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+
+        // Optional query param ?lines=N
+        try {
+          const url = new URL(req.url);
+          const lines = parseInt(url.searchParams.get('lines') || '100', 10) || 100;
+          const Audit = require('./utils/audit').default;
+          const audit = new Audit();
+          const tail = await audit.tailLines(lines);
+          return new Response(JSON.stringify({ lines: tail }), {
+            headers: { 'Content-Type': 'application/json' },
+          });
+        } catch (e) {
+          return new Response(JSON.stringify({ error: 'failed' }), {
+            status: 500,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+      },
+    },
     // Prometheus text exposition endpoint. This mirrors /api/metrics but
     // returns plain-text in Prometheus exposition format so CI or Prometheus
     // can scrape it directly.

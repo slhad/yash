@@ -170,6 +170,27 @@ export class Audit {
       return { ok: false, error: String(e) };
     }
   }
+
+  // Read raw audit log content
+  async readRaw(): Promise<string> {
+    await this.init();
+    try {
+      const data = await fs.readFile(Audit.AUDIT_FILE, 'utf8');
+      return data;
+    } catch (e) {
+      // Return empty string if file missing
+      return '';
+    }
+  }
+
+  // Return the last N audit lines (most recent first if requested)
+  async tailLines(n: number = 100): Promise<string[]> {
+    const data = await this.readRaw();
+    if (!data) return [];
+    const lines = data.split(/\r?\n/).filter((l) => l && l.trim().length > 0);
+    if (n <= 0) return lines;
+    return lines.slice(Math.max(0, lines.length - n));
+  }
 }
 
 export default Audit;
