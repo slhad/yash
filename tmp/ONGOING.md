@@ -100,5 +100,12 @@ Next (candidate) tasks
 - Implement /api/metrics endpoint returning metrics.getAll() in JSON (easy).
 - Add README examples for CI usage (low).
 
+Done this turn
+- Implemented /api/metrics endpoint returning metrics.getAll() in JSON at GET /api/metrics.
+
+Next (candidate) tasks
+- Add README examples for CI usage (low).
+- Consider adding authentication/ACL for sensitive metrics (low).
+
 Notes
 - tmp/ is gitignored; file created to satisfy the workflow requirement. Will be force-added to commit per instruction.

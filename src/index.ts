@@ -130,6 +130,20 @@ Bun.serve({
         );
       },
     },
+    '/api/metrics': {
+      GET: () => {
+        // Return the full metrics snapshot collected in-memory. Consumers (CI or local)
+        // can poll this endpoint to retrieve counters, gauges, and timestamps.
+        const metricsModule = require('./utils/metrics');
+        const snapshot =
+          metricsModule && metricsModule.metrics && metricsModule.metrics.getAll
+            ? metricsModule.metrics.getAll()
+            : {};
+        return new Response(JSON.stringify(snapshot), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      },
+    },
   },
   development: {
     hmr: true,
