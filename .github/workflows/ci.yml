@@ -150,7 +150,13 @@ jobs:
               exit 1
             fi
 
+
             echo "Using pre-baked dependencies in the image; skipping in-container install"
+
+            echo "Running full test suite (bun test)"
+            # Run the full unit test suite inside the hermetic image to validate CI-like runtime.
+            # Fail the container early if tests fail (exit code 4) so CI shows a clear failure.
+            bun test --reporter=list || exit 4
 
             echo "Running Playwright webview test"
             npx playwright test e2e-tests/webview.spec.ts --reporter=list || exit 2
