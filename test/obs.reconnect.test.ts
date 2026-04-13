@@ -4,7 +4,6 @@ import { defaultLogger } from '../src/utils/logger';
 
 describe('ObsService reconnection', () => {
   test('should attempt reconnection after disconnect (using fake timers)', async () => {
-    vi.useFakeTimers();
     const loggerSpy = vi.spyOn(defaultLogger, 'info').mockImplementation(() => {});
 
     // Stub Math.random to make jitter deterministic in tests
@@ -14,8 +13,8 @@ describe('ObsService reconnection', () => {
 
     // Connect (simulated delay inside connect is 1000ms)
     const connectPromise = obsService.connect();
-    // fast-forward the connection delay
-    vi.advanceTimersByTime(1000);
+    // wait for the connection delay
+    await new Promise((resolve) => setTimeout(resolve, 1000));
     await connectPromise;
     expect(obsService.isConnected()).toBe(true);
 
@@ -29,14 +28,14 @@ describe('ObsService reconnection', () => {
 
     // The computed delay uses full jitter: delay = random() * base * multiplier^attempt
     // With Math.random() stubbed to 0.5, and base 30000, the delay will be 15000ms.
-    vi.advanceTimersByTime(15000);
+    await new Promise((resolve) => setTimeout(resolve, 15000 + 50));
 
     // The reconnection attempt logs a message before calling connect
     const calls = loggerSpy.mock.calls.map((c) => c[0] as string);
     expect(calls.some((s) => s.includes('Attempting to reconnect to OBS...'))).toBe(true);
 
-    // The reconnection's connect call uses a 1000ms delay; advance it and allow promise resolution
-    vi.advanceTimersByTime(1000);
+    // The reconnection's connect call uses a 1000ms delay; wait for it and allow promise resolution
+    await new Promise((resolve) => setTimeout(resolve, 1000 + 20));
     // Give promise microtasks a chance to run
     await Promise.resolve();
 
@@ -44,6 +43,5 @@ describe('ObsService reconnection', () => {
 
     mathRandomSpy.mockRestore();
     loggerSpy.mockRestore();
-    vi.useRealTimers();
   });
 });

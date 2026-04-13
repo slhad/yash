@@ -4,8 +4,7 @@ import { defaultLogger } from '../src/utils/logger';
 
 describe('ObsService maxAttempts', () => {
   test('stops retrying after maxAttempts and emits event', async () => {
-    vi.useFakeTimers();
-
+    // Use real timers to avoid CI flakiness
     const loggerSpy = vi.spyOn(defaultLogger, 'info').mockImplementation(() => {});
 
     class AlwaysFailObs extends ObsService {
@@ -27,16 +26,12 @@ describe('ObsService maxAttempts', () => {
 
     // advance through attempts: each attempt schedules next with base*2^(attempt-1)
     // We use Math.random = 1 implicitly in production randomness; just advance a safe amount
-    for (let i = 0; i < maxAttempts + 2; i++) {
-      vi.advanceTimersByTime(baseMs * Math.pow(2, i) + 1);
-      // allow microtasks
-      // eslint-disable-next-line no-await-in-loop
-      await Promise.resolve();
-    }
+    // Advance time by waiting real time; compute a safe total timeout
+    const totalWait = baseMs * Math.pow(2, maxAttempts + 1) + 200;
+    await new Promise((resolve) => setTimeout(resolve, totalWait));
 
     expect(emitted).toBe(true);
 
     loggerSpy.mockRestore();
-    vi.useRealTimers();
   });
 });

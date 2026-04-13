@@ -4,8 +4,7 @@ import { defaultLogger } from '../src/utils/logger';
 
 describe('ObsService backoff', () => {
   test('exponential backoff increases delay between attempts (deterministic jitter)', async () => {
-    vi.useFakeTimers();
-
+    // Use real timers in CI-friendly tests.
     // Spy on logger to capture scheduled delay messages
     const loggerSpy = vi.spyOn(defaultLogger, 'info').mockImplementation(() => {});
 
@@ -39,8 +38,8 @@ describe('ObsService backoff', () => {
     expect(firstAttempt).toBe(1);
     expect(firstDelay).toBe(baseMs); // with random=1 delay == base
 
-    // Advance timers by the first delay to trigger the first attempt (which will fail)
-    vi.advanceTimersByTime(firstDelay);
+    // Wait for the scheduled attempt to fire (add a small margin)
+    await new Promise((resolve) => setTimeout(resolve, firstDelay + 20));
     // allow promise microtasks to run so the .catch handler schedules next attempt
     await Promise.resolve();
 
@@ -62,6 +61,5 @@ describe('ObsService backoff', () => {
     // cleanup
     randomSpy.mockRestore();
     loggerSpy.mockRestore();
-    vi.useRealTimers();
   });
 });
