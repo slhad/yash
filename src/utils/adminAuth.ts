@@ -113,3 +113,28 @@ export async function authorizeAdmin(req: Request): Promise<AuthResult> {
 }
 
 export default { authorizeAdmin };
+
+// Check whether the provided auth result has the requested role.
+export async function hasAdminRole(auth: AuthResult, role: string): Promise<boolean> {
+  try {
+    if (!auth || !(auth as any).ok) return false;
+    const method = (auth as any).method || 'none';
+    // If ADMIN_TOKEN was used or no admin token configured (dev), treat as allowed.
+    if (method === 'admin-token' || method === 'none') return true;
+    const adminKeyId = (auth as any).adminKeyId;
+    if (!adminKeyId) return false;
+    const svc = new AdminService();
+    await svc.init();
+    return svc.hasRole(adminKeyId, role);
+  } catch (e) {
+    defaultLogger.warn('hasAdminRole failed', e);
+    return false;
+  }
+}
+
+export async function hasAnyAdminRole(auth: AuthResult, roles: string[]): Promise<boolean> {
+  for (const r of roles) {
+    if (await hasAdminRole(auth, r)) return true;
+  }
+  return false;
+}

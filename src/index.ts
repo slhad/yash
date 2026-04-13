@@ -208,6 +208,23 @@ Bun.serve({
         const body = await req.json().catch(() => ({}));
         const label = body?.label;
         const roles = Array.isArray(body?.roles) ? body.roles : undefined;
+
+        // Require 'admin' role to create keys, unless ADMIN_TOKEN was used.
+        try {
+          const { hasAdminRole } = require('./utils/adminAuth');
+          const allowed = await hasAdminRole(auth, 'admin');
+          if (!allowed) {
+            return new Response(JSON.stringify({ error: 'forbidden' }), {
+              status: 403,
+              headers: { 'Content-Type': 'application/json' },
+            });
+          }
+        } catch (e) {
+          return new Response(JSON.stringify({ error: 'forbidden' }), {
+            status: 403,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
         await adminService.init();
         const created = await adminService.createKey(label, roles);
 
@@ -256,7 +273,24 @@ Bun.serve({
             status: auth.status,
             headers: { 'Content-Type': 'application/json' },
           });
-
+        // Enforce RBAC: only keys with 'admin' role (or ADMIN_TOKEN) may revoke keys.
+        try {
+          // Import here to avoid circular issues
+          const { hasAdminRole } = require('./utils/adminAuth');
+          const okRole = await hasAdminRole(auth, 'admin');
+          if (!okRole) {
+            return new Response(JSON.stringify({ error: 'forbidden' }), {
+              status: 403,
+              headers: { 'Content-Type': 'application/json' },
+            });
+          }
+        } catch (e) {
+          // If role check fails unexpectedly, deny for safety
+          return new Response(JSON.stringify({ error: 'forbidden' }), {
+            status: 403,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
         const body = await req.json().catch(() => ({}));
         const id = body?.id;
         if (!id)
@@ -287,6 +321,97 @@ Bun.serve({
         return new Response(JSON.stringify({ success: ok }), {
           headers: { 'Content-Type': 'application/json' },
         });
+      },
+    },
+    '/api/admin/keys/update-roles': {
+      POST: async (req) => {
+        const auth = await authorizeAdmin(req);
+        if (!auth.ok)
+          return new Response(JSON.stringify(auth.body), {
+            status: auth.status,
+            headers: { 'Content-Type': 'application/json' },
+          });
+
+        try {
+          const { hasAdminRole } = require('./utils/adminAuth');
+          const allowed = await hasAdminRole(auth, 'admin');
+          if (!allowed) {
+            return new Response(JSON.stringify({ error: 'forbidden' }), {
+              status: 403,
+              headers: { 'Content-Type': 'application/json' },
+            });
+          }
+        } catch (e) {
+          return new Response(JSON.stringify({ error: 'forbidden' }), {
+            status: 403,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+
+        const body = await req.json().catch(() => ({}));
+        const id = body?.id;
+        const roles = Array.isArray(body?.roles) ? body.roles : null;
+        if (!id || !roles)
+          return new Response(JSON.stringify({ error: 'id and roles required' }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json' },
+          });
+
+        await adminService.init();
+        const keys = adminService.listKeys();
+        const found = keys.find((k: any) => k.id === id);
+        if (!found)
+          return new Response(JSON.stringify({ error: 'not found' }), {
+            status: 404,
+            headers: { 'Content-Type': 'application/json' },
+          });
+
+        // Update is done by directly mutating the persisted file via AdminService internals
+        try {
+          // Load, modify, and save
+          // eslint-disable-next-line @typescript-eslint/no-var-requires
+          const AdminSvc = require('./services/admin.service').default;
+          const svc = new AdminSvc();
+          await svc.init();
+          // Directly access internal map; AdminService does not expose update API yet
+          // This is an internal operation — keep it cautious.
+          const internal: any = (svc as any).keys;
+          if (!internal.has(id)) {
+            return new Response(JSON.stringify({ error: 'not found' }), {
+              status: 404,
+              headers: { 'Content-Type': 'application/json' },
+            });
+          }
+          const obj = internal.get(id);
+          obj.roles = roles;
+          await (svc as any).save();
+
+          // Audit the change
+          try {
+            const Audit = require('./utils/audit').default;
+            const audit = new Audit();
+            await audit.append('admin-key-roles-updated', {
+              actor: 'admin-endpoint',
+              clientIp: (auth as any).clientIp || 'unknown',
+              adminKeyId: (auth as any).adminKeyId || null,
+              method: (auth as any).method || null,
+              id,
+              roles,
+            });
+          } catch (e) {
+            defaultLogger.info('Audit append failed (non-fatal):', e);
+          }
+
+          return new Response(JSON.stringify({ success: true }), {
+            headers: { 'Content-Type': 'application/json' },
+          });
+        } catch (e) {
+          defaultLogger.error('Failed to update key roles', e);
+          return new Response(JSON.stringify({ error: 'failed' }), {
+            status: 500,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
       },
     },
     '/api/admin/export-key': {
