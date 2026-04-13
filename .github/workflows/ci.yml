@@ -121,9 +121,11 @@ jobs:
 
           # Run container as current host user so artifacts written into the mounted
           # tmp directory are owned by the runner and can be uploaded as artifacts.
+          # Also pass HOST_UID/HOST_GID into the container so the verification
+          # script can attempt a chown when appropriate.
           # The Docker image builds dependencies (bun install + Playwright) at image build
           # time to speed up CI; do not reinstall inside the container here.
-          docker run --rm -e RUN_PLAYWRIGHT=1 -v "${{ github.workspace }}/tmp:/app/tmp" --user "$(id -u):$(id -g)" yash-ci:latest /bin/bash -lc '
+          docker run --rm -e RUN_PLAYWRIGHT=1 -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" -v "${{ github.workspace }}/tmp:/app/tmp" --user "$(id -u):$(id -g)" yash-ci:latest /bin/bash -lc '
             set -euo pipefail
 
             echo "Starting server inside container"
