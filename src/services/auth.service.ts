@@ -28,9 +28,16 @@ export class AuthService {
 
   private tokens: Map<string, TokenData> = new Map();
   private refreshInterval: NodeJS.Timeout | null = null;
+  // Promise that resolves when async initialization (key + tokens load) completes
+  private readyPromise: Promise<void>;
+  private readyResolve?: () => void;
 
   // Allow optional keytar injection for testing
   constructor(keytarOverride?: any) {
+    // ready promise for callers/tests to await initialization
+    this.readyPromise = new Promise((res) => {
+      this.readyResolve = res;
+    });
     // Use environment variable, OS keyring, or persist a generated key to disk so tokens remain readable across runs.
     // In production, a proper key management system should be used instead.
     const envKey = process.env.YASH_ENCRYPTION_KEY;
@@ -48,7 +55,10 @@ export class AuthService {
         this.encryptionKey = crypto.randomBytes(32).toString('hex');
       }
       // Load tokens asynchronously after key is set
-      this.loadTokens();
+      (async () => {
+        await this.loadTokens();
+        this.readyResolve?.();
+      })();
     } else {
       // If a test injected a keytar implementation, honor it and let initEncryptionKey
       // use the provided keytar. Then run the async init flow as before.
@@ -70,7 +80,84 @@ export class AuthService {
         }
         // Load tokens after the key is initialized
         await this.loadTokens();
+        this.readyResolve?.();
       })();
+    }
+  }
+
+  /**
+   * Wait for the AuthService asynchronous initialization to complete.
+   * Useful for CLI utilities or tests that need tokens/key to be ready.
+   */
+  async waitForReady(timeoutMs: number = 5000): Promise<void> {
+    return await Promise.race([
+      this.readyPromise,
+      new Promise((_, rej) =>
+        setTimeout(() => rej(new Error('AuthService init timeout')), timeoutMs),
+      ),
+    ]);
+  }
+
+  /**
+   * Migrate tokens currently stored in file-based tokens.json into the OS keyring
+   * (keytar) if available. Returns true if migration occurred.
+   */
+  async migrateTokensToKeyring(): Promise<boolean> {
+    // Ensure initialization completed so encryptionKey/tokens are loaded
+    try {
+      await this.waitForReady(5000);
+    } catch (err) {
+      defaultLogger.info('AuthService initialization did not complete before migration attempt');
+      // proceed anyway; methods below will handle missing state
+    }
+
+    // Ensure keytar is available
+    if (!this.keytar || typeof this.keytar.setPassword !== 'function') {
+      try {
+        // Dynamic import optional dependency
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const keytar = await import('keytar');
+        this.keytar = keytar;
+        this.useKeytar = true;
+      } catch (err) {
+        defaultLogger.info('OS keyring (keytar) not available; cannot migrate tokens');
+        return false;
+      }
+    }
+
+    // If still no keytar API, bail
+    if (!this.keytar || typeof this.keytar.setPassword !== 'function') {
+      return false;
+    }
+
+    try {
+      // If there are already credentials in keyring, don't overwrite
+      if (typeof this.keytar.findCredentials === 'function') {
+        const existing = await this.keytar.findCredentials('yash.tokens');
+        if (Array.isArray(existing) && existing.length > 0) {
+          defaultLogger.info('Keyring already contains token entries; skipping migration');
+          return false;
+        }
+      }
+
+      for (const [platform, token] of this.tokens.entries()) {
+        const encrypted = this.encryptToken(token);
+        await this.keytar.setPassword('yash.tokens', platform, JSON.stringify(encrypted));
+      }
+
+      // Remove file-based tokens.json if present
+      try {
+        await fs.unlink(AuthService.TOKENS_FILE);
+        defaultLogger.info('Removed tokens.json after migration');
+      } catch (err) {
+        // ignore if file not present or removal failed
+      }
+
+      defaultLogger.info('Migrated tokens.json entries into OS keyring');
+      return true;
+    } catch (err) {
+      defaultLogger.warn('Failed to migrate tokens to keyring', err);
+      return false;
     }
   }
 

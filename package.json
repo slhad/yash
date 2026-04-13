@@ -5,6 +5,7 @@
   "private": true,
   "scripts": {
     "start": "bun run src/index.ts",
+    "migrate:tokens": "bun run scripts/migrate_tokens.ts",
     "pretest": "bun lint",
     "test": "bun test",
     "test:e2e": "bun run src/index.ts &",
