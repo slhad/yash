@@ -56,7 +56,12 @@ describe('ObsService backoff', () => {
     // The next schedule attempt should have incremented the attempt counter; poll
     // the instance state by scheduling a quick observer run: call scheduleReconnectAttempt
     // again only if there is no timer active (it is safe for tests).
-    const info2 = (obs as any).scheduleReconnectAttempt();
+    // Prefer reading lastScheduledInfo which is set by the instance when
+    // scheduling occurs. This is more reliable than parsing logs across
+    // concurrent tests.
+    const info2 = (obs as any).getLastScheduledInfo
+      ? (obs as any).getLastScheduledInfo()
+      : (obs as any).scheduleReconnectAttempt();
     // If scheduleReconnectAttempt returned info, assert on it; otherwise ensure
     // we observed at least two scheduling logs via the spy.
     if (info2) {

@@ -41,6 +41,12 @@ export class ObsService {
   private statusCallbacks: ((connected: boolean) => void)[] = [];
   private messageCallbacks: ((message: any) => void)[] = [];
 
+  // Last scheduled info (used by tests to observe backoff behavior)
+  private lastScheduledInfo: { delay: number; attempt: number } | null = null;
+  // History of scheduled attempts (keeps past scheduling entries so tests
+  // can reliably inspect previous attempt values even if scheduler advanced)
+  private scheduledHistory: Array<{ delay: number; attempt: number }> = [];
+
   // add optional `useWebSocketTransport` flag as fourth argument (default false)
   constructor(
     host?: string,
@@ -388,6 +394,10 @@ export class ObsService {
 
     defaultLogger.info(`Scheduling reconnection attempt in ${delay}ms (attempt ${attemptNum})`);
 
+    // Record last scheduled info so tests can assert deterministic backoff
+    const entry = { delay, attempt: attemptNum };
+    this.lastScheduledInfo = entry;
+    this.scheduledHistory.push(entry);
     this.reconnectTimer = setTimeout(() => {
       // clear the timer handle first
       this.reconnectTimer = null;
@@ -438,6 +448,16 @@ export class ObsService {
 
     // Return scheduling info to allow tests to assert on computed delay/attempt
     return { delay, attempt: attemptNum };
+  }
+
+  // Expose last scheduled info for tests
+  getLastScheduledInfo(): { delay: number; attempt: number } | null {
+    return this.lastScheduledInfo;
+  }
+
+  // Return a copy of the scheduled history
+  getScheduledHistory(): Array<{ delay: number; attempt: number }> {
+    return this.scheduledHistory.slice();
   }
 
   /**
