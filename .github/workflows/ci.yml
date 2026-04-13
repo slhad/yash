@@ -207,6 +207,13 @@ jobs:
             tmp/ci-env.txt
             tmp/**
 
+      - name: Annotate artifact ownership mismatches
+        if: always()
+        run: |
+          echo "Annotating artifact ownership mismatches in workflow logs"
+          chmod +x scripts/ci/annotate_artifact_ownership.sh || true
+          ./scripts/ci/annotate_artifact_ownership.sh tmp/artifact-ownership-report.txt "$(id -u)" "$(id -g)" || true
+
   vhs:
     name: Record TUI VHS demo
     needs: e2e
