@@ -8,6 +8,7 @@ import { StreamService } from './services/stream.service';
 import { defaultLogger } from './utils/logger';
 import { AuthService } from './services/auth.service';
 import AdminService from './services/admin.service';
+import { authorizeAdmin } from './utils/adminAuth';
 import { apiMetricsHandler, prometheusMetricsHandler } from './utils/metricsHandlers';
 
 export const youtube = new YouTubeProvider();
@@ -145,24 +146,14 @@ Bun.serve({
     // header Authorization: Bearer <ADMIN_TOKEN>.
     '/api/admin/rotate-key': {
       POST: async (req) => {
-        const admin = process.env.ADMIN_TOKEN;
-        if (!admin) {
-          return new Response(JSON.stringify({ error: 'admin token not configured' }), {
-            status: 403,
+        // Centralize admin authorization checks (IP allowlist, rate limiting,
+        // and ADMIN_TOKEN when configured).
+        const auth = await authorizeAdmin(req);
+        if (!auth.ok)
+          return new Response(JSON.stringify(auth.body), {
+            status: auth.status,
             headers: { 'Content-Type': 'application/json' },
           });
-        }
-
-        const authHeader = (req.headers.get('authorization') || '').trim();
-        if (
-          !authHeader.toLowerCase().startsWith('bearer ') ||
-          authHeader.slice(7).trim() !== admin
-        ) {
-          return new Response(JSON.stringify({ error: 'unauthorized' }), {
-            status: 401,
-            headers: { 'Content-Type': 'application/json' },
-          });
-        }
 
         let body = null;
         try {
@@ -178,8 +169,12 @@ Bun.serve({
             // eslint-disable-next-line @typescript-eslint/no-var-requires
             const Audit = require('./utils/audit').default;
             const audit = new Audit();
-            // Do not record secrets in audit payload; include actor and note
-            await audit.append('rotate-key', { actor: 'admin-endpoint', note: 'rotation invoked' });
+            // Do not record secrets in audit payload; include actor and caller IP
+            await audit.append('rotate-key', {
+              actor: 'admin-endpoint',
+              clientIp: (auth as any).clientIp || 'unknown',
+              note: 'rotation invoked',
+            });
           } catch (e) {
             // Non-fatal: audit best-effort
             defaultLogger.info('Audit append failed (non-fatal):', e);
@@ -199,44 +194,47 @@ Bun.serve({
     },
     '/api/admin/keys': {
       POST: async (req) => {
-        // Create new admin key (returns plaintext token once)
-        const admin = process.env.ADMIN_TOKEN;
-        // allow local dev if ADMIN_TOKEN not set: require no auth
-        if (admin) {
-          const authHeader = (req.headers.get('authorization') || '').trim();
-          if (
-            !authHeader.toLowerCase().startsWith('bearer ') ||
-            authHeader.slice(7).trim() !== admin
-          ) {
-            return new Response(JSON.stringify({ error: 'unauthorized' }), {
-              status: 401,
-              headers: { 'Content-Type': 'application/json' },
-            });
-          }
-        }
+        // Create new admin key (returns plaintext token once). Use centralized
+        // authorization to enforce allowlist/rate-limiting.
+        const auth = await authorizeAdmin(req);
+        if (!auth.ok)
+          return new Response(JSON.stringify(auth.body), {
+            status: auth.status,
+            headers: { 'Content-Type': 'application/json' },
+          });
 
         const body = await req.json().catch(() => ({}));
         const label = body?.label;
         await adminService.init();
         const created = await adminService.createKey(label);
+
+        // Audit creation (do not include the plaintext token)
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-var-requires
+          const Audit = require('./utils/audit').default;
+          const audit = new Audit();
+          await audit.append('admin-key-created', {
+            actor: 'admin-endpoint',
+            clientIp: (auth as any).clientIp || 'unknown',
+            id: created.id,
+            label: label || null,
+          });
+        } catch (e) {
+          defaultLogger.info('Audit append failed (non-fatal):', e);
+        }
+
         return new Response(JSON.stringify(created), {
           headers: { 'Content-Type': 'application/json' },
         });
       },
       GET: async (req) => {
-        const admin = process.env.ADMIN_TOKEN;
-        if (admin) {
-          const authHeader = (req.headers.get('authorization') || '').trim();
-          if (
-            !authHeader.toLowerCase().startsWith('bearer ') ||
-            authHeader.slice(7).trim() !== admin
-          ) {
-            return new Response(JSON.stringify({ error: 'unauthorized' }), {
-              status: 401,
-              headers: { 'Content-Type': 'application/json' },
-            });
-          }
-        }
+        const auth = await authorizeAdmin(req);
+        if (!auth.ok)
+          return new Response(JSON.stringify(auth.body), {
+            status: auth.status,
+            headers: { 'Content-Type': 'application/json' },
+          });
+
         await adminService.init();
         const list = adminService.listKeys();
         return new Response(JSON.stringify({ keys: list }), {
@@ -246,19 +244,13 @@ Bun.serve({
     },
     '/api/admin/keys/revoke': {
       POST: async (req) => {
-        const admin = process.env.ADMIN_TOKEN;
-        if (admin) {
-          const authHeader = (req.headers.get('authorization') || '').trim();
-          if (
-            !authHeader.toLowerCase().startsWith('bearer ') ||
-            authHeader.slice(7).trim() !== admin
-          ) {
-            return new Response(JSON.stringify({ error: 'unauthorized' }), {
-              status: 401,
-              headers: { 'Content-Type': 'application/json' },
-            });
-          }
-        }
+        const auth = await authorizeAdmin(req);
+        if (!auth.ok)
+          return new Response(JSON.stringify(auth.body), {
+            status: auth.status,
+            headers: { 'Content-Type': 'application/json' },
+          });
+
         const body = await req.json().catch(() => ({}));
         const id = body?.id;
         if (!id)
@@ -268,6 +260,22 @@ Bun.serve({
           });
         await adminService.init();
         const ok = await adminService.revokeKey(id);
+
+        // Audit revocation (best-effort)
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-var-requires
+          const Audit = require('./utils/audit').default;
+          const audit = new Audit();
+          await audit.append('admin-key-revoked', {
+            actor: 'admin-endpoint',
+            clientIp: (auth as any).clientIp || 'unknown',
+            id,
+            success: !!ok,
+          });
+        } catch (e) {
+          defaultLogger.info('Audit append failed (non-fatal):', e);
+        }
+
         return new Response(JSON.stringify({ success: ok }), {
           headers: { 'Content-Type': 'application/json' },
         });
@@ -275,23 +283,12 @@ Bun.serve({
     },
     '/api/admin/export-key': {
       POST: async (req) => {
-        const admin = process.env.ADMIN_TOKEN;
-        if (!admin) {
-          return new Response(JSON.stringify({ error: 'admin token not configured' }), {
-            status: 403,
+        const auth = await authorizeAdmin(req);
+        if (!auth.ok)
+          return new Response(JSON.stringify(auth.body), {
+            status: auth.status,
             headers: { 'Content-Type': 'application/json' },
           });
-        }
-        const authHeader = (req.headers.get('authorization') || '').trim();
-        if (
-          !authHeader.toLowerCase().startsWith('bearer ') ||
-          authHeader.slice(7).trim() !== admin
-        ) {
-          return new Response(JSON.stringify({ error: 'unauthorized' }), {
-            status: 401,
-            headers: { 'Content-Type': 'application/json' },
-          });
-        }
 
         let body = null;
         try {
@@ -314,6 +311,7 @@ Bun.serve({
               const audit = new Audit();
               await audit.append('export-tokens', {
                 actor: 'admin-endpoint',
+                clientIp: (auth as any).clientIp || 'unknown',
                 note: 'exported encrypted tokens',
               });
             } catch (e) {
@@ -331,6 +329,7 @@ Bun.serve({
             const audit = new Audit();
             await audit.append('export-key', {
               actor: 'admin-endpoint',
+              clientIp: (auth as any).clientIp || 'unknown',
               note: 'exported encryption key (encrypted)',
             });
           } catch (e) {
@@ -351,22 +350,12 @@ Bun.serve({
     },
     '/api/admin/audit/tail': {
       GET: async (req) => {
-        const admin = process.env.ADMIN_TOKEN;
-        if (!admin)
-          return new Response(JSON.stringify({ error: 'admin token not configured' }), {
-            status: 403,
+        const auth = await authorizeAdmin(req);
+        if (!auth.ok)
+          return new Response(JSON.stringify(auth.body), {
+            status: auth.status,
             headers: { 'Content-Type': 'application/json' },
           });
-        const authHeader = (req.headers.get('authorization') || '').trim();
-        if (
-          !authHeader.toLowerCase().startsWith('bearer ') ||
-          authHeader.slice(7).trim() !== admin
-        ) {
-          return new Response(JSON.stringify({ error: 'unauthorized' }), {
-            status: 401,
-            headers: { 'Content-Type': 'application/json' },
-          });
-        }
 
         // Optional query param ?lines=N
         try {
@@ -375,6 +364,18 @@ Bun.serve({
           const Audit = require('./utils/audit').default;
           const audit = new Audit();
           const tail = await audit.tailLines(lines);
+
+          // Audit that an audit tail was viewed (do not include the content)
+          try {
+            await audit.append('audit-tail-viewed', {
+              actor: 'admin-endpoint',
+              clientIp: (auth as any).clientIp || 'unknown',
+              linesRequested: lines,
+            });
+          } catch (e) {
+            defaultLogger.info('Audit append failed (non-fatal):', e);
+          }
+
           return new Response(JSON.stringify({ lines: tail }), {
             headers: { 'Content-Type': 'application/json' },
           });

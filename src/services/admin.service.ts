@@ -97,6 +97,18 @@ export class AdminService {
     return false;
   }
 
+  // Return the key id associated with the provided plaintext token, or null
+  // if none matches. This avoids exposing token plaintexts and only returns
+  // the metadata identifier.
+  getKeyIdByToken(token: string): string | null {
+    if (!token) return null;
+    const h = this.hmac(token);
+    for (const [id, k] of this.keys.entries()) {
+      if (!k.revoked && k.hash === h) return id;
+    }
+    return null;
+  }
+
   listKeys(): Array<{ id: string; label?: string; createdAt: number; revoked: boolean }> {
     return Array.from(this.keys.values()).map((k) => ({
       id: k.id,
