@@ -214,6 +214,15 @@ jobs:
           chmod +x scripts/ci/annotate_artifact_ownership.sh || true
           ./scripts/ci/annotate_artifact_ownership.sh tmp/artifact-ownership-report.txt "$(id -u)" "$(id -g)" || true
 
+      - name: Post PR comment for artifact ownership issues
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Posting PR comment for artifact ownership mismatches (if PR context present)"
+          chmod +x scripts/ci/post_artifact_ownership_comment.sh || true
+          ./scripts/ci/post_artifact_ownership_comment.sh tmp/artifact-ownership-report.txt "$(id -u)" "$(id -g)" || true
+
   vhs:
     name: Record TUI VHS demo
     needs: e2e
