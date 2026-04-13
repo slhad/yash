@@ -17,8 +17,12 @@ Next steps (ongoing) - do not commit
     - Consider adding gitleaks or similar as a required check in CI for PRs.
 
 4) Ops / cleanup:
-   - Coordinate secret rotation for config.json present in working tree.
-   - Optionally run scripts/cleanup/remove-config-history.sh with team agreement.
+    - Coordinate secret rotation for config.json present in working tree.
+    - Optionally run scripts/cleanup/remove-config-history.sh with team agreement.
+    - A non-destructive preview helper was added: scripts/cleanup/preview-remove-config.sh
+      which creates a mirror clone and runs the filter in the mirror if git-filter-repo is
+      available. Use it to validate what history will look like before performing the
+      destructive rewrite.
 
 5) Followups (future):
    - Consider integrating mutual TLS or other network-level protections for admin endpoints.
