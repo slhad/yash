@@ -10,13 +10,13 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
             * displayed: on/off
             * mode: per platform/cumulative/both
         * Window (as sidebar) showing events/triggers/stuff with platform prefix (if more than one)
-        * Window showing messages with plaform as header (if more than one)
-        * Window showing all messages with plaform as prefix (if more than one)
+        * Window showing messages with platform as header (if more than one)
+        * Window showing all messages with platform as prefix (if more than one)
         * Element : Platform connected as Status bar showing number of viewers between "()" if activated in "Number of viewers" element
         * Message box
             * position : top/bottom/hide
     * Command /connect [youtube|twitch|kick] to launch connection to platform with auth+save secrets in config
-    * Message box to send message to [all|youtube|twitch|kick] platform and receive command "/" (without sending to plaforms)
+    * Message box to send message to [all|youtube|twitch|kick] platform and receive command "/" (without sending to platforms)
 - Usable webviews
     * Route to show unified view of all chats
     * Route to show view of chats side by side with config options to enable any platform (saved in browser)
