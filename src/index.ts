@@ -171,6 +171,18 @@ Bun.serve({
 
         try {
           await authService.rotateEncryptionKey(body?.key);
+          // Audit the operation if audit helper is available
+          try {
+            // eslint-disable-next-line @typescript-eslint/no-var-requires
+            const Audit = require('./utils/audit').default;
+            const audit = new Audit();
+            // Do not record secrets in audit payload; include actor and note
+            await audit.append('rotate-key', { actor: 'admin-endpoint', note: 'rotation invoked' });
+          } catch (e) {
+            // Non-fatal: audit best-effort
+            defaultLogger.info('Audit append failed (non-fatal):', e);
+          }
+
           return new Response(JSON.stringify({ success: true }), {
             headers: { 'Content-Type': 'application/json' },
           });

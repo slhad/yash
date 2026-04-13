@@ -94,13 +94,35 @@ export class Audit {
   }
 
   // Append an audited event. Does not include secrets in payload.
+  // Implements a chained HMAC where each entry's signature covers the
+  // previous entry's signature plus the JSON body. This makes the log
+  // tamper-evident: altering an earlier line invalidates subsequent signatures.
   async append(eventType: string, payload: any): Promise<void> {
     await this.init();
     const obj = { ts: Date.now(), type: eventType, payload };
     const body = JSON.stringify(obj);
+
+    // Read the previous signature if present
+    let prevSig = '';
+    try {
+      const data = await fs.readFile(Audit.AUDIT_FILE, 'utf8');
+      const lines = data
+        .trim()
+        .split(/\r?\n/)
+        .filter((l) => l && l.trim().length > 0);
+      if (lines.length > 0) {
+        const last = lines[lines.length - 1];
+        const idx = last.lastIndexOf('.');
+        if (idx !== -1) prevSig = last.substring(idx + 1).trim();
+      }
+    } catch (e) {
+      // File missing or unreadable -> treat as empty chain
+      prevSig = '';
+    }
+
     const hmac = crypto
       .createHmac('sha256', this.key as string)
-      .update(body)
+      .update(prevSig + body)
       .digest('hex');
     const line = `${body}.${hmac}\n`;
     try {
@@ -112,15 +134,41 @@ export class Audit {
     }
   }
 
-  // Verify a single audit log line using the currently-initialized audit key
-  verifyLine(line: string): boolean {
+  // Verify a single audit log line given a previous signature value.
+  // This is synchronous and requires the audit key to be initialized.
+  verifyLine(line: string, prevSig: string = ''): boolean {
     if (!this.key) throw new Error('audit key not initialized');
     const idx = line.lastIndexOf('.');
     if (idx === -1) return false;
     const json = line.substring(0, idx);
     const sig = line.substring(idx + 1).trim();
-    const expected = crypto.createHmac('sha256', this.key).update(json).digest('hex');
+    const expected = crypto
+      .createHmac('sha256', this.key)
+      .update(prevSig + json)
+      .digest('hex');
     return sig === expected;
+  }
+
+  // Verify the entire audit file chain. Returns an object describing the
+  // result and the index of the first bad line (if any).
+  async verifyAll(): Promise<{ ok: boolean; badIndex?: number; error?: string }> {
+    await this.init();
+    try {
+      const data = await fs.readFile(Audit.AUDIT_FILE, 'utf8');
+      const lines = data.split(/\r?\n/).filter((l) => l && l.trim().length > 0);
+      let prevSig = '';
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        if (!this.verifyLine(line, prevSig)) {
+          return { ok: false, badIndex: i, error: 'signature mismatch' };
+        }
+        const idx = line.lastIndexOf('.');
+        prevSig = line.substring(idx + 1).trim();
+      }
+      return { ok: true };
+    } catch (e: any) {
+      return { ok: false, error: String(e) };
+    }
   }
 }
 
