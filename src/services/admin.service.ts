@@ -487,6 +487,26 @@ export class AdminService {
     return roles.includes(role);
   }
 
+  /**
+   * Update fields on an existing admin key. This is the supported public API
+   * to modify metadata (label, roles, revoked flag) without touching
+   * internal maps from outside the service.
+   */
+  async updateKey(
+    id: string,
+    updates: { label?: string; roles?: string[]; revoked?: boolean; replaceHash?: string },
+  ): Promise<boolean> {
+    const k = this.keys.get(id);
+    if (!k) return false;
+    if (typeof updates.label !== 'undefined') k.label = updates.label;
+    if (Array.isArray(updates.roles)) k.roles = updates.roles;
+    if (typeof updates.revoked !== 'undefined') k.revoked = updates.revoked;
+    if (typeof updates.replaceHash === 'string' && updates.replaceHash.length > 0)
+      k.hash = updates.replaceHash;
+    await this.save();
+    return true;
+  }
+
   async revokeKey(id: string): Promise<boolean> {
     const k = this.keys.get(id);
     if (!k) return false;
