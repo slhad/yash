@@ -20,9 +20,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
   && apt-get update && apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*
 
-# Install Bun
-RUN curl -fsSL https://bun.sh/install | bash -s -- -y
-ENV PATH="/root/.bun/bin:${PATH}"
+# Install Bun and make it available system-wide so non-root users can run it.
+# The bun installer writes into /root/.bun by default; create a symlink into
+# /usr/local/bin so containers run with --user can still execute bun.
+RUN curl -fsSL https://bun.sh/install | bash -s -- -y \
+  && ln -sf /root/.bun/bin/bun /usr/local/bin/bun \
+  && chmod +x /usr/local/bin/bun
+ENV PATH="/usr/local/bin:/root/.bun/bin:${PATH}"
 
 WORKDIR /app
 
