@@ -31,3 +31,34 @@ Notes:
   ownership or if chown inside the container was not permitted.
 - tmp/ is gitignored; this file is intentionally local-only to serve as the
   single-follow-up journal for the current iteration.
+
+Additional verification steps (non-test, lowest-risk):
+
+1. Verify entrypoint environment propagation for non-root runs: build image and run a quick container that prints PATH and PLAYWRIGHT_BROWSERS_PATH without running tests.
+
+   Example:
+   docker build --build-arg HOST_UID=$(id -u) --build-arg HOST_GID=$(id -g) -t yash-ci:local .
+   docker run --rm --user $(id -u):$(id -g) -v $(pwd)/tmp:/app/tmp yash-ci:local /usr/local/bin/ci-entrypoint.sh bash -lc 'echo PATH=$PATH; echo PLAYWRIGHT_BROWSERS_PATH=$PLAYWRIGHT_BROWSERS_PATH; which bun || true; bun --version 2>/dev/null || true'
+
+2. Inspect tmp/ after the quick run to confirm scripts can execute (no tests run): ls -la tmp && cat tmp/ci-env.txt || true
+
+Record results locally in tmp/ONGOING.md after verification.
+
+Easiest follow-up (exclude running tests):
+
+Make all CI helper scripts executable and perform a quick shell lint locally.
+This is low-risk, doesn't run the test-suite, and reduces friction when
+reproducing runs locally or in CI.
+
+Steps:
+1. Make helper scripts executable locally:
+   chmod +x scripts/ci/*.sh
+2. (Optional) Lint the scripts using ShellCheck to catch common issues:
+   shellcheck scripts/ci/*.sh
+   - Install ShellCheck on Ubuntu: sudo apt-get update && sudo apt-get install -y shellcheck
+3. Commit permission changes (git will ignore tmp/):
+   git add -A
+   git commit -m "chore(ci): mark CI helper scripts executable; document easiest follow-up in tmp/ONGOING.md"
+4. Do not run tests as per instruction; this follow-up is limited to tooling and script hygiene.
+
+This file is intentionally gitignored; it records a local-only single-follow-up.
