@@ -103,8 +103,8 @@ export async function importKeysHandler(req: Request): Promise<Response> {
     const svc = new AdminService();
     await svc.init();
 
-    // Default behavior: if overwrite is not requested, perform a dry-run preview.
-    const dryRun = explicitDryRun !== undefined ? explicitDryRun : !overwrite;
+    // Default behavior: perform actual import by default unless dryRun=true is specified.
+    const dryRun = explicitDryRun !== undefined ? explicitDryRun : false;
 
     // Extra protection for destructive imports: require ADMIN_TOKEN (admin-token method)
     // to proceed with overwrite=true. Dry-run previews are allowed with admin keys.
