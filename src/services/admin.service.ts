@@ -19,13 +19,50 @@ export class AdminService {
   private static ADMIN_FILE = path.join(AdminService.DATA_DIR, 'admin_keys.json');
 
   private hmacKey: string;
+  private prevHmacKeys: string[] = [];
+  private hmacFromEnv: boolean = false;
   private keys: Map<string, AdminKey> = new Map();
 
   constructor(hmacKey?: string) {
-    if (hmacKey) this.hmacKey = hmacKey;
-    else if (process.env.ADMIN_HMAC_KEY) this.hmacKey = process.env.ADMIN_HMAC_KEY;
-    else if (process.env.YASH_ENCRYPTION_KEY) this.hmacKey = process.env.YASH_ENCRYPTION_KEY;
-    else this.hmacKey = crypto.randomBytes(32).toString('hex'); // ephemeral fallback
+    // Allow injecting an explicit hmac key (useful for tests). Otherwise
+    // prefer ADMIN_HMAC_KEYS (current + previous) or ADMIN_HMAC_KEY, then
+    // fall back to YASH_ENCRYPTION_KEY or generate an ephemeral key.
+    if (hmacKey) {
+      this.hmacKey = hmacKey;
+      this.hmacFromEnv = true;
+    } else if (process.env.ADMIN_HMAC_KEYS) {
+      // ADMIN_HMAC_KEYS can be JSON array or comma-separated list
+      try {
+        const parsed = JSON.parse(process.env.ADMIN_HMAC_KEYS);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          this.hmacKey = parsed[0];
+          this.prevHmacKeys = parsed.slice(1);
+          this.hmacFromEnv = true;
+        } else {
+          throw new Error('not array');
+        }
+      } catch (e) {
+        const parts = (process.env.ADMIN_HMAC_KEYS || '')
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean);
+        if (parts.length > 0) {
+          this.hmacKey = parts[0];
+          this.prevHmacKeys = parts.slice(1);
+          this.hmacFromEnv = true;
+        } else if (process.env.ADMIN_HMAC_KEY) {
+          this.hmacKey = process.env.ADMIN_HMAC_KEY;
+          this.hmacFromEnv = true;
+        } else if (process.env.YASH_ENCRYPTION_KEY) {
+          this.hmacKey = process.env.YASH_ENCRYPTION_KEY;
+        } else this.hmacKey = crypto.randomBytes(32).toString('hex');
+      }
+    } else if (process.env.ADMIN_HMAC_KEY) {
+      this.hmacKey = process.env.ADMIN_HMAC_KEY;
+      this.hmacFromEnv = true;
+    } else if (process.env.YASH_ENCRYPTION_KEY) {
+      this.hmacKey = process.env.YASH_ENCRYPTION_KEY;
+    } else this.hmacKey = crypto.randomBytes(32).toString('hex'); // ephemeral fallback
   }
 
   async init(): Promise<void> {
@@ -53,6 +90,19 @@ export class AdminService {
 
       const data = await fs.readFile(AdminService.ADMIN_FILE, 'utf8');
       const parsed = JSON.parse(data || '{}');
+      // If hmac keys were not supplied via env, read persisted hmac metadata
+      if (!this.hmacFromEnv) {
+        const hk = parsed.hmacKeys || parsed.hmac_keys || null;
+        try {
+          if (hk && typeof hk === 'object') {
+            if (hk.current) this.hmacKey = hk.current;
+            if (Array.isArray(hk.previous)) this.prevHmacKeys = hk.previous;
+          }
+        } catch (e) {
+          // ignore malformed hmacKeys section
+        }
+      }
+
       const arr = parsed.keys || [];
       for (const k of arr) {
         this.keys.set(k.id, k as AdminKey);
@@ -69,7 +119,10 @@ export class AdminService {
   private async save(): Promise<void> {
     const arr = Array.from(this.keys.values());
     try {
-      await fs.writeFile(AdminService.ADMIN_FILE, JSON.stringify({ keys: arr }, null, 2));
+      const payload: any = { keys: arr };
+      // Persist current and previous HMACs so rotate operations survive restarts
+      payload.hmacKeys = { current: this.hmacKey, previous: this.prevHmacKeys };
+      await fs.writeFile(AdminService.ADMIN_FILE, JSON.stringify(payload, null, 2));
       try {
         // enforce strict permissions if possible
         fsSync.chmodSync(AdminService.ADMIN_FILE, 0o600);
@@ -84,6 +137,21 @@ export class AdminService {
       defaultLogger.warn('AdminService failed to persist admin keys:', e);
       throw e;
     }
+  }
+
+  /**
+   * Rotate the HMAC key used for admin token hashing. Keeps the previous keys so
+   * existing tokens remain valid; stored hashes are migrated lazily on first use.
+   */
+  async rotateHmacKey(newKey?: string): Promise<string> {
+    const next = newKey || crypto.randomBytes(32).toString('hex');
+    if (this.hmacKey) {
+      this.prevHmacKeys.unshift(this.hmacKey);
+      if (this.prevHmacKeys.length > 10) this.prevHmacKeys = this.prevHmacKeys.slice(0, 10);
+    }
+    this.hmacKey = next;
+    await this.save();
+    return this.hmacKey;
   }
 
   // Best-effort helper: read admin keys from HashiCorp Vault KV v2 if configured.
@@ -165,9 +233,37 @@ export class AdminService {
 
   verifyToken(token: string): boolean {
     if (!token) return false;
-    const h = this.hmac(token);
+    const candidates = [this.hmacKey, ...this.prevHmacKeys];
     for (const k of this.keys.values()) {
-      if (!k.revoked && k.hash === h) return true;
+      if (k.revoked) continue;
+      let matched = false;
+      let matchedWithCurrent = false;
+      for (const keyCandidate of candidates) {
+        try {
+          const h = crypto.createHmac('sha256', keyCandidate).update(token).digest('hex');
+          if (h === k.hash) {
+            matched = true;
+            if (keyCandidate === this.hmacKey) matchedWithCurrent = true;
+            break;
+          }
+        } catch (e) {
+          // ignore
+        }
+      }
+      if (matched) {
+        // If matched with an older key, migrate stored hash to current key
+        if (!matchedWithCurrent) {
+          try {
+            k.hash = crypto.createHmac('sha256', this.hmacKey).update(token).digest('hex');
+            void this.save().catch((e) =>
+              defaultLogger.warn('Failed to persist migrated admin hash', e),
+            );
+          } catch (e) {
+            defaultLogger.warn('Failed to migrate admin key hash', e);
+          }
+        }
+        return true;
+      }
     }
     return false;
   }
@@ -177,9 +273,29 @@ export class AdminService {
   // the metadata identifier.
   getKeyIdByToken(token: string): string | null {
     if (!token) return null;
-    const h = this.hmac(token);
+    const candidates = [this.hmacKey, ...this.prevHmacKeys];
     for (const [id, k] of this.keys.entries()) {
-      if (!k.revoked && k.hash === h) return id;
+      if (k.revoked) continue;
+      for (const keyCandidate of candidates) {
+        try {
+          const h = crypto.createHmac('sha256', keyCandidate).update(token).digest('hex');
+          if (h === k.hash) {
+            if (keyCandidate !== this.hmacKey) {
+              try {
+                k.hash = crypto.createHmac('sha256', this.hmacKey).update(token).digest('hex');
+                void this.save().catch((e) =>
+                  defaultLogger.warn('Failed to persist migrated admin hash', e),
+                );
+              } catch (e) {
+                defaultLogger.warn('Failed to migrate admin key hash', e);
+              }
+            }
+            return id;
+          }
+        } catch (e) {
+          // ignore
+        }
+      }
     }
     return null;
   }

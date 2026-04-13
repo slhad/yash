@@ -33,6 +33,7 @@ Next steps (ongoing) - do not commit
     - Added migration helper: scripts/admin/migrate-admin-keys-to-vault.sh
       Use --preview to inspect the payload and --run with RUN_MIGRATE=1 and
       proper VAULT_* environment variables to perform the migration.
+    - Added HMAC rotation support to AdminService and a test to validate lazy migration of token hashes.
 
 5) Followups (future):
    - Consider integrating mutual TLS or other network-level protections for admin endpoints.
