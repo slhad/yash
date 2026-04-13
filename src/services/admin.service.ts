@@ -14,9 +14,15 @@ interface AdminKey {
 }
 
 export class AdminService {
-  private static DATA_DIR =
-    process.env.YASH_DATA_DIR || path.join(process.env.HOME || '.', '.yash');
-  private static ADMIN_FILE = path.join(AdminService.DATA_DIR, 'admin_keys.json');
+  // Compute data dir and admin file path at runtime so tests and processes
+  // that mutate process.env.YASH_DATA_DIR get the expected behavior.
+  private getDataDir(): string {
+    return process.env.YASH_DATA_DIR || path.join(process.env.HOME || '.', '.yash');
+  }
+
+  private getAdminFilePath(): string {
+    return path.join(this.getDataDir(), 'admin_keys.json');
+  }
 
   private hmacKey: string;
   private prevHmacKeys: string[] = [];
@@ -67,7 +73,7 @@ export class AdminService {
 
   async init(): Promise<void> {
     try {
-      await fs.mkdir(path.dirname(AdminService.ADMIN_FILE), { recursive: true });
+      await fs.mkdir(path.dirname(this.getAdminFilePath()), { recursive: true });
 
       // Try to load keys from Vault KV v2 (best-effort). If present use it,
       // otherwise fall back to file-based admin_keys.json.
@@ -81,14 +87,15 @@ export class AdminService {
         // ignore and fall back to file
       }
 
-      if (!fsSync.existsSync(AdminService.ADMIN_FILE)) {
-        await fs.writeFile(AdminService.ADMIN_FILE, JSON.stringify({ keys: [] }, null, 2), {
+      const adminFile = this.getAdminFilePath();
+      if (!fsSync.existsSync(adminFile)) {
+        await fs.writeFile(adminFile, JSON.stringify({ keys: [] }, null, 2), {
           mode: 0o600,
         });
         return;
       }
 
-      const data = await fs.readFile(AdminService.ADMIN_FILE, 'utf8');
+      const data = await fs.readFile(adminFile, 'utf8');
       const parsed = JSON.parse(data || '{}');
       // If hmac keys were not supplied via env, read persisted hmac metadata
       if (!this.hmacFromEnv) {
@@ -122,10 +129,11 @@ export class AdminService {
       const payload: any = { keys: arr };
       // Persist current and previous HMACs so rotate operations survive restarts
       payload.hmacKeys = { current: this.hmacKey, previous: this.prevHmacKeys };
-      await fs.writeFile(AdminService.ADMIN_FILE, JSON.stringify(payload, null, 2));
+      const adminFile = this.getAdminFilePath();
+      await fs.writeFile(adminFile, JSON.stringify(payload, null, 2));
       try {
         // enforce strict permissions if possible
-        fsSync.chmodSync(AdminService.ADMIN_FILE, 0o600);
+        fsSync.chmodSync(adminFile, 0o600);
       } catch (_) {}
       // Best-effort: attempt to persist to Vault KV v2 as well
       try {

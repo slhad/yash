@@ -5,10 +5,17 @@ import * as path from 'node:path';
 import { defaultLogger } from './logger';
 
 export class Audit {
-  private static DATA_DIR =
-    process.env.YASH_DATA_DIR || path.join(process.env.HOME || '.', '.yash');
-  private static AUDIT_KEY_FILE = path.join(Audit.DATA_DIR, 'audit.key');
-  private static AUDIT_FILE = path.join(Audit.DATA_DIR, 'audit.log');
+  private getDataDir(): string {
+    return process.env.YASH_DATA_DIR || path.join(process.env.HOME || '.', '.yash');
+  }
+
+  private getAuditKeyFile(): string {
+    return path.join(this.getDataDir(), 'audit.key');
+  }
+
+  private getAuditFile(): string {
+    return path.join(this.getDataDir(), 'audit.log');
+  }
 
   private key: string | null = null;
   private keytar: any | null = null;
@@ -52,8 +59,9 @@ export class Audit {
 
     // File-based key
     try {
-      if (fsSync.existsSync(Audit.AUDIT_KEY_FILE)) {
-        const existing = fsSync.readFileSync(Audit.AUDIT_KEY_FILE, 'utf8').trim();
+      const keyFile = this.getAuditKeyFile();
+      if (fsSync.existsSync(keyFile)) {
+        const existing = fsSync.readFileSync(keyFile, 'utf8').trim();
         if (existing && existing.length > 0) {
           this.key = existing;
           return;
@@ -79,8 +87,9 @@ export class Audit {
 
     if (!persisted) {
       try {
-        fsSync.mkdirSync(path.dirname(Audit.AUDIT_KEY_FILE), { recursive: true });
-        fsSync.writeFileSync(Audit.AUDIT_KEY_FILE, newKey, { mode: 0o600 });
+        const keyFile = this.getAuditKeyFile();
+        fsSync.mkdirSync(path.dirname(keyFile), { recursive: true });
+        fsSync.writeFileSync(keyFile, newKey, { mode: 0o600 });
         this.key = newKey;
         persisted = true;
       } catch (e) {
@@ -105,7 +114,8 @@ export class Audit {
     // Read the previous signature if present
     let prevSig = '';
     try {
-      const data = await fs.readFile(Audit.AUDIT_FILE, 'utf8');
+      const auditFile = this.getAuditFile();
+      const data = await fs.readFile(auditFile, 'utf8');
       const lines = data
         .trim()
         .split(/\r?\n/)
@@ -126,8 +136,9 @@ export class Audit {
       .digest('hex');
     const line = `${body}.${hmac}\n`;
     try {
-      await fs.mkdir(path.dirname(Audit.AUDIT_FILE), { recursive: true });
-      await fs.appendFile(Audit.AUDIT_FILE, line, { encoding: 'utf8' });
+      const auditFile = this.getAuditFile();
+      await fs.mkdir(path.dirname(auditFile), { recursive: true });
+      await fs.appendFile(auditFile, line, { encoding: 'utf8' });
     } catch (e) {
       defaultLogger.error('Failed to append audit log', e);
       throw e;
@@ -154,7 +165,8 @@ export class Audit {
   async verifyAll(): Promise<{ ok: boolean; badIndex?: number; error?: string }> {
     await this.init();
     try {
-      const data = await fs.readFile(Audit.AUDIT_FILE, 'utf8');
+      const auditFile = this.getAuditFile();
+      const data = await fs.readFile(auditFile, 'utf8');
       const lines = data.split(/\r?\n/).filter((l) => l && l.trim().length > 0);
       let prevSig = '';
       for (let i = 0; i < lines.length; i++) {
@@ -175,7 +187,8 @@ export class Audit {
   async readRaw(): Promise<string> {
     await this.init();
     try {
-      const data = await fs.readFile(Audit.AUDIT_FILE, 'utf8');
+      const auditFile = this.getAuditFile();
+      const data = await fs.readFile(auditFile, 'utf8');
       return data;
     } catch (e) {
       // Return empty string if file missing

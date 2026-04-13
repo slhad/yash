@@ -358,7 +358,8 @@ export class ObsService {
    * Schedule a reconnect attempt using exponential backoff with full jitter.
    * Uses: delay = random() * min(reconnectIntervalMs * (multiplier ^ attempt), reconnectMaxMs)
    */
-  private scheduleReconnectAttempt(): void {
+  // Returns scheduling info when a new attempt is scheduled (used by tests)
+  private scheduleReconnectAttempt(): { delay: number; attempt: number } | void {
     // If already scheduled or we are connected, do nothing
     if (this.reconnectTimer || this.connected) return;
 
@@ -383,10 +384,9 @@ export class ObsService {
 
     // full jitter
     const delay = Math.floor(Math.random() * maxDelay);
+    const attemptNum = this.reconnectAttempt + 1;
 
-    defaultLogger.info(
-      `Scheduling reconnection attempt in ${delay}ms (attempt ${this.reconnectAttempt + 1})`,
-    );
+    defaultLogger.info(`Scheduling reconnection attempt in ${delay}ms (attempt ${attemptNum})`);
 
     this.reconnectTimer = setTimeout(() => {
       // clear the timer handle first
@@ -435,6 +435,9 @@ export class ObsService {
         this.scheduleReconnectAttempt();
       });
     }, delay);
+
+    // Return scheduling info to allow tests to assert on computed delay/attempt
+    return { delay, attempt: attemptNum };
   }
 
   /**
