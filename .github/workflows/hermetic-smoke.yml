@@ -32,7 +32,10 @@ jobs:
         run: |
           mkdir -p tmp
           CONTAINER_NAME="yash-ci-smoke-$(date +%s)-$RANDOM"
-          docker run --name "$CONTAINER_NAME" -e RUN_PLAYWRIGHT=1 -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" -v "${{ github.workspace }}/tmp:/app/tmp" ghcr.io/${{ github.repository }}/yash-ci:latest /bin/bash -lc '
+          # Run the smoke container as the host runner user so artifacts written
+          # into the mounted tmp directory are owned by the runner and can be
+          # uploaded by actions/upload-artifact without UID/GID surprises.
+          docker run --name "$CONTAINER_NAME" --user "$(id -u):$(id -g)" -e RUN_PLAYWRIGHT=1 -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" -v "${{ github.workspace }}/tmp:/app/tmp" ghcr.io/${{ github.repository }}/yash-ci:latest /bin/bash -lc '
             set -euo pipefail
 
             echo "Starting server inside container"

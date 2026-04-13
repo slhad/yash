@@ -126,7 +126,10 @@ jobs:
           # The Docker image builds dependencies (bun install + Playwright) at image build
           # time to speed up CI; do not reinstall inside the container here.
           CONTAINER_NAME="yash-ci-run-$(date +%s)-$RANDOM"
-          docker run --name "$CONTAINER_NAME" -e RUN_PLAYWRIGHT=1 -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" -v "${{ github.workspace }}/tmp:/app/tmp" yash-ci:latest /bin/bash -lc '
+          # Run container as the host runner user so files written into the mounted
+          # ${GITHUB_WORKSPACE}/tmp directory are owned by the runner and can be
+          # uploaded by actions/upload-artifact without UID/GID surprises.
+          docker run --name "$CONTAINER_NAME" --user "$(id -u):$(id -g)" -e RUN_PLAYWRIGHT=1 -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" -v "${{ github.workspace }}/tmp:/app/tmp" yash-ci:latest /bin/bash -lc '
             set -euo pipefail
 
             echo "Starting server inside container"
