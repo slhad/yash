@@ -267,6 +267,113 @@ export class AdminService {
     };
   }
 
+  /**
+   * Import an encrypted admin keys package that was produced by
+   * exportEncryptedAdminKeys(). The package is a hybrid-encrypted object
+   * { algorithm, encryptedKey, iv, tag, ciphertext } that this method will
+   * decrypt using the provided RSA private key PEM, validate, and merge into
+   * the local admin key store using safe merge semantics (skip on id
+   * conflict by default).
+   *
+   * Important: the payload contains stored HMAC hashes computed under the
+   * source instance's HMAC keys. To preserve the ability to verify tokens
+   * minted by the source instance, this method merges the source hmac keys
+   * into this.prevHmacKeys so token verification will check them.
+   */
+  async importEncryptedAdminKeys(
+    privateKeyPem: string,
+    pkg: {
+      algorithm?: string;
+      encryptedKey: string;
+      iv: string;
+      tag: string;
+      ciphertext: string;
+    },
+    options?: { overwrite?: boolean },
+  ): Promise<{ imported: string[]; skipped: string[]; errors: string[] }> {
+    await this.init();
+
+    if (!privateKeyPem || typeof privateKeyPem !== 'string')
+      throw new Error('privateKeyPem required');
+    if (!pkg || !pkg.encryptedKey || !pkg.iv || !pkg.ciphertext) throw new Error('invalid package');
+
+    try {
+      const encKeyBuf = Buffer.from(pkg.encryptedKey, 'base64');
+      const aesKey = crypto.privateDecrypt(
+        {
+          key: privateKeyPem,
+          padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
+          oaepHash: 'sha256',
+        },
+        encKeyBuf,
+      );
+
+      const ivBuf = Buffer.from(pkg.iv, 'base64');
+      const tagBuf = pkg.tag ? Buffer.from(pkg.tag, 'base64') : null;
+      const cipherBuf = Buffer.from(pkg.ciphertext, 'base64');
+
+      const decipher = crypto.createDecipheriv('aes-256-gcm', aesKey, ivBuf);
+      if (tagBuf) decipher.setAuthTag(tagBuf);
+      const decryptedBuf = Buffer.concat([decipher.update(cipherBuf), decipher.final()]);
+      const plaintext = decryptedBuf.toString('utf8');
+
+      const parsed = JSON.parse(plaintext || '{}');
+      const incomingKeys = Array.isArray(parsed.keys) ? parsed.keys : [];
+      const hmacMeta: any = parsed.hmacKeys || parsed.hmac_keys || null;
+
+      const imported: string[] = [];
+      const skipped: string[] = [];
+      const errors: string[] = [];
+
+      for (const ik of incomingKeys) {
+        try {
+          const id = ik.id || crypto.randomBytes(8).toString('hex');
+          if (this.keys.has(id) && !options?.overwrite) {
+            skipped.push(id);
+            continue;
+          }
+
+          const keyObj: AdminKey = {
+            id,
+            label: ik.label,
+            hash: ik.hash,
+            roles: Array.isArray(ik.roles) ? ik.roles : ik.roles ? [ik.roles] : ['admin'],
+            createdAt: typeof ik.createdAt === 'number' ? ik.createdAt : Date.now(),
+            revoked: !!ik.revoked,
+          };
+
+          this.keys.set(id, keyObj);
+          imported.push(id);
+        } catch (e: any) {
+          errors.push(String(e));
+        }
+      }
+
+      // Merge incoming HMAC metadata so tokens signed under the source
+      // instance's HMAC keys remain verifiable here.
+      if (hmacMeta) {
+        const toAdd: string[] = [];
+        if (typeof hmacMeta.current === 'string' && hmacMeta.current.length > 0) {
+          if (hmacMeta.current !== this.hmacKey && !this.prevHmacKeys.includes(hmacMeta.current))
+            toAdd.push(hmacMeta.current);
+        }
+        if (Array.isArray(hmacMeta.previous)) {
+          for (const k of hmacMeta.previous) {
+            if (k && k !== this.hmacKey && !this.prevHmacKeys.includes(k) && !toAdd.includes(k))
+              toAdd.push(k);
+          }
+        }
+        if (toAdd.length > 0)
+          this.prevHmacKeys = Array.from(new Set([...toAdd, ...this.prevHmacKeys]));
+      }
+
+      await this.save();
+      return { imported, skipped, errors };
+    } catch (e: any) {
+      throw e;
+    }
+  }
+
   // Create a new admin key and return plaintext token (one-time display)
   async createKey(
     label?: string,

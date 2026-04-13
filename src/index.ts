@@ -478,6 +478,75 @@ Bun.serve({
         }
       },
     },
+    '/api/admin/keys/import': {
+      POST: async (req) => {
+        const auth = await authorizeAdmin(req);
+        if (!auth.ok)
+          return new Response(JSON.stringify(auth.body), {
+            status: auth.status,
+            headers: { 'Content-Type': 'application/json' },
+          });
+
+        try {
+          const { hasAdminRole } = require('./utils/adminAuth');
+          const allowed = await hasAdminRole(auth, 'admin');
+          if (!allowed)
+            return new Response(JSON.stringify({ error: 'forbidden' }), {
+              status: 403,
+              headers: { 'Content-Type': 'application/json' },
+            });
+        } catch (e) {
+          return new Response(JSON.stringify({ error: 'forbidden' }), {
+            status: 403,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+
+        const body = await req.json().catch(() => ({}));
+        const privateKeyPem = body?.privateKeyPem;
+        const pkg = body?.package;
+        if (!privateKeyPem || !pkg)
+          return new Response(JSON.stringify({ error: 'privateKeyPem and package required' }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json' },
+          });
+
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-var-requires
+          const AdminSvc = require('./services/admin.service').default;
+          const svc = new AdminSvc();
+          await svc.init();
+          const result = await svc.importEncryptedAdminKeys(privateKeyPem, pkg, {
+            overwrite: false,
+          });
+
+          try {
+            const Audit = require('./utils/audit').default;
+            const audit = new Audit();
+            await audit.append('admin-keys-imported', {
+              actor: 'admin-endpoint',
+              clientIp: (auth as any).clientIp || 'unknown',
+              adminKeyId: (auth as any).adminKeyId || null,
+              method: (auth as any).method || null,
+              imported: result.imported.length,
+              skipped: result.skipped.length,
+            });
+          } catch (e) {
+            defaultLogger.info('Audit append failed (non-fatal):', e);
+          }
+
+          return new Response(JSON.stringify(result), {
+            headers: { 'Content-Type': 'application/json' },
+          });
+        } catch (e) {
+          defaultLogger.error('admin keys import failed', e);
+          return new Response(JSON.stringify({ error: 'failed' }), {
+            status: 500,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+      },
+    },
     '/api/admin/export-key': {
       POST: async (req) => {
         const auth = await authorizeAdmin(req);
