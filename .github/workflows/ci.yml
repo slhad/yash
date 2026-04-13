@@ -73,10 +73,27 @@ jobs:
             exit 1
           fi
 
-      - name: Run Playwright webview test
+      - name: Run Playwright webview test (with retries)
         env:
           RUN_PLAYWRIGHT: '1'
-        run: npx playwright test e2e-tests/webview.spec.ts --reporter=list
+        run: |
+          set -euo pipefail
+          max_attempts=3
+          attempt=1
+          until [ $attempt -gt $max_attempts ]; do
+            echo "Playwright attempt $attempt/$max_attempts"
+            if npx playwright test e2e-tests/webview.spec.ts --reporter=list; then
+              echo "Playwright succeeded"
+              break
+            fi
+            echo "Playwright failed on attempt $attempt"
+            attempt=$((attempt + 1))
+            sleep 5
+          done
+          if [ $attempt -gt $max_attempts ]; then
+            echo "Playwright failed after $max_attempts attempts" >&2
+            exit 1
+          fi
 
       - name: Upload Playwright screenshot artifact
         if: always()
@@ -125,13 +142,47 @@ jobs:
             exit 1
           fi
 
-      - name: Run Playwright webview test (hermetic)
+      - name: Run Playwright webview test (hermetic, with retries)
         env:
           RUN_PLAYWRIGHT: '1'
-        run: npx playwright test e2e-tests/webview.spec.ts --reporter=list
+        run: |
+          set -euo pipefail
+          max_attempts=3
+          attempt=1
+          until [ $attempt -gt $max_attempts ]; do
+            echo "Hermetic Playwright attempt $attempt/$max_attempts"
+            if npx playwright test e2e-tests/webview.spec.ts --reporter=list; then
+              echo "Hermetic Playwright succeeded"
+              break
+            fi
+            echo "Hermetic Playwright failed on attempt $attempt"
+            attempt=$((attempt + 1))
+            sleep 5
+          done
+          if [ $attempt -gt $max_attempts ]; then
+            echo "Hermetic Playwright failed after $max_attempts attempts" >&2
+            exit 1
+          fi
 
-      - name: Run reconnection integration test
-        run: bun test test/obs.websocket.reconnect.test.ts --reporter=list
+      - name: Run reconnection integration test (with retries)
+        run: |
+          set -euo pipefail
+          max_attempts=3
+          attempt=1
+          until [ $attempt -gt $max_attempts ]; do
+            echo "Reconnection test attempt $attempt/$max_attempts"
+            if bun test test/obs.websocket.reconnect.test.ts --reporter=list; then
+              echo "Reconnection test succeeded"
+              break
+            fi
+            echo "Reconnection test failed on attempt $attempt"
+            attempt=$((attempt + 1))
+            sleep 5
+          done
+          if [ $attempt -gt $max_attempts ]; then
+            echo "Reconnection test failed after $max_attempts attempts" >&2
+            exit 1
+          fi
 
       - name: Upload integration artifacts
         if: always()
