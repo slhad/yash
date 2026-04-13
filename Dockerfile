@@ -21,11 +21,17 @@ RUN curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
   && apt-get update && apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*
 
 # Install Bun and make it available system-wide so non-root users can run it.
-# The bun installer writes into /root/.bun by default; create a symlink into
-# /usr/local/bin so containers run with --user can still execute bun.
-RUN curl -fsSL https://bun.sh/install | bash -s -- -y \
-  && ln -sf /root/.bun/bin/bun /usr/local/bin/bun \
-  && chmod +x /usr/local/bin/bun
+# The bun installer writes into /root/.bun by default. The installer does not
+# accept a '-y' flag; invoking it with '-y' causes it to treat '-y' as a tag and
+# fail (404). Invoke the installer without '-y', then copy the bun binary into
+# /usr/local/bin to avoid relying on traversing /root from non-root users.
+RUN curl -fsSL https://bun.sh/install | bash -s -- \
+  && if [ -f /root/.bun/bin/bun ]; then \
+       cp -f /root/.bun/bin/bun /usr/local/bin/bun; \
+       chmod +x /usr/local/bin/bun; \
+     else \
+       ln -sf /root/.bun/bin/bun /usr/local/bin/bun || true; \
+     fi
 ENV PATH="/usr/local/bin:/root/.bun/bin:${PATH}"
 
 WORKDIR /app

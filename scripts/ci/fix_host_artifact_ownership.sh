@@ -17,12 +17,28 @@ else
 	echo "No owner file found; defaulting to runner owner: $OWNER"
 fi
 
-if command -v sudo >/dev/null 2>&1; then
-	echo "Attempting to chown $TARGET_DIR -> $OWNER using sudo"
-	sudo chown -R "$OWNER" "$TARGET_DIR" || echo "sudo chown failed; continuing"
+echo "Attempting chown $TARGET_DIR -> $OWNER without sudo"
+if chown -R "$OWNER" "$TARGET_DIR" 2>/dev/null; then
+	echo "chown succeeded"
 else
-	echo "Attempting to chown $TARGET_DIR -> $OWNER (no sudo)"
-	chown -R "$OWNER" "$TARGET_DIR" 2>/dev/null || echo "chown failed or not permitted; continuing"
+	echo "chown without sudo failed; checking for non-interactive sudo"
+	if command -v sudo >/dev/null 2>&1; then
+		# Check if sudo is usable non-interactively (passwordless)
+		if sudo -n true >/dev/null 2>&1; then
+			echo "Attempting non-interactive sudo chown"
+			if sudo chown -R "$OWNER" "$TARGET_DIR"; then
+				echo "sudo chown succeeded"
+			else
+				echo "sudo chown failed; continuing"
+			fi
+		else
+			echo "sudo present but requires interactive password; cannot auto-chown in this environment."
+			echo "To remediate run as a user with privileges: sudo chown -R $OWNER $TARGET_DIR"
+		fi
+	else
+		echo "No sudo available and chown failed; cannot remediate automatically."
+		echo "To remediate run as root or on a runner with appropriate permissions: chown -R $OWNER $TARGET_DIR"
+	fi
 fi
 
 echo "Post-fix listing:"
