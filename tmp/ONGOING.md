@@ -5,8 +5,10 @@ Next steps (ongoing) - do not commit
    - Add an end-to-end test that exercises admin endpoints using generated admin tokens.
 
 2) Safety & consistency:
-   - Ensure all admin endpoints use authorizeAdmin (done).
-   - Review and tighten audit entries to avoid accidental secret capture (avoid token plaintexts).
+    - Ensure all admin endpoints use authorizeAdmin (done).
+    - Review and tighten audit entries to avoid accidental secret capture (avoid token plaintexts).
+    - Support admin keys stored in AdminService: authorizeAdmin should recognize admin keys and surface adminKeyId and method in its result (done).
+    - Include adminKeyId and method in audit metadata for all admin operations (done).
 
 3) Tests & CI:
    - Add tests for exportEncryptionKey and exportEncryptedTokens (added).

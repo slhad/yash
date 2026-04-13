@@ -20,6 +20,7 @@ describe('adminAuth', () => {
     const req = makeReq({ authorization: 'Bearer s3cr3t' });
     const res = await authorizeAdmin(req);
     expect(res.ok).toBe(true);
+    expect((res as any).method).toBe('admin-token');
     delete process.env.ADMIN_TOKEN;
   });
 

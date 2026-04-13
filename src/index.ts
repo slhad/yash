@@ -173,6 +173,8 @@ Bun.serve({
             await audit.append('rotate-key', {
               actor: 'admin-endpoint',
               clientIp: (auth as any).clientIp || 'unknown',
+              adminKeyId: (auth as any).adminKeyId || null,
+              method: (auth as any).method || null,
               note: 'rotation invoked',
             });
           } catch (e) {
@@ -216,6 +218,8 @@ Bun.serve({
           await audit.append('admin-key-created', {
             actor: 'admin-endpoint',
             clientIp: (auth as any).clientIp || 'unknown',
+            adminKeyId: (auth as any).adminKeyId || null,
+            method: (auth as any).method || null,
             id: created.id,
             label: label || null,
           });
@@ -269,6 +273,8 @@ Bun.serve({
           await audit.append('admin-key-revoked', {
             actor: 'admin-endpoint',
             clientIp: (auth as any).clientIp || 'unknown',
+            adminKeyId: (auth as any).adminKeyId || null,
+            method: (auth as any).method || null,
             id,
             success: !!ok,
           });
@@ -312,6 +318,8 @@ Bun.serve({
               await audit.append('export-tokens', {
                 actor: 'admin-endpoint',
                 clientIp: (auth as any).clientIp || 'unknown',
+                adminKeyId: (auth as any).adminKeyId || null,
+                method: (auth as any).method || null,
                 note: 'exported encrypted tokens',
               });
             } catch (e) {
@@ -330,6 +338,8 @@ Bun.serve({
             await audit.append('export-key', {
               actor: 'admin-endpoint',
               clientIp: (auth as any).clientIp || 'unknown',
+              adminKeyId: (auth as any).adminKeyId || null,
+              method: (auth as any).method || null,
               note: 'exported encryption key (encrypted)',
             });
           } catch (e) {
@@ -370,6 +380,8 @@ Bun.serve({
             await audit.append('audit-tail-viewed', {
               actor: 'admin-endpoint',
               clientIp: (auth as any).clientIp || 'unknown',
+              adminKeyId: (auth as any).adminKeyId || null,
+              method: (auth as any).method || null,
               linesRequested: lines,
             });
           } catch (e) {
@@ -407,6 +419,8 @@ Bun.serve({
             await audit.append('audit-verify-run', {
               actor: 'admin-endpoint',
               clientIp: (auth as any).clientIp || 'unknown',
+              adminKeyId: (auth as any).adminKeyId || null,
+              method: (auth as any).method || null,
               ok: !!result.ok,
               badIndex: result.badIndex || null,
             });

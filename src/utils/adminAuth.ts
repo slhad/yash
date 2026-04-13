@@ -1,6 +1,14 @@
 import { defaultLogger } from './logger';
+import AdminService from '../services/admin.service';
 
-type AuthResult = { ok: true; clientIp?: string } | { ok: false; status: number; body: any };
+type AuthResult =
+  | {
+      ok: true;
+      clientIp?: string;
+      adminKeyId?: string;
+      method?: 'admin-token' | 'admin-key' | 'none';
+    }
+  | { ok: false; status: number; body: any };
 
 const rateMap = new Map<string, { count: number; windowStart: number }>();
 
@@ -57,18 +65,47 @@ export async function authorizeAdmin(req: Request): Promise<AuthResult> {
       return { ok: false, status: 429, body: { error: 'rate limit exceeded' } };
     }
 
-    // Token check if configured
+    // Token check if configured. Also accept admin keys persisted in AdminService.
+    const authHeader = (req.headers.get('authorization') || '').trim();
+    const bearer = authHeader.toLowerCase().startsWith('bearer ') ? authHeader.slice(7).trim() : '';
+
+    // If an ADMIN_TOKEN is configured, prefer it. If the provided bearer token
+    // does not match ADMIN_TOKEN, fall back to checking the AdminService keys.
     if (adminToken && adminToken.length > 0) {
-      const authHeader = (req.headers.get('authorization') || '').trim();
-      if (
-        !authHeader.toLowerCase().startsWith('bearer ') ||
-        authHeader.slice(7).trim() !== adminToken
-      ) {
-        return { ok: false, status: 401, body: { error: 'unauthorized' } };
+      if (bearer && bearer === adminToken) {
+        return { ok: true, clientIp, method: 'admin-token' };
+      }
+
+      // Try AdminService key lookup (best-effort). If AdminService confirms the
+      // token is a valid admin key, allow.
+      if (bearer) {
+        try {
+          const svc = new AdminService();
+          await svc.init();
+          const keyId = svc.getKeyIdByToken(bearer);
+          if (keyId) return { ok: true, clientIp, adminKeyId: keyId, method: 'admin-key' };
+        } catch (e) {
+          defaultLogger.warn('AdminService lookup failed during authorizeAdmin', e);
+        }
+      }
+
+      return { ok: false, status: 401, body: { error: 'unauthorized' } };
+    }
+
+    // ADMIN_TOKEN not configured: allow local/dev usage, but if a bearer token is
+    // presented and matches an AdminService key, return that identity.
+    if (bearer) {
+      try {
+        const svc = new AdminService();
+        await svc.init();
+        const keyId = svc.getKeyIdByToken(bearer);
+        if (keyId) return { ok: true, clientIp, adminKeyId: keyId, method: 'admin-key' };
+      } catch (e) {
+        defaultLogger.warn('AdminService lookup failed during authorizeAdmin (dev path)', e);
       }
     }
 
-    return { ok: true, clientIp };
+    return { ok: true, clientIp, method: 'none' };
   } catch (err) {
     defaultLogger.warn('authorizeAdmin error', err);
     return { ok: false, status: 500, body: { error: 'internal' } };
