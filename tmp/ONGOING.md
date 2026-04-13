@@ -16,6 +16,9 @@ Next steps (ongoing) - do not commit
     - Add tests for Audit.verifyAll and tailLines.
     - Add a CI job that runs Bun tests and the secret-scan action (added: .github/workflows/ci.yml).
     - Consider adding gitleaks or similar as a required check in CI for PRs.
+    - Added a GitHub Action to run a secret-scan: .github/workflows/secret-scan.yml (gitleaks).
+    - Added local pre-commit hook and installer: .githooks/pre-commit and scripts/precommit/install-hooks.sh
+      plus a Node fallback scanner scripts/precommit/fallback.js for environments without gitleaks.
 
 4) Ops / cleanup:
     - Coordinate secret rotation for config.json present in working tree.

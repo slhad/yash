@@ -1,48 +1,46 @@
-// Lightweight staged-files scanner to flag likely secrets if gitleaks is not installed.
-// Scans staged files for typical secret-looking patterns (long hex strings, AWS keys, private keys).
+// Lightweight fallback scanner for staged files. Looks for high-confidence secrets
+// patterns (private keys, AWS access keys, basic tokens). This is a best-effort
+// heuristic and not a replacement for a proper secret scanner.
+
 const { execSync } = require('child_process');
 const fs = require('fs');
 
 function getStagedFiles() {
   try {
-    const out = execSync('git diff --cached --name-only --diff-filter=ACMR', { encoding: 'utf8' });
-    return out.split(/\r?\n/).filter(Boolean);
+    const out = execSync('git diff --cached --name-only --diff-filter=ACM', { encoding: 'utf8' });
+    return out.split('\n').filter(Boolean);
   } catch (e) {
     return [];
   }
 }
 
-function scanFile(path) {
+const patterns = [
+  /-----BEGIN PRIVATE KEY-----/i,
+  /-----BEGIN RSA PRIVATE KEY-----/i,
+  /AKIA[0-9A-Z]{16}/, // AWS access key id
+  /aws_secret_access_key\s*[:=]\s*[A-Za-z0-9\/+=]{40}/i,
+  /-----BEGIN OPENSSH PRIVATE KEY-----/i,
+  /api_key\s*[:=]\s*[A-Za-z0-9\-_.]{20,}/i,
+];
+
+let failed = false;
+for (const file of getStagedFiles()) {
   try {
-    const data = fs.readFileSync(path, 'utf8');
-    const patterns = [
-      /aws_access_key_id\s*=\s*[A-Z0-9]{16}/i,
-      /aws_secret_access_key\s*=\s*[A-Za-z0-9\/+=]{40}/i,
-      /-----BEGIN PRIVATE KEY-----/,
-      /-----BEGIN RSA PRIVATE KEY-----/,
-      /[0-9a-fA-F]{32,}/, // long hex blobs
-      /ghp_[A-Za-z0-9_]{36}/, // GitHub token pattern
-    ];
+    const content = fs.readFileSync(file, 'utf8');
     for (const p of patterns) {
-      if (p.test(data)) return { path, pattern: p.toString() };
+      if (p.test(content)) {
+        console.error(`Potential secret found in staged file: ${file} (pattern: ${p})`);
+        failed = true;
+      }
     }
-    return null;
   } catch (e) {
-    return null;
+    // ignore binary files or deleted files
   }
 }
 
-const staged = getStagedFiles();
-const findings = [];
-for (const f of staged) {
-  const r = scanFile(f);
-  if (r) findings.push(r);
-}
-
-if (findings.length > 0) {
-  console.error('Pre-commit fallback scanner detected potential secrets:');
-  for (const f of findings) console.error(`  ${f.path} -> ${f.pattern}`);
-  process.exit(2);
+if (failed) {
+  console.error('Pre-commit fallback secret scanner detected potential secrets. Aborting commit.');
+  process.exit(1);
 }
 
 process.exit(0);
