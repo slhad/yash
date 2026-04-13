@@ -11,6 +11,8 @@ export class ObsService {
   private reconnectInterval: NodeJS.Timeout | null = null;
   // Allow configurable reconnection interval for tests (ms)
   private reconnectIntervalMs: number = 30000;
+  // Simulated connect delay for testability (ms)
+  private connectDelayMs: number = 1000;
   // Optional WebSocket transport support
   private ws: any = null;
   private pendingRequests: Map<number, { resolve: (v: any) => void; reject: (e: any) => void }> =
@@ -34,6 +36,7 @@ export class ObsService {
     password?: string | null,
     useWebSocketTransport: boolean = false,
     reconnectIntervalMs?: number,
+    connectDelayMs?: number,
   ) {
     this.loadConfigSync();
     if (host) this.host = host;
@@ -42,6 +45,9 @@ export class ObsService {
     this.useWebSocketTransport = useWebSocketTransport;
     if (typeof reconnectIntervalMs === 'number' && reconnectIntervalMs > 0) {
       this.reconnectIntervalMs = reconnectIntervalMs;
+    }
+    if (typeof connectDelayMs === 'number' && connectDelayMs >= 0) {
+      this.connectDelayMs = connectDelayMs;
     }
   }
 
@@ -131,8 +137,8 @@ export class ObsService {
       try {
         defaultLogger.info(`Connecting to OBS at ws://${this.host}:${this.port}...`);
 
-        // Simulate connection delay
-        await new Promise((resolve) => setTimeout(resolve, 1000));
+        // Simulate connection delay (configurable for tests)
+        await new Promise((resolve) => setTimeout(resolve, this.connectDelayMs));
 
         this.connected = true;
         this.connectionPromise = null;

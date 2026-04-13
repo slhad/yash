@@ -2,8 +2,8 @@ import { test, expect } from 'bun:test';
 import { ObsService } from '../src/services/obs.service';
 
 test('ObsService reconnection interval is configurable and attempts reconnect when disconnected', async () => {
-  // Use a short reconnect interval to make the test fast
-  const obs = new ObsService('localhost', 4455, null, false, 200);
+  // Use a short reconnect interval and short connect delay to make the test fast
+  const obs = new ObsService('localhost', 4455, null, false, 200, 50);
 
   // Initially disconnected
   expect(obs.isConnected()).toBe(false);
