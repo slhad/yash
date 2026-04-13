@@ -107,5 +107,12 @@ Next (candidate) tasks
 - Add README examples for CI usage (low).
 - Consider adding authentication/ACL for sensitive metrics (low).
 
+Done this turn
+- Added Dockerfile and a CI workflow (ci-docker) to build a hermetic image containing Bun and Playwright browsers. The image can run tests locally or in CI where Docker is available.
+
+Next (candidate) tasks
+- Use the Docker image in CI to run flaky integration tests in a controlled environment (medium).
+- Publish the Docker image to a registry for reproducible CI runs (low).
+
 Notes
 - tmp/ is gitignored; file created to satisfy the workflow requirement. Will be force-added to commit per instruction.

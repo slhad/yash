@@ -1,0 +1,23 @@
+name: CI (Docker)
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'Dockerfile'
+      - '.github/workflows/ci-docker.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: |
+          docker build -t yash-ci:latest .
+
+      - name: Run tests inside container (smoke)
+        run: |
+          docker run --rm -e CI=true yash-ci:latest /bin/bash -lc "bun install && bun test --reporter=list"
