@@ -23,6 +23,11 @@ WORKDIR /app
 # Copy project files
 COPY . /app
 
+# Copy CI entrypoint that can chown mounted /app/tmp when HOST_UID/HOST_GID provided
+# This makes artifact ownership easier when the CI job passes host UID/GID.
+COPY scripts/ci/ci-entrypoint.sh /usr/local/bin/ci-entrypoint.sh
+RUN chmod +x /usr/local/bin/ci-entrypoint.sh || true
+
 # Install dependencies via Bun and ensure Playwright browsers are available
 RUN bun install --no-save || true
 RUN npx playwright install --with-deps || true
@@ -32,3 +37,6 @@ EXPOSE 3000
 
 # Default command: show usage (CI will override)
 CMD ["/bin/bash", "-lc", "echo 'Image built. Run tests with: bun test or npx playwright test'"]
+
+# Default entrypoint: allow CI to pass HOST_UID/HOST_GID and have the image chown /app/tmp early
+ENTRYPOINT ["/usr/local/bin/ci-entrypoint.sh"]
