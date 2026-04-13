@@ -31,7 +31,8 @@ jobs:
       - name: Run hermetic smoke inside published image
         run: |
           mkdir -p tmp
-          docker run --rm -e RUN_PLAYWRIGHT=1 -v "${{ github.workspace }}/tmp:/app/tmp" --user "$(id -u):$(id -g)" ghcr.io/${{ github.repository }}/yash-ci:latest /bin/bash -lc '
+          CONTAINER_NAME="yash-ci-smoke-$(date +%s)-$RANDOM"
+          docker run --name "$CONTAINER_NAME" -e RUN_PLAYWRIGHT=1 -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" -v "${{ github.workspace }}/tmp:/app/tmp" ghcr.io/${{ github.repository }}/yash-ci:latest /bin/bash -lc '
             set -euo pipefail
 
             echo "Starting server inside container"
@@ -63,6 +64,16 @@ jobs:
 
             echo "Hermetic smoke finished"
           '
+
+          RUN_EXIT=$?
+          echo "Container $CONTAINER_NAME exited with status $RUN_EXIT"
+          echo "Attempting to docker cp /app/tmp from container to host tmp/ (if present)"
+          mkdir -p tmp || true
+          docker cp "$CONTAINER_NAME":/app/tmp/. tmp/ || echo "docker cp failed or no files present"
+          docker rm -f "$CONTAINER_NAME" || true
+          if [ $RUN_EXIT -ne 0 ]; then
+            exit $RUN_EXIT
+          fi
 
       - name: Upload hermetic smoke artifacts
         if: always()
