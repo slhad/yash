@@ -201,3 +201,36 @@ Next (chosen) task (hard and different from last two): Add a small utility to ce
 
 Done this turn:
 - Implemented `toPrometheusText` in src/utils/metrics.ts.
+
+Next (chosen) task (medium): Add unit tests for the Prometheus exporter to ensure formatting is stable and timestamps are exported as seconds.
+ - Why: This is different from image publishing and hermetic smoke tasks and provides good test coverage for the exporter we just added.
+ - Plan:
+   1. Add test/metrics.unit.test.ts which resets the in-memory metrics, populates counters/gauges/timestamps, and asserts the produced text contains expected lines and values.
+   2. Commit the test file (tmp remains uncommitted).
+
+Done this turn:
+- Added test/metrics.unit.test.ts and left tmp/ONGOING.md updated locally.
+
+Next (chosen) task (hard and different from last two): Improve Prometheus metric naming and ensure exporter follows Prometheus conventions; update tests and docs accordingly.
+ - Why: This is a different kind of work from CI publishing and artifact verification; it standardizes metric naming which helps downstream scraping and dashboards.
+ - Plan:
+   1. Sanitize metric names to be Prometheus-compliant (replace invalid chars with underscores, ensure starts with [A-Za-z_:]).
+   2. Export counters with _total suffix, timestamps as _timestamp_seconds, and add HELP/TYPE comments.
+   3. Update unit tests and README to reflect the naming conventions.
+   4. Commit the changes (tmp remains uncommitted).
+
+Done this turn:
+- Implemented sanitization and naming conventions in src/utils/metrics.ts, updated test/metrics.unit.test.ts and README.md.
+
+2026-04-13 (this turn)
+- Chosen follow-up (very hard, in_progress): Validate hermetic Docker CI job artifact collection end-to-end.
+  - Why: Ensure artifacts produced inside the hermetic container (yash-ci) reliably appear on the host tmp/ mount with correct ownership/permissions so GitHub Actions can upload them. This resolves a high-value CI debugging gap and is distinct from the last two tasks (metrics auth and test conversions).
+  - Plan:
+    1. Reproduce locally: build the Docker image and run the same docker run invocation used in CI (mount host tmp to /app/tmp, run with --user $(id -u):$(id -g), set RUN_PLAYWRIGHT=1). Verify that scripts/ci/verify_artifact.sh writes /app/tmp/ci-artifact.txt and that it appears on the host with matching ownership.
+    2. If ownership mismatches, try these remediation options in order of preference:
+       - Run container with --user (already used); if this fails due to missing permissions, create a minimal user inside the image that matches the host UID/GID via build-arg or a small entrypoint helper that chowns the artifact directory at runtime.
+       - As fallback, copy artifacts out of the container with docker cp before uploading in CI.
+    3. Add a small CI smoke-step that lists tmp/ after the container run and prints stat output for the artifact file so failures are easier to diagnose.
+    4. Update CI workflow (.github/workflows/ci.yml -> integration-hermetic) if a change is required (either to docker run flags or to the image Dockerfile) and commit those changes.
+    5. Document the final approach in README.md and tmp/ONGOING.md.
+  - Status: in_progress — will start by building and running the image locally.

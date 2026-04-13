@@ -7,6 +7,7 @@ import { ObsService } from './services/obs.service';
 import { StreamService } from './services/stream.service';
 import { defaultLogger } from './utils/logger';
 import { AuthService } from './services/auth.service';
+import { authorizeMetrics } from './utils/metricsAuth';
 
 export const youtube = new YouTubeProvider();
 export const twitch = new TwitchProvider();
@@ -136,30 +137,13 @@ Bun.serve({
       // - x-api-key: <token>
       // - query parameter: ?token=<token>
       GET: (req) => {
-        const requiredToken = process.env.YASH_METRICS_TOKEN;
-        if (requiredToken) {
-          const authHeader = req.headers.get('authorization') || '';
-          const apiKeyHeader = req.headers.get('x-api-key');
-          let authorized = false;
-          if (authHeader && authHeader.toLowerCase().startsWith('bearer ')) {
-            authorized = authHeader.slice(7).trim() === requiredToken;
-          }
-          if (!authorized && apiKeyHeader) authorized = apiKeyHeader === requiredToken;
-          if (!authorized) {
-            try {
-              const url = new URL(req.url, 'http://localhost');
-              const q = url.searchParams.get('token');
-              if (q === requiredToken) authorized = true;
-            } catch (e) {
-              // ignore
-            }
-          }
-          if (!authorized) {
-            return new Response(JSON.stringify({ error: 'unauthorized' }), {
-              status: 401,
-              headers: { 'Content-Type': 'application/json' },
-            });
-          }
+        // Delegate authorization to the central helper so both endpoints
+        // behave the same when YASH_METRICS_TOKEN is set.
+        if (!authorizeMetrics((name: string) => req.headers.get(name), req.url)) {
+          return new Response(JSON.stringify({ error: 'unauthorized' }), {
+            status: 401,
+            headers: { 'Content-Type': 'application/json' },
+          });
         }
 
         // Return the full metrics snapshot collected in-memory.
@@ -177,7 +161,16 @@ Bun.serve({
     // returns plain-text in Prometheus exposition format so CI or Prometheus
     // can scrape it directly.
     '/metrics': {
-      GET: () => {
+      GET: (req) => {
+        // Protect Prometheus exposition the same way as /api/metrics when a
+        // metrics token is configured.
+        if (!authorizeMetrics((name: string) => req.headers.get(name), req.url)) {
+          return new Response(JSON.stringify({ error: 'unauthorized' }), {
+            status: 401,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+
         try {
           const metricsModule = require('./utils/metrics');
           const body =
