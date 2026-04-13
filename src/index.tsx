@@ -4,6 +4,8 @@ import {
   ScrollBoxRenderable,
   TextRenderable,
 } from '@opentui/core';
+import * as readline from 'node:readline';
+import SettingsStore from './utils/settings';
 import { KickProvider } from './platforms/kick';
 import { TwitchProvider } from './platforms/twitch';
 import { YouTubeProvider } from './platforms/youtube';
@@ -127,6 +129,7 @@ async function renderUI(
 
 let isRunning = true;
 const lastMessages: string[] = [];
+let cliRenderer: Awaited<ReturnType<typeof createCliRenderer>> | null = null;
 
 function transformMessage(msg: { platform: string; username: string; message: string }) {
   return `[${msg.platform}] ${msg.username}: ${msg.message}`;
@@ -145,7 +148,91 @@ async function main() {
   });
 
   const renderer = await createCliRenderer();
+  cliRenderer = renderer;
   await renderUI(renderer, lastMessages);
+
+  // Simple stdin command handler for TUI -- supports /connect and /settings
+  try {
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    const settings = new SettingsStore();
+
+    rl.on('line', async (line: string) => {
+      const trimmed = line.trim();
+      if (!trimmed) return;
+
+      if (trimmed.startsWith('/')) {
+        const parts = trimmed.split(/\s+/);
+        const cmd = parts[0].toLowerCase();
+        if (cmd === '/connect' && parts[1]) {
+          const platform = parts[1].toLowerCase();
+          const provider =
+            platform === 'youtube'
+              ? youtube
+              : platform === 'twitch'
+                ? twitch
+                : platform === 'kick'
+                  ? kick
+                  : null;
+          if (provider) {
+            lastMessages.push(`[system] Authenticating ${platform}...`);
+            try {
+              const res = await provider.authenticate();
+              lastMessages.push(
+                `[system] ${platform} authentication ${res?.success ? 'succeeded' : 'failed'}`,
+              );
+            } catch (err) {
+              lastMessages.push(`[system] ${platform} authentication error: ${String(err)}`);
+            }
+          } else {
+            lastMessages.push(`[system] Unknown platform: ${platform}`);
+          }
+        } else if (cmd === '/settings') {
+          // /settings get <key>
+          // /settings set <key> <value>
+          const op = parts[1];
+          if (op === 'get' && parts[2]) {
+            const key = parts[2];
+            const val = settings.get(key, null);
+            lastMessages.push(`[settings] ${key} = ${JSON.stringify(val)}`);
+          } else if (op === 'set' && parts[2] && parts[3]) {
+            const key = parts[2];
+            const value = parts.slice(3).join(' ');
+            try {
+              await settings.set(key, JSON.parse(value));
+              lastMessages.push(`[settings] set ${key} = ${value}`);
+            } catch {
+              // if JSON parse fails, store as string
+              await settings.set(key, value);
+              lastMessages.push(`[settings] set ${key} = "${value}"`);
+            }
+          } else {
+            lastMessages.push(
+              '[system] Usage: /settings get <key> | /settings set <key> <json-value>',
+            );
+          }
+        } else {
+          lastMessages.push(`[system] Unknown command: ${trimmed}`);
+        }
+      } else {
+        // Regular chat message: broadcast to all providers
+        try {
+          await chatService.sendMessage(trimmed, []);
+          lastMessages.push(`[you] ${trimmed}`);
+        } catch (err) {
+          lastMessages.push(`[system] Failed to send message: ${String(err)}`);
+        }
+      }
+
+      // Re-render immediately after processing input
+      try {
+        if (cliRenderer) await renderUI(cliRenderer, lastMessages);
+      } catch {
+        // ignore render errors
+      }
+    });
+  } catch (err) {
+    // If readline isn't available, TUI will still refresh periodically
+  }
 
   const updateLoop = setInterval(async () => {
     if (!isRunning) return;

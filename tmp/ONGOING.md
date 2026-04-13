@@ -57,3 +57,15 @@ Planned next steps:
 3. Commit changes (force-add tmp and commit).
 
 Proceeding to add the Playwright smoke test and commit.
+
+- 2026-04-13T00:55:00Z: Added stdin handling to TUI renderer to support commands (/connect, /settings) and message sending from terminal input.
+
+Next hardest follow-up (new):
+- Implement a basic settings persistence layer (small, file-backed) to store UI preferences (like which chat panels are visible). This is different from the prior tasks and enables /settings command to persist choices.
+
+Planned next steps:
+1. Implement a minimal settings store at src/utils/settings.ts using JSON file under AuthService.DATA_DIR or a configurable path.
+2. Add CLI '/settings set <key> <value>' and '/settings get <key>' support in src/index.tsx to interact with the store.
+3. Update tmp/ONGOING.md with actions and commit.
+
+I'll implement step 1 and step 2 now and commit (force-add tmp).
