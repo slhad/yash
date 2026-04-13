@@ -7,6 +7,10 @@ set -euo pipefail
 #   FORCE_BUILD=1 ./scripts/ci/run_hermetic_local.sh  # force rebuild
 
 IMAGE_TAG="${IMAGE_TAG:-yash-ci:local}"
+# By default pass host UID/GID as build args so the locally-built image can
+# optionally create a host-matching user. Override by setting BUILD_ARGS in
+# the environment before invoking this script (set to empty string to skip).
+BUILD_ARGS="${BUILD_ARGS:---build-arg HOST_UID=$(id -u) --build-arg HOST_GID=$(id -g)}"
 CONTAINER_NAME="${CONTAINER_NAME:-yash-ci-local-$(date +%s)}"
 
 echo "Using image: $IMAGE_TAG"
@@ -14,7 +18,12 @@ echo "Using image: $IMAGE_TAG"
 # Build image if not present or if forced
 if [ "${FORCE_BUILD:-0}" = "1" ] || [ -z "$(docker images -q "$IMAGE_TAG" 2>/dev/null)" ]; then
 	echo "Building Docker image $IMAGE_TAG (this may take a while)..."
-	docker build -t "$IMAGE_TAG" .
+	# If BUILD_ARGS is non-empty, include them in the docker build invocation
+	if [ -n "$BUILD_ARGS" ]; then
+		eval docker build $BUILD_ARGS -t "$IMAGE_TAG" .
+	else
+		docker build -t "$IMAGE_TAG" .
+	fi
 else
 	echo "Image $IMAGE_TAG already exists locally; skipping build. Set FORCE_BUILD=1 to rebuild."
 fi

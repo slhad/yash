@@ -112,7 +112,10 @@ jobs:
 
       - name: Build Docker image for hermetic tests
         run: |
-          docker build -t yash-ci:latest .
+          # Pass host UID/GID as build args so the image can optionally bake a
+          # host-matching user. This helps artifact ownership when the image is
+          # used on the runner. Use --progress=plain for clearer logs.
+          docker build --build-arg HOST_UID="$(id -u)" --build-arg HOST_GID="$(id -g)" -t yash-ci:latest .
 
       - name: Run hermetic integration tests inside Docker image
         run: |
