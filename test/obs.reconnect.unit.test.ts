@@ -4,11 +4,19 @@ import { ObsService } from '../src/services/obs.service';
 test('ObsService reconnection interval is configurable and attempts reconnect when disconnected', async () => {
   // Use a short reconnect interval and short connect delay to make the test fast
   // Use a small base reconnect interval and very short connect delay for fast test
-  const obs = new ObsService('localhost', 4455, null, false, 200, 50);
-
-  // Stub Math.random to make jitter deterministic: delay = random()*200 -> 100ms
-  const originalRandom = Math.random;
-  (Math as any).random = () => 0.5;
+  // Use injected deterministic RNG rather than stubbing Math.random globally
+  const obs = new ObsService(
+    'localhost',
+    4455,
+    null,
+    false,
+    200,
+    50,
+    undefined,
+    undefined,
+    undefined,
+    () => 0.5,
+  );
 
   // Initially disconnected
   expect(obs.isConnected()).toBe(false);
@@ -29,6 +37,5 @@ test('ObsService reconnection interval is configurable and attempts reconnect wh
   // Clean up
   await obs.disconnect();
 
-  // restore Math.random
-  (Math as any).random = originalRandom;
+  // No global RNG modification to restore; injection keeps tests isolated
 });

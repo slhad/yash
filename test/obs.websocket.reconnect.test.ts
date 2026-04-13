@@ -3,8 +3,8 @@ import { ObsService } from '../src/services/obs.service';
 
 describe('ObsService WebSocket reconnection (integration)', () => {
   test('reconnects when server returns after a close', async () => {
-    // Deterministic jitter: Math.random() -> 1 so delay == maxDelay
-    const randomSpy = vi.spyOn(Math, 'random').mockImplementation(() => 1);
+    // Deterministic jitter via injected RNG so we don't spy/stub Math.random globally
+    const randomFn = () => 1;
 
     // In-process fake server that controls availability and tracks clients
     const FakeServer = {
@@ -75,7 +75,18 @@ describe('ObsService WebSocket reconnection (integration)', () => {
     (globalThis as any).WebSocket = FakeWebSocket;
 
     const baseMs = 100;
-    const obs = new ObsService('localhost', 4455, null, true, baseMs, 0);
+    const obs = new ObsService(
+      'localhost',
+      4455,
+      null,
+      true,
+      baseMs,
+      0,
+      undefined,
+      undefined,
+      undefined,
+      randomFn,
+    );
 
     // connect while server is available
     await obs.connect();
@@ -100,6 +111,5 @@ describe('ObsService WebSocket reconnection (integration)', () => {
 
     // cleanup
     (globalThis as any).WebSocket = originalWebSocket;
-    randomSpy.mockRestore();
   });
 });
