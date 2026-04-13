@@ -323,6 +323,70 @@ Bun.serve({
         });
       },
     },
+    '/api/admin/keys/export': {
+      POST: async (req) => {
+        const auth = await authorizeAdmin(req);
+        if (!auth.ok)
+          return new Response(JSON.stringify(auth.body), {
+            status: auth.status,
+            headers: { 'Content-Type': 'application/json' },
+          });
+
+        try {
+          const { hasAdminRole } = require('./utils/adminAuth');
+          const allowed = await hasAdminRole(auth, 'admin');
+          if (!allowed)
+            return new Response(JSON.stringify({ error: 'forbidden' }), {
+              status: 403,
+              headers: { 'Content-Type': 'application/json' },
+            });
+        } catch (e) {
+          return new Response(JSON.stringify({ error: 'forbidden' }), {
+            status: 403,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+
+        let body = null;
+        try {
+          body = await req.json();
+        } catch (_) {}
+
+        const publicKey = body?.publicKeyPem;
+        if (!publicKey)
+          return new Response(JSON.stringify({ error: 'publicKeyPem missing' }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json' },
+          });
+
+        try {
+          const packageData = await adminService.exportEncryptedAdminKeys(publicKey);
+          try {
+            const Audit = require('./utils/audit').default;
+            const audit = new Audit();
+            await audit.append('admin-keys-exported', {
+              actor: 'admin-endpoint',
+              clientIp: (auth as any).clientIp || 'unknown',
+              adminKeyId: (auth as any).adminKeyId || null,
+              method: (auth as any).method || null,
+              note: 'exported admin keys (encrypted)',
+            });
+          } catch (e) {
+            defaultLogger.info('Audit append failed (non-fatal):', e);
+          }
+
+          return new Response(JSON.stringify(packageData), {
+            headers: { 'Content-Type': 'application/json' },
+          });
+        } catch (e) {
+          defaultLogger.error('admin keys export failed', e);
+          return new Response(JSON.stringify({ error: 'failed' }), {
+            status: 500,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+      },
+    },
     '/api/admin/keys/update-roles': {
       POST: async (req) => {
         const auth = await authorizeAdmin(req);

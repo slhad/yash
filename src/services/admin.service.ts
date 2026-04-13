@@ -205,6 +205,68 @@ export class AdminService {
     }
   }
 
+  /**
+   * Export admin keys and HMAC metadata encrypted for a provided RSA public key.
+   * Returns a hybrid-encrypted package (RSA-OAEP-SHA256 + AES-256-GCM) that the
+   * holder of the corresponding private key can decrypt to recover the admin
+   * keys (including stored HMACs). This is intended for secure transfer between
+   * instances or backups.
+   */
+  async exportEncryptedAdminKeys(publicKeyPem: string): Promise<{
+    algorithm: string;
+    encryptedKey: string;
+    iv: string;
+    tag: string;
+    ciphertext: string;
+  }> {
+    await this.init();
+
+    if (!publicKeyPem || typeof publicKeyPem !== 'string') throw new Error('publicKeyPem required');
+
+    // Prepare payload: keys and hmac metadata
+    const keysArr = Array.from(this.keys.values());
+    const payload = {
+      keys: keysArr,
+      hmacKeys: { current: this.hmacKey, previous: this.prevHmacKeys },
+    };
+
+    const plaintext = JSON.stringify(payload);
+
+    // Hybrid encrypt: AES-256-GCM for payload, RSA-OAEP-SHA256 for AES key
+    const aesKey = crypto.randomBytes(32);
+    const iv = crypto.randomBytes(12);
+
+    const cipher = crypto.createCipheriv('aes-256-gcm', aesKey, iv);
+    const encryptedBuf = Buffer.concat([
+      cipher.update(Buffer.from(plaintext, 'utf8')),
+      cipher.final(),
+    ]);
+    const authTag = cipher.getAuthTag();
+
+    let encryptedKeyBuf: Buffer;
+    try {
+      encryptedKeyBuf = crypto.publicEncrypt(
+        {
+          key: publicKeyPem,
+          padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
+          oaepHash: 'sha256',
+        },
+        aesKey,
+      );
+    } catch (err) {
+      defaultLogger.error('Failed to encrypt AES key with provided public key', err);
+      throw err;
+    }
+
+    return {
+      algorithm: 'rsa-oaep-sha256+aes-256-gcm',
+      encryptedKey: encryptedKeyBuf.toString('base64'),
+      iv: iv.toString('base64'),
+      tag: authTag.toString('base64'),
+      ciphertext: encryptedBuf.toString('base64'),
+    };
+  }
+
   // Create a new admin key and return plaintext token (one-time display)
   async createKey(
     label?: string,
