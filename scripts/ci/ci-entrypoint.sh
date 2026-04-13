@@ -30,15 +30,17 @@ if [ -n "${HOST_UID:-}" ] && [ -n "${HOST_GID:-}" ]; then
 		# Attempt to set ownership of artifact dir to host UID/GID
 		chown -R "$HOST_UID":"$HOST_GID" /app/tmp 2>/dev/null || true
 
-		# Execute the requested command as the created user. Use su if available.
-		# Fall back to running as root if su is not present or fails.
-		if command -v su >/dev/null 2>&1; then
-			echo "Executing command as hostuser (UID:GID $HOST_UID:$HOST_GID)"
-			# Combine all args into a single command string
-			cmd="$*"
+		# Execute the requested command as the created user. Prefer gosu (fast
+		# and reliable), fall back to su if present, otherwise run as root.
+		cmd="$*"
+		if command -v gosu >/dev/null 2>&1; then
+			echo "Executing command as hostuser (UID:GID $HOST_UID:$HOST_GID) using gosu"
+			exec gosu hostuser bash -lc "$cmd"
+		elif command -v su >/dev/null 2>&1; then
+			echo "Executing command as hostuser (UID:GID $HOST_UID:$HOST_GID) using su"
 			exec su -s /bin/bash hostuser -c "$cmd"
 		else
-			echo "su not available; running command as root"
+			echo "No gosu or su available; running command as root"
 			exec "$@"
 		fi
 	else

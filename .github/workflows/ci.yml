@@ -170,6 +170,12 @@ jobs:
             echo "Running artifact verification script"
             bash scripts/ci/verify_artifact.sh || true
 
+            echo "Capturing metrics and OBS status into /app/tmp for artifact inspection"
+            # Capture Prometheus text and JSON snapshots for debugging
+            curl -sS http://localhost:3000/metrics -o /app/tmp/metrics.txt || echo "metrics fetch failed" > /app/tmp/metrics_fetch_failed.txt || true
+            curl -sS http://localhost:3000/api/metrics -o /app/tmp/metrics.json || echo "api metrics fetch failed" > /app/tmp/metrics_api_fetch_failed.txt || true
+            curl -sS http://localhost:3000/api/obs/status -o /app/tmp/obs_status.json || echo "obs status fetch failed" > /app/tmp/obs_status_fetch_failed.txt || true
+
             echo "Integration tests finished"
           '
 

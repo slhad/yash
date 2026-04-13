@@ -13,7 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libx11-6 libgbm1 \
   libasound2 libpangocairo-1.0-0 libxshmfence1 libxrandr2 libxcomposite1 libxss1 libxcb1 \
   libxdamage1 libxext6 libxrender1 libxfixes3 libglib2.0-0 libgtk-3-0 \
-  ca-certificates xz-utils \
+  ca-certificates xz-utils unzip \
   && rm -rf /var/lib/apt/lists/*
 
 # Install Node 18 (for Playwright tooling)
@@ -34,6 +34,21 @@ COPY . /app
 COPY scripts/ci/ci-entrypoint.sh /usr/local/bin/ci-entrypoint.sh
 RUN chmod +x /usr/local/bin/ci-entrypoint.sh || true
  
+# Install gosu for reliable privilege drop in ci-entrypoint (used to run commands
+# as a host-matching user without relying on su). We download the prebuilt
+# binary from the upstream releases and install it to /usr/local/bin.
+RUN set -eux; \
+    dpkgArch="$(dpkg --print-architecture)"; \
+    case "${dpkgArch}" in \
+      amd64) gosu_arch="amd64" ;; \
+      arm64) gosu_arch="arm64" ;; \
+      armhf) gosu_arch="armhf" ;; \
+      *) gosu_arch="${dpkgArch}" ;; \
+    esac; \
+    curl -fsSL -o /usr/local/bin/gosu "https://github.com/tianon/gosu/releases/download/1.16/gosu-${gosu_arch}"; \
+    chmod +x /usr/local/bin/gosu; \
+    /usr/local/bin/gosu --version || true
+
 # If HOST_UID/HOST_GID are provided as build-args, create a matching user inside
 # the image at build time to simplify mounted artifact ownership when possible.
 RUN if [ "${HOST_UID}" != "1000" ] || [ "${HOST_GID}" != "1000" ]; then \
