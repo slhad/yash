@@ -131,9 +131,38 @@ Bun.serve({
       },
     },
     '/api/metrics': {
-      GET: () => {
-        // Return the full metrics snapshot collected in-memory. Consumers (CI or local)
-        // can poll this endpoint to retrieve counters, gauges, and timestamps.
+      // Protect metrics endpoints when YASH_METRICS_TOKEN is set. Accepts:
+      // - Authorization: Bearer <token>
+      // - x-api-key: <token>
+      // - query parameter: ?token=<token>
+      GET: (req) => {
+        const requiredToken = process.env.YASH_METRICS_TOKEN;
+        if (requiredToken) {
+          const authHeader = req.headers.get('authorization') || '';
+          const apiKeyHeader = req.headers.get('x-api-key');
+          let authorized = false;
+          if (authHeader && authHeader.toLowerCase().startsWith('bearer ')) {
+            authorized = authHeader.slice(7).trim() === requiredToken;
+          }
+          if (!authorized && apiKeyHeader) authorized = apiKeyHeader === requiredToken;
+          if (!authorized) {
+            try {
+              const url = new URL(req.url, 'http://localhost');
+              const q = url.searchParams.get('token');
+              if (q === requiredToken) authorized = true;
+            } catch (e) {
+              // ignore
+            }
+          }
+          if (!authorized) {
+            return new Response(JSON.stringify({ error: 'unauthorized' }), {
+              status: 401,
+              headers: { 'Content-Type': 'application/json' },
+            });
+          }
+        }
+
+        // Return the full metrics snapshot collected in-memory.
         const metricsModule = require('./utils/metrics');
         const snapshot =
           metricsModule && metricsModule.metrics && metricsModule.metrics.getAll

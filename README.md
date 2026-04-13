@@ -90,3 +90,25 @@ Keys currently exported (examples)
 
 Security note: /api/metrics and /metrics are unauthenticated by default. If you plan to
 expose them on a public network, add an ACL or authentication layer before enabling scraping.
+
+Optional authentication
+-----------------------
+If you want to protect the metrics endpoints, set an environment variable `YASH_METRICS_TOKEN`.
+When set, both `/api/metrics` (JSON) and `/metrics` (Prometheus text) will require this token.
+
+Accepted authentication methods:
+- HTTP header: `Authorization: Bearer <token>`
+- HTTP header: `x-api-key: <token>`
+- Query parameter: `?token=<token>`
+
+Example (env):
+
+```
+export YASH_METRICS_TOKEN=supersecret-token
+```
+
+Then access metrics with a header:
+
+```
+curl -H "Authorization: Bearer supersecret-token" http://localhost:3000/metrics
+```
