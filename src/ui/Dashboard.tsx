@@ -1,6 +1,6 @@
 import { baseComponents } from '@opentui/react';
 
-const { Box, Text } = baseComponents;
+const { Box, Text, Button } = baseComponents;
 
 import React, { useEffect, useState } from 'react';
 import { ChatDisplay } from './ChatDisplay';
@@ -37,6 +37,23 @@ export const Dashboard: React.FC<DashboardProps> = ({
   getObsStatus,
   getChatMessages,
 }) => {
+  // Settings store (file-backed). We use it to persist simple UI preferences.
+  // Initialize lazily so server-side rendering or test runs don't block.
+  const [settings] = useState(() => new (require('../utils/settings').default)());
+
+  // Whether to show the settings panel
+  const [showSettings, setShowSettings] = useState(false);
+
+  // Persisted setting: whether to show the platform status panel
+  const [showPlatformStatus, setShowPlatformStatus] = useState<boolean>(() =>
+    settings.get('showPlatformStatus', true),
+  );
+
+  // When showPlatformStatus changes, persist it
+  useEffect(() => {
+    // write asynchronously
+    void settings.set('showPlatformStatus', showPlatformStatus);
+  }, [showPlatformStatus, settings]);
   const [authStatus, setAuthStatus] = useState<Record<string, boolean>>({});
   const [streamStatus, setStreamStatus] = useState<Record<string, string>>({});
   const [connectionStatus, setConnectionStatus] = useState<Record<string, string>>({});
@@ -161,10 +178,32 @@ export const Dashboard: React.FC<DashboardProps> = ({
   return (
     <Box padding={1} style={{ backgroundColor: '#0f0f1a' }}>
       <Box marginBottom={1}>
-        <Text bold color="cyan" fontSize={2}>
-          YASH - Yet Another Streamer Helper
-        </Text>
-        <Text color="gray">Unified platform management for YouTube, Twitch, and Kick</Text>
+        <Box flexDirection="row" gap={1} alignItems="center">
+          <Box>
+            <Text bold color="cyan" fontSize={2}>
+              YASH - Yet Another Streamer Helper
+            </Text>
+            <Text color="gray">Unified platform management for YouTube, Twitch, and Kick</Text>
+          </Box>
+          <Box marginLeft="auto">
+            <Button onClick={() => setShowSettings((s) => !s)} style={{ backgroundColor: '#333' }}>
+              {showSettings ? 'Close Settings' : 'Settings'}
+            </Button>
+          </Box>
+        </Box>
+        {showSettings && (
+          <Box marginTop={1} border="rounded" padding={1} width="50%">
+            <Text bold>UI Settings</Text>
+            <Box marginTop={1} flexDirection="row" gap={1} alignItems="center">
+              <Button
+                onClick={() => setShowPlatformStatus((v) => !v)}
+                style={{ backgroundColor: showPlatformStatus ? 'green' : '#333' }}
+              >
+                {showPlatformStatus ? '[x] Show Platform Status' : '[ ] Show Platform Status'}
+              </Button>
+            </Box>
+          </Box>
+        )}
       </Box>
 
       <Box flexDirection="row" gap={1}>
@@ -179,7 +218,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
             getStreamStatus={getStreamStatusFn}
           />
 
-          <StatusBar platformStatus={combinedPlatformStatus} obsConnected={obsConnected} />
+          {showPlatformStatus && (
+            <StatusBar platformStatus={combinedPlatformStatus} obsConnected={obsConnected} />
+          )}
         </Box>
 
         <Box flexDirection="column" gap={1} width="50%">
