@@ -10,5 +10,13 @@ Next steps
 - Consider adding a maxAttempts option to stop reconnection after N tries and emit an event.
 - Expose backoff config via runtime config (getConfig) or env variables for production tuning.
 
+Done this turn
+- Added deterministic unit test: test/obs.backoff.unit.test.ts
+
+Next (candidate) tasks
+- Add maxAttempts and event when exceeded (harder follow-up).
+- Wire backoff parameters to getConfig() so they can be set from config file (medium).
+- Add integration test with fake WS server to validate reconnection in a more realistic environment (hard).
+
 Notes
 - tmp/ is gitignored; file created to satisfy the workflow requirement. Will be force-added to commit per instruction.
