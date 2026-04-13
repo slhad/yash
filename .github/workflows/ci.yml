@@ -117,6 +117,17 @@ jobs:
           # used on the runner. Use --progress=plain for clearer logs.
           docker build --build-arg HOST_UID="$(id -u)" --build-arg HOST_GID="$(id -g)" -t yash-ci:latest .
 
+      - name: Image health-check (fast, non-test)
+        run: |
+          # Run a lightweight health check inside the built hermetic image as the
+          # non-root runner user to fail fast on environment/tooling issues.
+          mkdir -p tmp
+          chmod +x scripts/ci/run_and_collect_artifacts.sh
+          chmod +x scripts/ci/image_health_check.sh
+          # This wrapper will copy any /app/tmp artifacts back to tmp/ and will
+          # exit non-zero if the health check fails.
+          ./scripts/ci/run_and_collect_artifacts.sh yash-ci:latest -- "bash scripts/ci/image_health_check.sh"
+
       - name: Run hermetic integration tests inside Docker image
         run: |
           # Ensure host tmp exists and is writable by the runner user
