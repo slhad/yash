@@ -229,6 +229,27 @@ jobs:
           chmod +x scripts/ci/sign_artifacts.sh || true
           ./scripts/ci/sign_artifacts.sh tmp
 
+      - name: Verify artifact signatures (optional)
+        if: ${{ secrets.ARTIFACT_SIGNING_KEY }}
+        run: |
+          echo "Verifying artifact signatures (using generated public key)"
+          chmod +x scripts/ci/verify_signatures_and_restore.sh || true
+          # Find created tarball
+          TARFILE=$(ls tmp/integration-artifacts-*.tar.gz 2>/dev/null | head -n1 || true)
+          if [ -z "$TARFILE" ]; then
+            echo "No tarball found to verify; skipping verification"
+            exit 0
+          fi
+          echo "Verifying tar: $TARFILE with pubkey tmp/artifact-signing-public.pem"
+          # Run verification in no-ownership mode so we don't attempt chown on runner
+          if ./scripts/ci/verify_signatures_and_restore.sh "$TARFILE" --pubkey tmp/artifact-signing-public.pem --no-ownership; then
+            echo "Signature verification succeeded"
+          else
+            echo "Signature verification failed; creating diagnostic tarball and failing the job"
+            ./scripts/ci/create_artifact_tar.sh tmp || true
+            exit 3
+          fi
+
       - name: Upload integration artifacts (tarball + manifest + diagnostics)
         if: always()
         uses: actions/upload-artifact@v4
