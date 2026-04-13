@@ -203,6 +203,15 @@ jobs:
           # If remediation succeeded, create a tarball as normal
           ./scripts/ci/create_artifact_tar.sh tmp || echo "Tarball creation failed"
 
+      - name: Sign integration artifacts (optional)
+        if: ${{ secrets.ARTIFACT_SIGNING_KEY }}
+        env:
+          ARTIFACT_SIGNING_KEY: ${{ secrets.ARTIFACT_SIGNING_KEY }}
+        run: |
+          echo "Signing artifacts (ARTIFACT_SIGNING_KEY provided)"
+          chmod +x scripts/ci/sign_artifacts.sh || true
+          ./scripts/ci/sign_artifacts.sh tmp
+
       - name: Upload integration artifacts (tarball + manifest + diagnostics)
         if: always()
         uses: actions/upload-artifact@v4
