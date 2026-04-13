@@ -5,6 +5,12 @@ set -euo pipefail
 # then reliably collect /app/tmp into the host tmp/ directory. This wrapper is
 # intended for deterministic local reproduction and CI wrapper usage.
 #
+# The wrapper supports an optional environment variable BAKE_USER. When
+# BAKE_USER=true the container will NOT be run with the host --user flag and
+# assumes the image either bakes a host-matching user or will handle ownership
+# inside the container. Default (unset) preserves the original behavior of
+# running the container as the host runner UID:GID (recommended default).
+#
 # Usage: scripts/ci/run_and_collect_artifacts.sh <image> -- <command to run inside container>
 
 IMAGE="${1:-yash-ci:local}"
@@ -28,13 +34,29 @@ echo "[run_and_collect_artifacts] Container: $CONTAINER_NAME"
 mkdir -p tmp
 
 echo "Starting container (detached) and running command inside it"
-docker run -d --name "$CONTAINER_NAME" \
-	-e RUN_PLAYWRIGHT=1 \
-	-e HOST_UID="$(id -u)" \
-	-e HOST_GID="$(id -g)" \
-	-v "$(pwd)/tmp:/app/tmp" \
-	--user "$(id -u):$(id -g)" \
-	"$IMAGE" /bin/bash -lc "$CMD"
+
+# If BAKE_USER is set to 'true', do not pass --user so the baked image's user
+# (if present) will run the command. Otherwise run the container as the current
+# host user to make artifact ownership immediate on the host.
+BAKE_USER="${BAKE_USER:-false}"
+if [ "$BAKE_USER" = "true" ]; then
+	echo "Running container without --user (bake-user path)"
+	docker run -d --name "$CONTAINER_NAME" \
+		-e RUN_PLAYWRIGHT=1 \
+		-e HOST_UID="$(id -u)" \
+		-e HOST_GID="$(id -g)" \
+		-v "$(pwd)/tmp:/app/tmp" \
+		"$IMAGE" /bin/bash -lc "$CMD"
+else
+	echo "Running container with --user $(id -u):$(id -g) (runtime --user path)"
+	docker run -d --name "$CONTAINER_NAME" \
+		-e RUN_PLAYWRIGHT=1 \
+		-e HOST_UID="$(id -u)" \
+		-e HOST_GID="$(id -g)" \
+		-v "$(pwd)/tmp:/app/tmp" \
+		--user "$(id -u):$(id -g)" \
+		"$IMAGE" /bin/bash -lc "$CMD"
+fi
 
 echo "Waiting for container to finish..."
 docker wait "$CONTAINER_NAME" >/dev/null

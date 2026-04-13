@@ -15,6 +15,7 @@ IMAGE="${IMAGE:-yash-ci:local}"
 FORCE_BUILD=0
 NO_SIGN=0
 GENERATE_KEY=0
+BAKE_USER=0
 
 usage() {
 	cat <<USAGE >&2
@@ -48,6 +49,10 @@ while [ $# -gt 0 ]; do
 		GENERATE_KEY=1
 		shift
 		;;
+	--bake-user)
+		BAKE_USER=1
+		shift
+		;;
 	-h | --help)
 		usage
 		;;
@@ -79,6 +84,14 @@ mkdir -p tmp
 
 echo "Running integration container and collecting artifacts (wrapper will copy tmp/ back to host)"
 chmod +x scripts/ci/run_and_collect_artifacts.sh scripts/ci/container_run.sh || true
+
+# Honor bake-user flag/env by exporting BAKE_USER for the wrapper
+if [ "$BAKE_USER" -eq 1 ] || [ "${BAKE_USER:-false}" = "true" ]; then
+	echo "Using bake-user path: will run container without --user"
+	export BAKE_USER=true
+else
+	export BAKE_USER=false
+fi
 
 # Allow the container run to fail (we still want to collect artifacts and run remediation)
 set +e

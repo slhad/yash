@@ -5,6 +5,12 @@ on:
     branches: [ master, main ]
   pull_request:
     branches: [ master, main ]
+  workflow_dispatch:
+    inputs:
+      bake_user:
+        description: 'When true, run baked-user path (do not run containers with --user)'
+        required: false
+        default: 'false'
 
 jobs:
   secret-scan:
@@ -126,6 +132,8 @@ jobs:
           chmod +x scripts/ci/image_health_check.sh
           # This wrapper will copy any /app/tmp artifacts back to tmp/ and will
           # exit non-zero if the health check fails.
+          # Allow bake-user toggle via workflow_dispatch input; default is runtime --user
+          export BAKE_USER="${{ github.event.inputs.bake_user || 'false' }}"
           ./scripts/ci/run_and_collect_artifacts.sh yash-ci:latest -- "bash scripts/ci/image_health_check.sh"
 
       - name: Lint CI helper scripts (ShellCheck)
@@ -162,7 +170,8 @@ jobs:
           # manage docker cp/tar fallbacks and run the fixer before upload.
           chmod +x scripts/ci/run_and_collect_artifacts.sh
           chmod +x scripts/ci/container_run.sh
-          ./scripts/ci/run_and_collect_artifacts.sh yash-ci:latest -- "bash scripts/ci/container_run.sh"
+           export BAKE_USER="${{ github.event.inputs.bake_user || 'false' }}"
+           ./scripts/ci/run_and_collect_artifacts.sh yash-ci:latest -- "bash scripts/ci/container_run.sh"
 
           RUN_EXIT=$?
           echo "Container $CONTAINER_NAME exited with status $RUN_EXIT"
