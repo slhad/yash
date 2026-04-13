@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Pre-commit hook: run gitleaks if available, otherwise run a lightweight JS fallback scanner
+
+echo "Running pre-commit secret-scan"
+
+if command -v gitleaks >/dev/null 2>&1; then
+  echo "gitleaks found, running gitleaks detect --staged --redact"
+  if ! gitleaks detect --staged --redact; then
+    echo "gitleaks detected potential secrets in staged changes. Commit aborted." >&2
+    exit 1
+  fi
+  exit 0
+fi
+
+# Try node or bun fallback
+if command -v node >/dev/null 2>&1 || command -v bun >/dev/null 2>&1; then
+  echo "gitleaks not found; running JS fallback scanner"
+  if command -v node >/dev/null 2>&1; then
+    node scripts/precommit/fallback.js
+  else
+    bun scripts/precommit/fallback.js
+  fi
+  EXIT_CODE=$?
+  if [ $EXIT_CODE -ne 0 ]; then
+    echo "Pre-commit secret-scan failed (fallback). Commit aborted." >&2
+    exit $EXIT_CODE
+  fi
+  exit 0
+fi
+
+echo "No gitleaks or node/bun available; skipping secret-scan" >&2
+exit 0
