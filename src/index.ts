@@ -7,7 +7,7 @@ import { ObsService } from './services/obs.service';
 import { StreamService } from './services/stream.service';
 import { defaultLogger } from './utils/logger';
 import { AuthService } from './services/auth.service';
-import { authorizeMetrics } from './utils/metricsAuth';
+import { apiMetricsHandler, prometheusMetricsHandler } from './utils/metricsHandlers';
 
 export const youtube = new YouTubeProvider();
 export const twitch = new TwitchProvider();
@@ -132,54 +132,17 @@ Bun.serve({
       },
     },
     '/api/metrics': {
-      // Protect metrics endpoints when YASH_METRICS_TOKEN is set. Accepts:
-      // - Authorization: Bearer <token>
-      // - x-api-key: <token>
-      // - query parameter: ?token=<token>
-      GET: (req) => {
-        // Delegate authorization to the central helper so both endpoints
-        // behave the same when YASH_METRICS_TOKEN is set.
-        if (!authorizeMetrics((name: string) => req.headers.get(name), req.url)) {
-          return new Response(JSON.stringify({ error: 'unauthorized' }), {
-            status: 401,
-            headers: { 'Content-Type': 'application/json' },
-          });
-        }
-
-        // Return the full metrics snapshot collected in-memory.
-        const metricsModule = require('./utils/metrics');
-        const snapshot =
-          metricsModule && metricsModule.metrics && metricsModule.metrics.getAll
-            ? metricsModule.metrics.getAll()
-            : {};
-        return new Response(JSON.stringify(snapshot), {
-          headers: { 'Content-Type': 'application/json' },
-        });
-      },
+      // Delegate to the testable handler which centralizes authorization and
+      // response formatting. The handler accepts a header getter and URL string.
+      GET: (req) => apiMetricsHandler((name: string) => req.headers.get(name), req.url),
     },
     // Prometheus text exposition endpoint. This mirrors /api/metrics but
     // returns plain-text in Prometheus exposition format so CI or Prometheus
     // can scrape it directly.
     '/metrics': {
-      GET: (req) => {
-        // Protect Prometheus exposition the same way as /api/metrics when a
-        // metrics token is configured.
-        if (!authorizeMetrics((name: string) => req.headers.get(name), req.url)) {
-          return new Response(JSON.stringify({ error: 'unauthorized' }), {
-            status: 401,
-            headers: { 'Content-Type': 'application/json' },
-          });
-        }
-
-        try {
-          const metricsModule = require('./utils/metrics');
-          const body =
-            metricsModule && metricsModule.toPrometheusText ? metricsModule.toPrometheusText() : '';
-          return new Response(body, { headers: { 'Content-Type': 'text/plain; version=0.0.4' } });
-        } catch (err) {
-          return new Response('', { status: 500 });
-        }
-      },
+      // Use the centralized prometheus handler which applies the same auth rules
+      // and formatting as the JSON handler.
+      GET: (req) => prometheusMetricsHandler((name: string) => req.headers.get(name), req.url),
     },
   },
   development: {
