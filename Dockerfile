@@ -1,6 +1,12 @@
 FROM ubuntu:22.04
 ENV DEBIAN_FRONTEND=noninteractive
 
+# Optional build args to create a host-matching user inside the image. CI can pass
+# these (via --build-arg HOST_UID=$(id -u) --build-arg HOST_GID=$(id -g)) to bake
+# a user with matching UID/GID into the image which can simplify artifact ownership.
+ARG HOST_UID=1000
+ARG HOST_GID=1000
+
 # Install essentials and Playwright deps
 RUN apt-get update && apt-get install -y --no-install-recommends \
   curl ca-certificates gnupg apt-transport-https lsb-release build-essential git procps \
@@ -27,6 +33,13 @@ COPY . /app
 # This makes artifact ownership easier when the CI job passes host UID/GID.
 COPY scripts/ci/ci-entrypoint.sh /usr/local/bin/ci-entrypoint.sh
 RUN chmod +x /usr/local/bin/ci-entrypoint.sh || true
+ 
+# If HOST_UID/HOST_GID are provided as build-args, create a matching user inside
+# the image at build time to simplify mounted artifact ownership when possible.
+RUN if [ "${HOST_UID}" != "1000" ] || [ "${HOST_GID}" != "1000" ]; then \
+      groupadd -g "${HOST_GID}" hostgroup 2>/dev/null || true; \
+      useradd -u "${HOST_UID}" -g "${HOST_GID}" -m -d /home/hostuser -s /bin/bash hostuser 2>/dev/null || true; \
+    fi || true
 
 # Install dependencies via Bun and ensure Playwright browsers are available
 RUN bun install --no-save || true
