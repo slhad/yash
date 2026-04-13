@@ -76,5 +76,14 @@ Next (candidate) tasks
 - Add CI-level retries around flaky integration steps (medium).
 - Consider adding documentation in README for configuring OBS reconnection behavior via env/config (low).
 
+Done this turn
+- Expanded metrics to include gauges and timestamps (successes, attempts, lastAttemptTs) and wired additional metrics in ObsService.
+- Exposed the richer metrics via /api/obs/status.
+
+Next (candidate) tasks
+- Add a dedicated /api/metrics endpoint and a small metrics export format (medium).
+- Add CI-level retries around flaky integration steps (medium).
+- Add README docs for OBS reconnection config (low).
+
 Notes
 - tmp/ is gitignored; file created to satisfy the workflow requirement. Will be force-added to commit per instruction.

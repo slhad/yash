@@ -403,6 +403,8 @@ export class ObsService {
         // record metric
         try {
           metrics.increment('obs.reconnect.failures');
+          metrics.increment('obs.reconnect.attempts');
+          metrics.recordTimestamp('obs.reconnect.lastAttemptTs');
         } catch (e) {
           // ignore metric errors
         }
@@ -420,6 +422,12 @@ export class ObsService {
             defaultLogger.info(
               `Reconnect attempts exceeded max (${this.reconnectMaxAttempts}), will not retry`,
             );
+            try {
+              metrics.increment('obs.reconnect.exhausted');
+              metrics.recordTimestamp('obs.reconnect.exhaustedTs');
+            } catch (e) {
+              // ignore
+            }
           }
           return;
         }

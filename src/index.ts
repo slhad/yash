@@ -122,8 +122,8 @@ Bun.serve({
           JSON.stringify({
             connected: obsService.isConnected(),
             // expose a few lightweight metrics for CI debugging
-            metrics: require('./utils/metrics').metrics.getCounters
-              ? require('./utils/metrics').metrics.getCounters()
+            metrics: require('./utils/metrics').metrics.getAll
+              ? require('./utils/metrics').metrics.getAll()
               : {},
           }),
           { headers: { 'Content-Type': 'application/json' } },
