@@ -59,5 +59,13 @@ Next (candidate) tasks
 - Add more metrics (successes, attempts, lastAttemptTs) and expose them via a /api/metrics endpoint (medium).
 - Replace sleep with polling /api/status readiness check in CI job (medium).
 
+Done this turn
+- Replaced CI `sleep` with a polling readiness check against /api/status for both e2e and integration-hermetic jobs.
+
+Next (candidate) tasks
+- Wire backoff parameters to getConfig() and environment variables (medium).
+- Add more metrics (successes, attempts, lastAttemptTs) and expose them via a /api/metrics endpoint (medium).
+- Add CI-level retries around flaky integration steps (medium).
+
 Notes
 - tmp/ is gitignored; file created to satisfy the workflow requirement. Will be force-added to commit per instruction.

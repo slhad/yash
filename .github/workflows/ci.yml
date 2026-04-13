@@ -54,11 +54,24 @@ jobs:
       - name: Install Playwright browsers
         run: npx playwright install --with-deps
 
-      - name: Start server in background
+      - name: Start server in background and wait for readiness
         run: |
           bun run src/index.ts &
-          # give server a moment to start
-          sleep 3
+          pid=$!
+          echo "Waiting for server to respond on http://localhost:3000/api/status..."
+          for i in $(seq 1 30); do
+            if curl -sSf http://localhost:3000/api/status -o /dev/null; then
+              echo "Server is up"
+              break
+            fi
+            sleep 1
+          done
+          # final check
+          if ! curl -sSf http://localhost:3000/api/status -o /dev/null; then
+            echo "Server failed to start after 30s" >&2
+            ps aux | sed -n '1,200p'
+            exit 1
+          fi
 
       - name: Run Playwright webview test
         env:
@@ -94,11 +107,23 @@ jobs:
       - name: Install Playwright browsers
         run: npx playwright install --with-deps
 
-      - name: Start server in background (hermetic)
+      - name: Start server in background (hermetic) and wait for readiness
         run: |
           bun run src/index.ts &
-          # give server a moment to start
-          sleep 3
+          pid=$!
+          echo "Waiting for server to respond on http://localhost:3000/api/status..."
+          for i in $(seq 1 30); do
+            if curl -sSf http://localhost:3000/api/status -o /dev/null; then
+              echo "Server is up"
+              break
+            fi
+            sleep 1
+          done
+          if ! curl -sSf http://localhost:3000/api/status -o /dev/null; then
+            echo "Server failed to start after 30s" >&2
+            ps aux | sed -n '1,200p'
+            exit 1
+          fi
 
       - name: Run Playwright webview test (hermetic)
         env:
