@@ -158,6 +158,20 @@ jobs:
             echo "Integration tests finished"
           '
 
+      - name: Inspect host tmp artifacts
+        if: always()
+        run: |
+          echo "Listing host tmp/ after container run"
+          ls -la tmp || true
+          if [ -f tmp/ci-artifact.txt ]; then
+            echo "Artifact stat:";
+            stat -c 'file=%n uid=%u gid=%g mode=%a' tmp/ci-artifact.txt || true
+          fi
+          if [ -f tmp/ci-artifact-owner.txt ]; then
+            echo "Artifact owner file contents:";
+            cat tmp/ci-artifact-owner.txt || true
+          fi
+
       - name: Upload integration artifacts
         if: always()
         uses: actions/upload-artifact@v4
