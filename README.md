@@ -1,5 +1,7 @@
 # Yet Another Streamer Helper (YASH)
 
+> NOTICE: Contributions are temporarily paused. The repository author has disabled certain features (OS keyring and hybrid encryption). Pull requests will be reviewed but may be closed until the author re-opens contributions.
+
 Small toolkit to manage streaming across YouTube, Twitch, and Kick with a
 unified interface. Written to run on Bun. This repository contains:
 

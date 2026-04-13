@@ -28,7 +28,7 @@ describe('AuthService', () => {
       async findCredentials(service: string) {
         const entries: Array<{ account: string; password: string }> = [];
         for (const k of Object.keys(this.store)) {
-          if (k.startsWith(service + ':')) {
+          if (k.startsWith(`${service}:`)) {
             const account = k.split(':')[1];
             entries.push({ account, password: this.store[k] });
           }

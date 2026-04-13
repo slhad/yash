@@ -1,8 +1,4 @@
 import { describe, expect, test } from 'bun:test';
-
-// This test starts a lightweight WebSocket server that mimics a minimal OBS
-// websocket server behaviour for request/response testing.
-import { serve } from 'bun';
 import { ObsService } from '../src/services/obs.service';
 
 describe('ObsService WebSocket transport', () => {
@@ -19,7 +15,7 @@ describe('ObsService WebSocket transport', () => {
       constructor(url: string) {
         this.url = url;
         // simulate async open
-        setTimeout(() => this.onopen && this.onopen(), 0);
+        setTimeout(() => this.onopen?.(), 0);
       }
       send(data: string) {
         try {
@@ -29,13 +25,13 @@ describe('ObsService WebSocket transport', () => {
             response: { success: true, echo: msg.requestType },
           };
           // simulate async response
-          setTimeout(() => this.onmessage && this.onmessage({ data: JSON.stringify(response) }), 0);
+          setTimeout(() => this.onmessage?.({ data: JSON.stringify(response) }), 0);
         } catch (e) {
-          setTimeout(() => this.onerror && this.onerror(e), 0);
+          setTimeout(() => this.onerror?.(e), 0);
         }
       }
       close() {
-        setTimeout(() => this.onclose && this.onclose(), 0);
+        setTimeout(() => this.onclose?.(), 0);
       }
     }
 

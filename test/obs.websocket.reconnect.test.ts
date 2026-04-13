@@ -1,4 +1,4 @@
-import { describe, expect, test, vi } from 'bun:test';
+import { describe, expect, test } from 'bun:test';
 import { ObsService } from '../src/services/obs.service';
 
 describe('ObsService WebSocket reconnection (integration)', () => {
@@ -32,12 +32,12 @@ describe('ObsService WebSocket reconnection (integration)', () => {
         if (FakeServer.available) {
           FakeServer.clients.add(this);
           // async open
-          setTimeout(() => this.onopen && this.onopen(), 0);
+          setTimeout(() => this.onopen?.(), 0);
         } else {
           // simulate immediate error/close
           setTimeout(() => {
-            this.onerror && this.onerror(new Error('connection refused'));
-            this.onclose && this.onclose();
+            this.onerror?.(new Error('connection refused'));
+            this.onclose?.();
           }, 0);
         }
       }
@@ -49,15 +49,15 @@ describe('ObsService WebSocket reconnection (integration)', () => {
             requestId: msg.requestId,
             response: { success: true, echo: msg.requestType },
           };
-          setTimeout(() => this.onmessage && this.onmessage({ data: JSON.stringify(response) }), 0);
+          setTimeout(() => this.onmessage?.({ data: JSON.stringify(response) }), 0);
         } catch (e) {
-          setTimeout(() => this.onerror && this.onerror(e), 0);
+          setTimeout(() => this.onerror?.(e), 0);
         }
       }
 
       close() {
         setTimeout(() => {
-          this.onclose && this.onclose();
+          this.onclose?.();
           FakeServer.clients.delete(this);
         }, 0);
       }
@@ -65,7 +65,7 @@ describe('ObsService WebSocket reconnection (integration)', () => {
       // helper for server-initiated close
       _simulateClose() {
         setTimeout(() => {
-          this.onclose && this.onclose();
+          this.onclose?.();
           FakeServer.clients.delete(this);
         }, 0);
       }

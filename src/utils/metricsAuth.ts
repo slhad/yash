@@ -8,7 +8,7 @@ export function authorizeMetrics(getHeader: (name: string) => string | null, url
   const authHeader = (getHeader('authorization') || '').toLowerCase();
   const apiKeyHeader = getHeader('x-api-key') || null;
 
-  if (authHeader && authHeader.startsWith('bearer ')) {
+  if (authHeader?.startsWith('bearer ')) {
     if (authHeader.slice(7).trim() === requiredToken) return true;
   }
 

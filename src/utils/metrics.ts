@@ -98,5 +98,5 @@ export function toPrometheusText(snapshot?: {
   }
 
   if (lines.length === 0) return '\n';
-  return lines.join('\n') + '\n';
+  return `${lines.join('\n')}\n`;
 }

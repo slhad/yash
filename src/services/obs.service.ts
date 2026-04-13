@@ -370,7 +370,7 @@ export class ObsService {
    * Uses: delay = random() * min(reconnectIntervalMs * (multiplier ^ attempt), reconnectMaxMs)
    */
   // Returns scheduling info when a new attempt is scheduled (used by tests)
-  private scheduleReconnectAttempt(): { delay: number; attempt: number } | void {
+  private scheduleReconnectAttempt(): { delay: number; attempt: number } | undefined {
     // If already scheduled or we are connected, do nothing
     if (this.reconnectTimer || this.connected) return;
 

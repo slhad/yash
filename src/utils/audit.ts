@@ -19,8 +19,6 @@ export class Audit {
 
   private key: string | null = null;
 
-  constructor() {}
-
   // Ensure audit key exists (prefer OS keyring, then file-based)
   async init(): Promise<void> {
     if (this.key) return;

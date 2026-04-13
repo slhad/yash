@@ -175,7 +175,7 @@ export class AdminService {
       if (!res.ok) return null;
       const j = await res.json();
       const data = j?.data?.data || {};
-      const raw = data['admin-keys'] || data['admin_keys'] || data['adminKeys'] || null;
+      const raw = data['admin-keys'] || data.admin_keys || data.adminKeys || null;
       if (!raw) return null;
       if (Array.isArray(raw)) return raw as AdminKey[];
       if (typeof raw === 'string') {

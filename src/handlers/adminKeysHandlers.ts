@@ -1,6 +1,3 @@
-import * as fsSync from 'node:fs';
-import * as fs from 'node:fs/promises';
-import * as path from 'node:path';
 import AdminService from '../services/admin.service';
 import { authorizeAdmin } from '../utils/adminAuth';
 import { defaultLogger } from '../utils/logger';

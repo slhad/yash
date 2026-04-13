@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
-import * as crypto from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { AuthService } from '../src/services/auth.service';
@@ -15,7 +14,7 @@ class MockKeytar {
   async findCredentials(service: string) {
     const entries: Array<{ account: string; password: string }> = [];
     for (const k of Object.keys(this.store)) {
-      if (k.startsWith(service + ':')) {
+      if (k.startsWith(`${service}:`)) {
         const account = k.split(':')[1];
         entries.push({ account, password: this.store[k] });
       }

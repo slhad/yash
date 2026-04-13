@@ -4,28 +4,8 @@ import * as path from 'node:path';
 import { AuthService } from '../src/services/auth.service';
 
 // Simple in-memory keytar mock for testing purposes
-class MockKeytar {
-  private store: Record<string, string> = {};
-  async getPassword(service: string, account: string) {
-    return this.store[`${service}:${account}`] || null;
-  }
-  async setPassword(service: string, account: string, password: string) {
-    this.store[`${service}:${account}`] = password;
-  }
-  async findCredentials(service: string) {
-    const entries: Array<{ account: string; password: string }> = [];
-    for (const k of Object.keys(this.store)) {
-      if (k.startsWith(service + ':')) {
-        const account = k.split(':')[1];
-        entries.push({ account, password: this.store[k] });
-      }
-    }
-    return entries;
-  }
-  async deletePassword(service: string, account: string) {
-    delete this.store[`${service}:${account}`];
-  }
-}
+// AuthService.rotateEncryptionKey is removed; tests call the service directly
+// without any OS keyring mocks.
 
 describe('AuthService.rotateEncryptionKey (removed)', () => {
   const yashDir = path.join(process.env.HOME || '.', '.yash');

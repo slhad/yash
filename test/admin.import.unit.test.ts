@@ -1,8 +1,4 @@
 import { describe, expect, test } from 'bun:test';
-import * as crypto from 'node:crypto';
-import * as fsSync from 'node:fs';
-import * as fs from 'node:fs/promises';
-import * as path from 'node:path';
 import AdminService from '../src/services/admin.service';
 
 describe('AdminService export/import (removed)', () => {

@@ -1,4 +1,3 @@
-import * as fsSync from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { PlatformProvider } from '../platforms/base';
@@ -19,11 +18,9 @@ export class AuthService {
 
   private tokens: Map<string, TokenData> = new Map();
 
-  // Accept an optional injected keytar-like object for compatibility with
-  // existing tests. The object is ignored because OS keyring integration has
-  // been removed.
-  constructor(_keytar?: any) {
-    // Load tokens synchronously-ish (fire-and-forget) to keep API simple.
+  // File-backed token store constructor. No OS keyring integration.
+  constructor() {
+    // Load tokens asynchronously (fire-and-forget) to keep API simple.
     void this.loadTokens();
   }
 
@@ -57,8 +54,8 @@ export class AuthService {
   }
 
   /**
-   * Migrate tokens currently stored in file-based tokens.json into the OS keyring
-   * (keytar) if available. Returns true if migration occurred.
+   * Note: migration to an OS keyring is no longer supported in this build.
+   * Tokens are stored as plain JSON in the data directory.
    */
 
   private async loadTokens() {

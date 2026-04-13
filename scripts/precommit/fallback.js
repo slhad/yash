@@ -2,8 +2,8 @@
 // patterns (private keys, AWS access keys, basic tokens). This is a best-effort
 // heuristic and not a replacement for a proper secret scanner.
 
-const { execSync } = require('child_process');
-const fs = require('fs');
+const { execSync } = require('node:child_process');
+const fs = require('node:fs');
 
 function getStagedFiles() {
   try {
