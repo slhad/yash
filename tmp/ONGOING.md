@@ -11,9 +11,10 @@ Next steps (ongoing) - do not commit
     - Include adminKeyId and method in audit metadata for all admin operations (done).
 
 3) Tests & CI:
-   - Add tests for exportEncryptionKey and exportEncryptedTokens (added).
-   - Add tests for Audit.verifyAll and tailLines.
-   - Add a CI job that runs Bun tests and the secret-scan action.
+    - Add tests for exportEncryptionKey and exportEncryptedTokens (added).
+    - Add tests for Audit.verifyAll and tailLines.
+    - Add a CI job that runs Bun tests and the secret-scan action (added: .github/workflows/ci.yml).
+    - Consider adding gitleaks or similar as a required check in CI for PRs.
 
 4) Ops / cleanup:
    - Coordinate secret rotation for config.json present in working tree.
