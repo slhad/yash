@@ -71,3 +71,22 @@ Notes:
 - Use `bun --hot ./src/main.tsx` for the interactive TUI entrypoint in development.
 
 See SPECS.md for architecture and conventions.
+
+Metrics & Prometheus
+--------------------
+This project exposes lightweight in-memory metrics for CI and local debugging.
+
+- JSON snapshot: GET /api/metrics returns counters, gauges, and timestamps as JSON.
+- Prometheus exposition: GET /metrics returns the same metrics in Prometheus text format
+  (Content-Type: text/plain; version=0.0.4). This endpoint is intended for scraping by
+  CI or lightweight Prometheus setups where data sensitivity is not a concern.
+
+Keys currently exported (examples)
+- obs.reconnect.failures (counter)
+- obs.reconnect.attempts (counter)
+- obs.reconnect.lastAttemptTs (timestamp, ms)
+- obs.reconnect.exhausted (counter)
+- obs.reconnect.exhaustedTs (timestamp, ms)
+
+Security note: /api/metrics and /metrics are unauthenticated by default. If you plan to
+expose them on a public network, add an ACL or authentication layer before enabling scraping.
