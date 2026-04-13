@@ -189,10 +189,18 @@ jobs:
         run: |
           echo "Preparing artifacts for upload: generate manifest, remediate ownership, create tarball"
           chmod +x scripts/ci/remediate_and_validate_artifacts.sh scripts/ci/create_artifact_tar.sh scripts/ci/generate_artifact_manifest.sh scripts/ci/validate_artifact_manifest.sh || true
-          # Attempt remediation and validation. Non-zero exit means remediation failed
-          # but we continue to collect artifacts for debugging.
-          ./scripts/ci/remediate_and_validate_artifacts.sh tmp "$(id -u)" "$(id -g)" || echo "Remediation failed; continuing to collect artifacts for debugging"
-          # Create a numeric-owner tarball of tmp/
+          # Attempt remediation and validation. If remediation fails we create a
+          # diagnostic tarball and then FAIL the step so the job is marked failed
+          # (but later upload steps marked with if: always() will still run and
+          # collect artifacts and diagnostics).
+          if ./scripts/ci/remediate_and_validate_artifacts.sh tmp "$(id -u)" "$(id -g)"; then
+            echo "Remediation succeeded or no mismatches"
+          else
+            echo "Remediation failed; creating tarball for debugging and failing the job"
+            ./scripts/ci/create_artifact_tar.sh tmp || echo "Tarball creation failed"
+            exit 2
+          fi
+          # If remediation succeeded, create a tarball as normal
           ./scripts/ci/create_artifact_tar.sh tmp || echo "Tarball creation failed"
 
       - name: Upload integration artifacts (tarball + manifest + diagnostics)
