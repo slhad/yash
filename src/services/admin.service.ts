@@ -31,6 +31,19 @@ export class AdminService {
   async init(): Promise<void> {
     try {
       await fs.mkdir(path.dirname(AdminService.ADMIN_FILE), { recursive: true });
+
+      // Try to load keys from Vault KV v2 (best-effort). If present use it,
+      // otherwise fall back to file-based admin_keys.json.
+      try {
+        const fromVault = await this.tryVaultGetAdminKeys();
+        if (fromVault && Array.isArray(fromVault) && fromVault.length > 0) {
+          for (const k of fromVault) this.keys.set(k.id, k as AdminKey);
+          return;
+        }
+      } catch (e) {
+        // ignore and fall back to file
+      }
+
       if (!fsSync.existsSync(AdminService.ADMIN_FILE)) {
         await fs.writeFile(AdminService.ADMIN_FILE, JSON.stringify({ keys: [] }, null, 2), {
           mode: 0o600,
@@ -61,9 +74,66 @@ export class AdminService {
         // enforce strict permissions if possible
         fsSync.chmodSync(AdminService.ADMIN_FILE, 0o600);
       } catch (_) {}
+      // Best-effort: attempt to persist to Vault KV v2 as well
+      try {
+        await this.tryVaultSetAdminKeys(arr);
+      } catch (e) {
+        defaultLogger.info('AdminService: vault persist failed (non-fatal)', e);
+      }
     } catch (e) {
       defaultLogger.warn('AdminService failed to persist admin keys:', e);
       throw e;
+    }
+  }
+
+  // Best-effort helper: read admin keys from HashiCorp Vault KV v2 if configured.
+  private async tryVaultGetAdminKeys(): Promise<AdminKey[] | null> {
+    const addr = process.env.VAULT_ADDR;
+    const token = process.env.VAULT_TOKEN;
+    if (!addr || !token) return null;
+    const mount = process.env.VAULT_KV_MOUNT || 'secret';
+    const secretPath = process.env.VAULT_SECRET_PATH || 'yash';
+    const url = `${addr.replace(/\/$/, '')}/v1/${mount}/data/${secretPath}`;
+    try {
+      const res = await fetch(url, { headers: { 'X-Vault-Token': token } });
+      if (!res.ok) return null;
+      const j = await res.json();
+      const data = j?.data?.data || {};
+      const raw = data['admin-keys'] || data['admin_keys'] || data['adminKeys'] || null;
+      if (!raw) return null;
+      if (Array.isArray(raw)) return raw as AdminKey[];
+      if (typeof raw === 'string') {
+        try {
+          return JSON.parse(raw) as AdminKey[];
+        } catch (e) {
+          return null;
+        }
+      }
+      return null;
+    } catch (e) {
+      defaultLogger.info('AdminService: vault read failed (continuing):', e);
+      return null;
+    }
+  }
+
+  // Best-effort helper: write admin keys to HashiCorp Vault KV v2 if configured.
+  private async tryVaultSetAdminKeys(arr: AdminKey[]): Promise<boolean> {
+    const addr = process.env.VAULT_ADDR;
+    const token = process.env.VAULT_TOKEN;
+    if (!addr || !token) return false;
+    const mount = process.env.VAULT_KV_MOUNT || 'secret';
+    const secretPath = process.env.VAULT_SECRET_PATH || 'yash';
+    const url = `${addr.replace(/\/$/, '')}/v1/${mount}/data/${secretPath}`;
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'X-Vault-Token': token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ data: { 'admin-keys': arr } }),
+      });
+      return res.ok;
+    } catch (e) {
+      defaultLogger.info('AdminService: vault write failed (continuing):', e);
+      return false;
     }
   }
 

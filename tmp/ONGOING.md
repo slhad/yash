@@ -24,6 +24,9 @@ Next steps (ongoing) - do not commit
       which creates a mirror clone and runs the filter in the mirror if git-filter-repo is
       available. Use it to validate what history will look like before performing the
       destructive rewrite.
+    - AdminService now supports best-effort Vault-backed storage for admin keys (VAULT_ADDR, VAULT_TOKEN,
+      VAULT_KV_MOUNT, VAULT_SECRET_PATH). If Vault is configured, admin keys will be read from and written to Vault
+      (KV v2) in addition to the local admin_keys.json file.
 
 5) Followups (future):
    - Consider integrating mutual TLS or other network-level protections for admin endpoints.
