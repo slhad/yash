@@ -125,7 +125,8 @@ jobs:
           # script can attempt a chown when appropriate.
           # The Docker image builds dependencies (bun install + Playwright) at image build
           # time to speed up CI; do not reinstall inside the container here.
-          docker run --rm -e RUN_PLAYWRIGHT=1 -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" -v "${{ github.workspace }}/tmp:/app/tmp" --user "$(id -u):$(id -g)" yash-ci:latest /bin/bash -lc '
+          CONTAINER_NAME="yash-ci-run-$(date +%s)-$RANDOM"
+          docker run --name "$CONTAINER_NAME" -e RUN_PLAYWRIGHT=1 -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" -v "${{ github.workspace }}/tmp:/app/tmp" yash-ci:latest /bin/bash -lc '
             set -euo pipefail
 
             echo "Starting server inside container"
@@ -159,6 +160,18 @@ jobs:
 
             echo "Integration tests finished"
           '
+
+          RUN_EXIT=$?
+          echo "Container $CONTAINER_NAME exited with status $RUN_EXIT"
+          echo "Attempting to docker cp /app/tmp from container to host tmp/ (if present)"
+          mkdir -p tmp || true
+          docker cp "$CONTAINER_NAME":/app/tmp/. tmp/ || echo "docker cp failed or no files present"
+          # Remove the container now that we've extracted artifacts
+          docker rm -f "$CONTAINER_NAME" || true
+          # Exit with the same code the container run returned
+          if [ $RUN_EXIT -ne 0 ]; then
+            exit $RUN_EXIT
+          fi
 
       - name: Inspect host tmp artifacts
         if: always()
