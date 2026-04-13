@@ -3,8 +3,6 @@ import { ObsService } from '../src/services/obs.service';
 
 describe('ObsService WebSocket reconnection (integration)', () => {
   test('reconnects when server returns after a close', async () => {
-    vi.useFakeTimers();
-
     // Deterministic jitter: Math.random() -> 1 so delay == maxDelay
     const randomSpy = vi.spyOn(Math, 'random').mockImplementation(() => 1);
 
@@ -81,23 +79,23 @@ describe('ObsService WebSocket reconnection (integration)', () => {
 
     // connect while server is available
     const p = obs.connect();
-    // fast-forward the open event
-    vi.advanceTimersByTime(0);
+    // wait for next tick to allow FakeWebSocket to call onopen
+    await new Promise((r) => setTimeout(r, 0));
     await p;
     expect(obs.isConnected()).toBe(true);
 
     // simulate server going down -> connected should become false
     FakeServer.setAvailable(false);
-    // allow the close callbacks to run
-    vi.advanceTimersByTime(0);
+    // allow the close callbacks to run (next tick)
+    await new Promise((r) => setTimeout(r, 0));
     await Promise.resolve();
     expect(obs.isConnected()).toBe(false);
 
     // bring server back up before the scheduled reconnect attempt occurs
     FakeServer.setAvailable(true);
 
-    // scheduled reconnect delay with random=1 equals baseMs
-    vi.advanceTimersByTime(baseMs + 1);
+    // scheduled reconnect delay with random=1 equals baseMs. Wait a bit longer than baseMs
+    await new Promise((r) => setTimeout(r, baseMs + 200));
     // allow microtasks (onopen) to run
     await Promise.resolve();
 
@@ -106,6 +104,5 @@ describe('ObsService WebSocket reconnection (integration)', () => {
     // cleanup
     (globalThis as any).WebSocket = originalWebSocket;
     randomSpy.mockRestore();
-    vi.useRealTimers();
   });
 });

@@ -42,5 +42,13 @@ Next (candidate) tasks
 - Add metrics/logging for reconnection attempts (medium).
 - Replace fake-timer integration tests with real-network based end-to-end runs under a controlled CI container (very hard).
 
+Done this turn
+- Converted WS reconnection integration test to use real timeouts instead of fake timers so it is compatible with CI runners.
+
+Next (candidate) tasks
+- Wire backoff parameters to getConfig() and environment variables (medium).
+- Add metrics/logging for reconnection attempts (medium).
+- Improve CI readiness checks (poll /api/status instead of sleep) for hermetic integration job (medium).
+
 Notes
 - tmp/ is gitignored; file created to satisfy the workflow requirement. Will be force-added to commit per instruction.
