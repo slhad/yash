@@ -184,21 +184,28 @@ jobs:
             cat tmp/ci-artifact-owner.txt || true
           fi
 
-      - name: Upload integration artifacts
+      - name: Generate, remediate, and create artifact tar
+        if: always()
+        run: |
+          echo "Preparing artifacts for upload: generate manifest, remediate ownership, create tarball"
+          chmod +x scripts/ci/remediate_and_validate_artifacts.sh scripts/ci/create_artifact_tar.sh scripts/ci/generate_artifact_manifest.sh scripts/ci/validate_artifact_manifest.sh || true
+          # Attempt remediation and validation. Non-zero exit means remediation failed
+          # but we continue to collect artifacts for debugging.
+          ./scripts/ci/remediate_and_validate_artifacts.sh tmp "$(id -u)" "$(id -g)" || echo "Remediation failed; continuing to collect artifacts for debugging"
+          # Create a numeric-owner tarball of tmp/
+          ./scripts/ci/create_artifact_tar.sh tmp || echo "Tarball creation failed"
+
+      - name: Upload integration artifacts (tarball + manifest + diagnostics)
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: integration-artifacts
-          path: tmp/**
-
-      - name: Generate and validate artifact manifest
-        if: always()
-        run: |
-          echo "Generating artifact manifest"
-          chmod +x scripts/ci/generate_artifact_manifest.sh scripts/ci/validate_artifact_manifest.sh || true
-          ./scripts/ci/generate_artifact_manifest.sh tmp
-          echo "Validating manifest against runner UID:GID"
-          ./scripts/ci/validate_artifact_manifest.sh tmp/artifact-manifest.json "$(id -u)" "$(id -g)" || echo "Manifest validation reported mismatches; see tmp/artifact-ownership-report.txt"
+          path: |
+            tmp/integration-artifacts-*.tar.gz
+            tmp/artifact-manifest.json
+            tmp/artifact-ownership-report.txt
+            tmp/ci-env.txt
+            tmp/**
 
   vhs:
     name: Record TUI VHS demo
