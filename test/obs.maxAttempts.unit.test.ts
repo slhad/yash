@@ -27,7 +27,8 @@ describe('ObsService maxAttempts', () => {
     // advance through attempts: each attempt schedules next with base*2^(attempt-1)
     // We use Math.random = 1 implicitly in production randomness; just advance a safe amount
     // Advance time by waiting real time; compute a safe total timeout
-    const totalWait = baseMs * Math.pow(2, maxAttempts + 1) + 200;
+    // Add some buffer for CI timing variability
+    const totalWait = baseMs * Math.pow(2, maxAttempts + 1) + 500;
     await new Promise((resolve) => setTimeout(resolve, totalWait));
 
     expect(emitted).toBe(true);

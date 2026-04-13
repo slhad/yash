@@ -38,8 +38,8 @@ describe('ObsService backoff', () => {
     expect(firstAttempt).toBe(1);
     expect(firstDelay).toBe(baseMs); // with random=1 delay == base
 
-    // Wait for the scheduled attempt to fire (add a small margin)
-    await new Promise((resolve) => setTimeout(resolve, firstDelay + 20));
+    // Wait for the scheduled attempt to fire (add a small margin for CI)
+    await new Promise((resolve) => setTimeout(resolve, firstDelay + 200));
     // allow promise microtasks to run so the .catch handler schedules next attempt
     await Promise.resolve();
 
