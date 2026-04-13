@@ -234,3 +234,90 @@ Done this turn:
     4. Update CI workflow (.github/workflows/ci.yml -> integration-hermetic) if a change is required (either to docker run flags or to the image Dockerfile) and commit those changes.
     5. Document the final approach in README.md and tmp/ONGOING.md.
   - Status: in_progress — will start by building and running the image locally.
+
+Next (easy) follow-up (chosen): Add README quick usage for the published hermetic Docker image.
+  - Why: This is a low-risk, easy change that helps users and CI operators pull and run the prebuilt image. It is different from the last two heavier tasks and can be completed without running tests.
+  - Plan:
+    1. Add a short section to README.md describing the image name (ghcr.io/<OWNER>/<REPO>/yash-ci:latest), how to pull it, and an example docker run invocation that mounts tmp/ and uses --user to preserve artifact ownership.
+    2. Commit the README change.
+  - Status: done — README.md updated with quick examples.
+
+Next (hard) follow-up (chosen): Convert remaining flaky tests that rely on fake timers to CI-friendly real-time tests.
+  - Why: A few tests still reference or assume fake timer semantics which can cause flakiness or confusion. Converting any remaining fake-timer tests to use real timers (and clear descriptions) reduces CI flakiness and makes tests easier to run in hermetic containers.
+  - Plan:
+    1. Scan test/ for any tests that reference "fake timers" or rely on fake timer APIs and update them to use real timers (setTimeout/Promise) with deterministic Math.random stubs where jitter is involved.
+    2. Update test descriptions to accurately reflect the timing model (remove "using fake timers" phrases).
+    3. Add small buffer margins to timing waits where necessary to accommodate CI host load (avoid overly tight thresholds).
+    4. Run the unit tests locally in a CI-like environment (optional later) to validate flakiness is reduced.
+  - Status: in_progress — updated test/obs.reconnect.test.ts description to remove the "fake timers" reference. Will continue scanning and updating other tests as needed.
+
+Next action taken (CI workflow improvement): added an inspection step in .github/workflows/ci.yml to list the host tmp/ directory after the hermetic container run and print stat output for tmp/ci-artifact.txt and tmp/ci-artifact-owner.txt when present. This helps diagnose ownership issues in CI without changing upload behavior.
+
+Plan (next):
+- Continue scanning tests for any remaining fake-timer assumptions and convert them to real timers.
+- If CI artifact ownership issues persist, reproduce locally with docker build/run and iterate on Dockerfile or run flags.
+
+Next (hard) chosen follow-up: Continue converting remaining flaky tests that rely on fake timers to CI-friendly real-time tests.
+  - Actions taken this turn:
+    1. Updated test/obs.reconnect.test.ts description to remove the "fake timers" wording (now indicates it uses real timers).
+    2. Added a diagnostic inspection step to .github/workflows/ci.yml to list tmp/ and print artifact ownership info after the hermetic container run.
+    3. Enhanced scripts/ci/verify_artifact.sh to write a ci-artifact-owner.txt and optionally chown /app/tmp when HOST_UID/HOST_GID env variables are provided.
+  - Next plan:
+    1. Scan remaining tests and update any that still assume fake timers (search for descriptive text and fake-timer APIs). Update timing waits to include small buffers where necessary.
+    2. If converting tests reveals flakiness, run them in the hermetic Docker image locally to replicate CI timing and iterate.
+  3. Once stable, commit test updates (tmp remains ignored) and re-run CI to verify stability.
+  - Status: in_progress
+  - Action taken: CI docker run now passes HOST_UID/HOST_GID environment variables so
+    scripts/ci/verify_artifact.sh can attempt to chown artifacts to the host UID/GID.
+
+Next (easy) follow-up (chosen): Add README note about local hermetic reproduction helper.
+ - Why: This helps contributors reproduce CI hermetic runs locally without running CI and is a small, low-risk documentation improvement.
+ - Plan:
+   1. Add a short section to README describing scripts/ci/run_hermetic_local.sh usage and examples, including FORCE_BUILD to force a rebuild.
+   2. Commit the README change.
+ - Actions taken: README.md updated with a "Local hermetic reproduction helper" section pointing to scripts/ci/run_hermetic_local.sh.
+ - Status: done
+
+Next (hard) follow-up (chosen): Stabilize smaller timing-sensitive unit tests by increasing init/wait buffers.
+ - Why: Several small tests assume very short init delays (10ms) which can be flaky under CI. Increasing these buffers slightly reduces spurious test failures while still keeping tests fast.
+ - Plan:
+   1. Increase brief setTimeout buffers in auth.service tests (e.g., from 10ms to 50ms) to ensure asynchronous initialization completes on slower CI hosts.
+   2. Continue monitoring test flakiness in CI and adjust only those small waits that prove flaky.
+ - Actions taken: updated test/auth.service.test.ts and test/auth.service.keytar.test.ts to wait 50ms for async initialization.
+ - Status: done for these tests; continue scanning others.
+
+Next (hard) follow-up (chosen): Harden the hermetic smoke workflow to use the published GHCR image and ensure artifacts are reliably captured.
+ - Why: After adding diagnostics and local reproduction helpers, the next hard step is to ensure the published GHCR image is actually usable in the smoke workflow and artifacts are captured even if the container runs under different UIDs.
+ - Plan:
+   1. Update CI hermetic smoke workflow to attempt to docker cp artifacts out of the container and remove reliance on the container's internal UID mapping.
+   2. Ensure the smoke workflow uses the published GHCR image and still collects tmp/** artifacts for inspection.
+   3. Add small helper script or commands to the workflow to print ownership and stat info for the uploaded artifacts.
+ - Actions taken: modified .github/workflows/ci.yml to name the container and docker cp /app/tmp to host tmp/ after the container finishes, and adjusted the container run to omit --user so the container will run as its default user (the publish-smoke workflow still pulls the published image).
+- Status: done for CI workflow changes; will monitor CI runs.
+
+Next (hard) follow-up (chosen): Harden the hermetic-smoke workflow to copy artifacts from the published image and retain diagnostics.
+ - Why: The hermetic-smoke job validates the published image; ensuring it reliably provides artifacts for inspection is critical for release validation.
+ - Plan:
+   1. Update hermetic-smoke workflow to name the container, run it as the image default user, and docker cp artifacts out of the container to host tmp/ after the run.
+   2. Ensure verify_artifact.sh writes an owner file to make debugging easy.
+   3. Monitor smoke job results and iterate if permissions/ownership still cause missing artifacts.
+ - Actions taken: modified .github/workflows/hermetic-smoke.yml accordingly.
+ - Status: done — will monitor CI runs.
+
+Next actions taken (this turn):
+ - Increased timing buffers in several timing-sensitive tests to be more tolerant of CI scheduling delays:
+   - test/obs.reconnect.test.ts: increased wait margins for reconnect and connect delays.
+   - test/obs.backoff.unit.test.ts: increased margin waiting for scheduled attempt.
+   - test/obs.maxAttempts.unit.test.ts: increased total wait buffer.
+ - These changes aim to make tests more stable under real timers in CI while keeping assertions deterministic by stubbing Math.random where needed.
+
+Next plan:
+ 1. Continue scanning tests for any remaining fragile timing assumptions and add small, well-justified buffers where needed.
+ 2. If tests still fail under CI timing, run them inside the hermetic Docker image to reproduce timing behavior and iterate.
+3. Keep tmp/ONGOING.md updated with each conversion step (local-only file, do not commit).
+
+2026-04-13 (this turn)
+- Action: Wired scripts/ci/ci-entrypoint.sh into Dockerfile
+  - Why: Ensure the hermetic image can chown /app/tmp at container startup when HOST_UID/HOST_GID are provided by CI, which helps artifact ownership on the host.
+  - What changed: Dockerfile now COPYs scripts/ci/ci-entrypoint.sh to /usr/local/bin/ci-entrypoint.sh, makes it executable, and sets ENTRYPOINT to that script.
+  - Follow-ups: Build the image locally and run the hermetic reproduction helper to verify artifacts written into mounted /app/tmp are owned by the host UID/GID when CI provides HOST_UID/HOST_GID.
