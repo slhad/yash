@@ -85,5 +85,13 @@ Next (candidate) tasks
 - Add CI-level retries around flaky integration steps (medium).
 - Add README docs for OBS reconnection config (low).
 
+Done this turn
+- Documented OBS reconnection env/config settings in README.md under 'OBS Reconnection & Backoff'.
+
+Next (candidate) tasks
+- Implement /api/metrics endpoint returning metrics.getAll() in JSON (easy).
+- Add CI-level retries around flaky integration steps (medium).
+- Add README examples for CI usage (low).
+
 Notes
 - tmp/ is gitignored; file created to satisfy the workflow requirement. Will be force-added to commit per instruction.

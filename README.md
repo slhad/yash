@@ -21,6 +21,47 @@ This project reads configuration from `config.json` in the repository root durin
    - `cp config.example.json config.json`
 2. Add `config.json` to `.gitignore` if it's not already ignored (this repository's .gitignore already includes `config.json`).
 
+OBS Reconnection & Backoff
+--------------------------
+You can tune the OBS websocket reconnection and backoff behaviour via environment variables or `config.json` (under `obs.websocket`). Environment variables take precedence and are useful for CI/runtime overrides.
+
+Environment variables (examples & defaults):
+
+- `YASH_OBS_SERVER` — OBS websocket host (eg. `localhost`)
+- `YASH_OBS_PORT` — OBS websocket port (eg. `4455`)
+- `YASH_OBS_PASSWORD` — OBS websocket password
+- `YASH_OBS_RECONNECT_BASE_MS` — base backoff delay in ms (default: `30000`)
+- `YASH_OBS_RECONNECT_MAX_MS` — maximum backoff cap in ms (default: `300000` / 5min)
+- `YASH_OBS_RECONNECT_MULTIPLIER` — exponential multiplier (default: `2`)
+- `YASH_OBS_RECONNECT_MAX_ATTEMPTS` — maximum retry attempts (default: unlimited)
+- `YASH_OBS_CONNECT_DELAY_MS` — simulated connect delay in ms (used for testing, default: `1000`)
+
+Example (env):
+
+```
+export YASH_OBS_RECONNECT_BASE_MS=10000
+export YASH_OBS_RECONNECT_MULTIPLIER=2
+export YASH_OBS_RECONNECT_MAX_ATTEMPTS=10
+```
+
+Or in `config.json`:
+
+```
+{
+  "obs": {
+    "websocket": {
+      "server": "localhost",
+      "port": "4455",
+      "reconnectBaseMs": 10000,
+      "reconnectMultiplier": 2,
+      "reconnectMaxAttempts": 10
+    }
+  }
+}
+```
+
+Notes: values supplied via environment variables are parsed as strings and cast to numbers by the app where applicable.
+
 CI and secrets
 --------------
 - For CI, provide secrets via environment variables or a secrets manager (do not commit config.json with credentials).
