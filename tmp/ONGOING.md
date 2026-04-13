@@ -30,6 +30,9 @@ Next steps (ongoing) - do not commit
     - AdminService now supports best-effort Vault-backed storage for admin keys (VAULT_ADDR, VAULT_TOKEN,
       VAULT_KV_MOUNT, VAULT_SECRET_PATH). If Vault is configured, admin keys will be read from and written to Vault
       (KV v2) in addition to the local admin_keys.json file.
+    - Added migration helper: scripts/admin/migrate-admin-keys-to-vault.sh
+      Use --preview to inspect the payload and --run with RUN_MIGRATE=1 and
+      proper VAULT_* environment variables to perform the migration.
 
 5) Followups (future):
    - Consider integrating mutual TLS or other network-level protections for admin endpoints.
