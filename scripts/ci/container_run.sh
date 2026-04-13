@@ -26,13 +26,25 @@ fi
 echo "Using pre-baked dependencies in the image; skipping in-container install"
 
 echo "Running full test suite (bun test)"
-bun test --reporter=list || exit 4
+# Try list reporter first (older/newer bun variants differ); fall back to default
+if ! bun test --reporter=list; then
+	echo "'list' reporter unsupported or tests failed; retrying with default reporter"
+	if ! bun test; then
+		exit 4
+	fi
+fi
 
 echo "Running Playwright webview test"
+# Playwright uses 'list' reporter; if it fails non-zero we'll let the wrapper handle retries
 npx playwright test e2e-tests/webview.spec.ts --reporter=list || exit 2
 
 echo "Running reconnection integration test"
-bun test test/obs.websocket.reconnect.test.ts --reporter=list || exit 3
+if ! bun test test/obs.websocket.reconnect.test.ts --reporter=list; then
+	echo "'list' reporter unsupported or reconnection test failed; retrying with default reporter"
+	if ! bun test test/obs.websocket.reconnect.test.ts; then
+		exit 3
+	fi
+fi
 
 echo "Running artifact verification script"
 bash scripts/ci/verify_artifact.sh || true
