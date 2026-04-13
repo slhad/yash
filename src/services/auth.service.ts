@@ -174,6 +174,37 @@ export class AuthService {
   }
 
   /**
+   * Export the current encryption key encrypted with the provided RSA public key (PEM).
+   * Returns the encrypted key as a base64 string. The caller must provide a
+   * PEM-encoded RSA public key and have appropriate authorization in the API.
+   */
+  async exportEncryptionKey(publicKeyPem: string): Promise<string> {
+    try {
+      await this.waitForReady(5000);
+    } catch (err) {
+      // proceed
+    }
+
+    if (!this.encryptionKey) throw new Error('encryption key not initialized');
+    if (!publicKeyPem || typeof publicKeyPem !== 'string') throw new Error('publicKeyPem required');
+
+    try {
+      const encrypted = crypto.publicEncrypt(
+        {
+          key: publicKeyPem,
+          padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
+          oaepHash: 'sha256',
+        },
+        Buffer.from(this.encryptionKey, 'hex'),
+      );
+      return encrypted.toString('base64');
+    } catch (err) {
+      defaultLogger.error('Failed to export encryption key', err);
+      throw err;
+    }
+  }
+
+  /**
    * Wait for the AuthService asynchronous initialization to complete.
    * Useful for CLI utilities or tests that need tokens/key to be ready.
    */

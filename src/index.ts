@@ -195,6 +195,65 @@ Bun.serve({
         }
       },
     },
+    '/api/admin/export-key': {
+      POST: async (req) => {
+        const admin = process.env.ADMIN_TOKEN;
+        if (!admin) {
+          return new Response(JSON.stringify({ error: 'admin token not configured' }), {
+            status: 403,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        const authHeader = (req.headers.get('authorization') || '').trim();
+        if (
+          !authHeader.toLowerCase().startsWith('bearer ') ||
+          authHeader.slice(7).trim() !== admin
+        ) {
+          return new Response(JSON.stringify({ error: 'unauthorized' }), {
+            status: 401,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+
+        let body = null;
+        try {
+          body = await req.json();
+        } catch (_) {}
+
+        const publicKey = body?.publicKeyPem;
+        if (!publicKey)
+          return new Response(JSON.stringify({ error: 'publicKeyPem missing' }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json' },
+          });
+
+        try {
+          const exported = await authService.exportEncryptionKey(publicKey);
+          // Audit export event
+          try {
+            // eslint-disable-next-line @typescript-eslint/no-var-requires
+            const Audit = require('./utils/audit').default;
+            const audit = new Audit();
+            await audit.append('export-key', {
+              actor: 'admin-endpoint',
+              note: 'exported encryption key (encrypted)',
+            });
+          } catch (e) {
+            defaultLogger.info('Audit append failed (non-fatal):', e);
+          }
+
+          return new Response(JSON.stringify({ key: exported }), {
+            headers: { 'Content-Type': 'application/json' },
+          });
+        } catch (err) {
+          defaultLogger.error('Export-key failed:', err);
+          return new Response(JSON.stringify({ error: 'failed' }), {
+            status: 500,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+      },
+    },
     // Prometheus text exposition endpoint. This mirrors /api/metrics but
     // returns plain-text in Prometheus exposition format so CI or Prometheus
     // can scrape it directly.
