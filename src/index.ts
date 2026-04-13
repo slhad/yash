@@ -387,6 +387,45 @@ Bun.serve({
         }
       },
     },
+
+    '/api/admin/audit/verify': {
+      GET: async (req) => {
+        const auth = await authorizeAdmin(req);
+        if (!auth.ok)
+          return new Response(JSON.stringify(auth.body), {
+            status: auth.status,
+            headers: { 'Content-Type': 'application/json' },
+          });
+
+        try {
+          const Audit = require('./utils/audit').default;
+          const audit = new Audit();
+          const result = await audit.verifyAll();
+
+          // Record that a verification was run (do not include sensitive content)
+          try {
+            await audit.append('audit-verify-run', {
+              actor: 'admin-endpoint',
+              clientIp: (auth as any).clientIp || 'unknown',
+              ok: !!result.ok,
+              badIndex: result.badIndex || null,
+            });
+          } catch (e) {
+            defaultLogger.info('Audit append failed (non-fatal):', e);
+          }
+
+          return new Response(JSON.stringify({ result }), {
+            headers: { 'Content-Type': 'application/json' },
+          });
+        } catch (e) {
+          defaultLogger.error('Audit verify failed:', e);
+          return new Response(JSON.stringify({ error: 'failed' }), {
+            status: 500,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+      },
+    },
     // Prometheus text exposition endpoint. This mirrors /api/metrics but
     // returns plain-text in Prometheus exposition format so CI or Prometheus
     // can scrape it directly.
