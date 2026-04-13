@@ -4,6 +4,7 @@
 
 import { getConfig } from '../utils/config';
 import { defaultLogger } from '../utils/logger';
+import { metrics } from '../utils/metrics';
 
 export class ObsService {
   private connected: boolean = false;
@@ -377,6 +378,12 @@ export class ObsService {
       defaultLogger.info('Attempting to reconnect to OBS...');
       this.connect().catch((error) => {
         defaultLogger.error('Reconnection attempt failed:', error);
+        // record metric
+        try {
+          metrics.increment('obs.reconnect.failures');
+        } catch (e) {
+          // ignore metric errors
+        }
         // increase attempt count and schedule next attempt
         this.reconnectAttempt++;
 

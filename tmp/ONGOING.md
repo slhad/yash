@@ -50,5 +50,14 @@ Next (candidate) tasks
 - Add metrics/logging for reconnection attempts (medium).
 - Improve CI readiness checks (poll /api/status instead of sleep) for hermetic integration job (medium).
 
+Done this turn
+- Added lightweight in-memory metrics collector at src/utils/metrics.ts and wired a counter for obs.reconnect.failures in ObsService.
+- Exposed metrics via /api/obs/status to aid CI/diagnosis.
+
+Next (candidate) tasks
+- Wire backoff parameters to getConfig() and environment variables (medium).
+- Add more metrics (successes, attempts, lastAttemptTs) and expose them via a /api/metrics endpoint (medium).
+- Replace sleep with polling /api/status readiness check in CI job (medium).
+
 Notes
 - tmp/ is gitignored; file created to satisfy the workflow requirement. Will be force-added to commit per instruction.
