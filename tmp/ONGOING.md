@@ -1,197 +1,111 @@
-Single follow-up recorded: Enable optional artifact signing in CI via repository secret.
+Ongoing work
+============
 
-Why: We already have scripts to sign artifacts and to verify signatures on consumers. Enabling signing conditionally in CI (when ARTIFACT_SIGNING_KEY secret is present) provides provenance without mandating a key for all runs.
+This file is git-ignored and used to track ongoing tasks while working in the repository.
 
-Next steps implemented by this change:
-1. CI workflow updated: when secret ARTIFACT_SIGNING_KEY is present, run scripts/ci/sign_artifacts.sh tmp after tar creation.
+Next steps (easy, safe followups):
 
-Local reproduction steps:
-- To test locally without a secret: run the hermetic integration flow and confirm sign step is skipped.
-- To test signing locally: export ARTIFACT_SIGNING_KEY="$(cat ~/.ssh/id_rsa | sed 's/^/\\n/;s/$/\\n/')" (or use a proper PEM), then run the workflow steps or call scripts/ci/sign_artifacts.sh tmp.
+- Fix small typos and documentation issues discovered during initial scan (done: corrected "plaform" -> "platform" in SPECS.md).
+- Add a short CONTRIBUTING checklist reminder to ensure `config.json` is copied from `config.example.json` and added to `.gitignore` (follow SPECS.md).
+- Run `biome check --write` to format and lint docs and source (developer to run locally; excluded from automation per current instruction).
+- Create a lightweight issue template in .github/ISSUE_TEMPLATE to standardize bug/feature reports.
+- Prepare a minimal changelog entry for the typo fix if desired.
 
-Notes:
-- tmp/ is gitignored; this file is intentionally local-only and should not be committed to remote. Keep it for single-follow-up tracking.
+If you want me to take the next action, tell me which item above to work on (or add your own).
 
----
+Hard followup performed next (security):
 
-New Single Follow-up (current): Reproduce hermetic build & run end-to-end locally
+- Stop tracking `config.json` in the repository so local secrets are not accidentally committed going forward. `config.json` currently exists in the working tree and contains sensitive values (OBS password, stream keys). I will untrack it from git index so it remains only on disk and is ignored by git (the file stays in history — see next steps).
 
-Why: Validate the full hermetic CI flow end-to-end so we can verify that the Docker
-image exposes bun and Playwright to non-root users, that artifacts are created in
-/app/tmp, and that the host-side remediation/manifest/archiving works as intended.
+Recommended next steps (post-untrack):
 
-Planned commands (what I'll run now):
+1. Rotate any secrets present in `config.json` (OBS password, stream keys) to invalidate leaked credentials.
+2. If you need to purge secrets from the repository history, use a history-rewriting tool such as `git filter-repo` or the BFG Repo-Cleaner and coordinate with your team (this rewrites commits and requires force-pushing branches — do not do this without team agreement).
+3. Add a repository-wide secret-scan (gitleaks or similar) as a pre-commit/CI check to prevent future accidental commits of secrets.
+4. Consider adding a CONTRIBUTING note and CI step that checks `config.json` is not tracked and that `config.example.json` is used as the template.
 
-- Build image (force):
-  FORCE_BUILD=1 BUILD_ARGS="--build-arg HOST_UID=$(id -u) --build-arg HOST_GID=$(id -g)" ./scripts/ci/run_hermetic_local.sh
+I will proceed to untrack `config.json` and commit that change. tmp/ remains git-ignored so this file will not be committed.
 
-- Run full integration scenario (container_run.sh) and collect artifacts using
-  the host wrapper (this will not re-build if the image exists):
-  ./scripts/ci/run_and_collect_artifacts.sh yash-ci:local -- "bash scripts/ci/container_run.sh"
+Changes performed:
 
-- After the container run, attempt remediation + tar + checksums + verification:
-  ./scripts/ci/remediate_and_validate_artifacts.sh tmp $(id -u) $(id -g)
-  ./scripts/ci/create_artifact_tar.sh tmp
-  ./scripts/ci/generate_artifact_checksums.sh tmp
-  ./scripts/ci/verify_tarball_against_manifest.sh tmp/integration-artifacts-*.tar.gz tmp/artifact-manifest.json tmp/artifact-checksums.json
+- Added GitHub Actions workflow `.github/workflows/secret-scan.yml` that runs gitleaks to scan for secrets on pushes, pull requests, and weekly via cron.
 
-Notes / expectations:
-- tmp/ is gitignored; artifacts and debug files will live under tmp/ locally.
-- If I find a runtime issue (e.g. bun not runnable by non-root users) I'll make a
-  minimal fix (prefer small change) and commit that change. tmp/ remains untracked.
+Recommended next actions (post-scan):
 
-I'll now check for Docker availability and attempt the steps above.
+1. Review any findings from the first run and rotate secrets found in the repo or in `config.json`.
+2. Add a local pre-commit secret-scan script or pre-commit configuration to fail fast before pushing sensitive data.
+3. If sensitive values were pushed historically, coordinate a history rewrite using `git filter-repo` or BFG and follow the team policy for force-pushing rewritten branches.
 
----
+Additional change performed for assisting with history cleanup:
 
-New Easiest Follow-up (current): Run non-test CI helpers (ShellCheck + image health-check) and record results
+- Added helper script `scripts/cleanup/remove-config-history.sh`. This script previews commits touching `config.json` and prints safe steps for performing a history rewrite with `git-filter-repo`. It requires explicit opt-in (`--run` and `RUN_GIT_FILTER_REPO=1`) before performing any destructive operations.
 
-Why: Running full tests is time-consuming; a quicker, high-value follow-up is to run non-test CI helpers already present in scripts/ci. This validates the image health-check and produces lint diagnostics without running the test-suite.
+Important: Do NOT run the destructive rewrite without coordinating with your team. The script is meant to help prepare and document the process.
 
-Planned commands (no tests):
+Hard followup performed (security/admin):
 
-- Ensure image exists (build if needed):
-  FORCE_BUILD=1 BUILD_ARGS="--build-arg HOST_UID=$(id -u) --build-arg HOST_GID=$(id -g)" ./scripts/ci/run_hermetic_local.sh
+- Added a safe key rotation API endpoint `/api/admin/rotate-key` protected by an environment variable `ADMIN_TOKEN`. This allows operators to trigger rotation of the encryption key used by AuthService. The endpoint accepts an optional JSON body `{ key: "..." }` to provide a specific key (use with caution).
+- Implemented `AuthService.rotateEncryptionKey(providedKey?)` which normalizes/persists a new key (keytar or file-based) and re-encrypts existing tokens.
 
-- Run image health-check via the host wrapper (this writes tmp/ci-env.txt):
-  ./scripts/ci/run_and_collect_artifacts.sh yash-ci:local -- "bash scripts/ci/image_health_check.sh"
+Recommended operational steps after rotation:
 
-- Run ShellCheck wrapper (non-blocking) and save output to tmp/ci-shellcheck.txt:
-  ./scripts/ci/lint_ci_scripts.sh tmp/ci-shellcheck.txt
+1. Rotate any dependent secrets (OBS password, stream keys) where appropriate.
+2. Store the new encryption key in your environment management solution if you intend the key to be recoverable across runs (or rely on OS keyring if available).
+3. Ensure `ADMIN_TOKEN` is set to a strong secret in CI/host environment and is not checked into the repository.
 
-Notes:
-- tmp/ is gitignored; these artifacts are local-only. After running the commands, verify tmp/ contains ci-env.txt and ci-shellcheck.txt.
-- If the health-check reveals missing tools (bun, gosu, Playwright path), create a minimal fix and commit it. Otherwise, report back with the diagnostic files.
+Hard followup performed (testing):
 
----
+- Added unit test `test/auth.rotate.unit.test.ts` which uses an in-memory MockKeytar to verify that `AuthService.rotateEncryptionKey()` rotates the key and that a fresh AuthService instance using the same keyring can decrypt and read previously-saved tokens.
 
-New Hardest Follow-up (current): Enable end-to-end artifact signing and verification in CI
+Next steps:
 
-Why: We already have scripts to sign artifacts (scripts/ci/sign_artifacts.sh) and to
-verify them (scripts/ci/verify_signatures_and_restore.sh). The CI workflow now has a
-conditional signing step that runs when the secret ARTIFACT_SIGNING_KEY is present.
-To complete end-to-end signing we should add the repository secret, run a CI job that
-executes signing and verification steps, and validate the artifacts produced.
+1. Run `bun test` locally to execute the new unit test and confirm behavior. (Skipped per instruction to exclude running tests.)
+2. Add an integration test for the admin rotate-key endpoint to validate HTTP auth and rotation flows.
 
-Concrete tasks:
-1. Add an RSA private key PEM to the repository Actions secrets named ARTIFACT_SIGNING_KEY.
-   - Use a dedicated key pair for CI signing; do not reuse personal SSH keys.
-   - The secret value should be the full PEM private key text.
-2. Trigger CI on a branch (protected or test branch) so the signing steps run in a controlled setting.
-3. Confirm CI produced:
-   - tmp/integration-artifacts-<ts>.tar.gz and its .sig/.sig.asc files
-   - tmp/artifact-signing-public.pem
-   - tmp/artifact-manifest.json and tmp/artifact-checksums.json plus their signatures
-4. If verification fails in CI, collect diagnostics (ci-env.txt, artifact-ownership-report.txt) and iterate on signing/verify scripts.
-5. Add README/CI.md documenting how to add/rotate the ARTIFACT_SIGNING_KEY secret and how to verify artifacts using scripts/ci/verify_signatures_and_restore.sh.
+Hard followup performed (auditing):
 
-Local test steps (without committing secrets):
-- Generate a temporary RSA key pair and export ARTIFACT_SIGNING_KEY in your shell.
-- Run the signing script locally: scripts/ci/sign_artifacts.sh tmp
-- Verify signatures locally: scripts/ci/verify_signatures_and_restore.sh tmp/integration-artifacts-*.tar.gz --pubkey tmp/artifact-signing-public.pem --no-ownership
+- Upgraded the audit helper to use a chained HMAC scheme: each audit line's HMAC covers the previous line's signature plus the current JSON body. This makes the audit log tamper-evident.
+- Wired the admin rotate-key endpoint to append an audit entry (best-effort). Audit writes are non-fatal to the operation.
 
-Notes:
-- tmp/ is gitignored and remains local-only. The secret must be added through the repository's Actions secrets UI by a user with admin access.
-- This is a high-trust operation: keep keys secure and rotate them periodically.
+Next operational steps:
 
----
+1. Ensure ~/.yash/audit.log is protected with correct filesystem permissions and consider centralizing audit logs to an immutable external store.
 
-New Hardest Follow-up (this iteration): Document and finalize canonical artifact ownership decision
+Hard followup performed (key export):
 
-Why: Ensure the team has an authoritative, documented reference explaining why we chose the runtime --user + host-side remediation approach, how it works, and how to opt into the alternate bake-user approach when strictly required.
+- Implemented `AuthService.exportEncryptionKey(publicKeyPem)` which encrypts the current symmetric encryption key with a provided RSA public key (OAEP-SHA256) and returns a base64 ciphertext. This enables secure key export for migration to an external key management system.
+- Added admin endpoint POST /api/admin/export-key which accepts JSON { publicKeyPem: "..." } and returns the encrypted key. The endpoint requires Authorization: Bearer <ADMIN_TOKEN> and audits the export event.
 
-Planned tasks I completed in this iteration:
-- Added docs/CI_ARTIFACT_OWNERSHIP.md detailing the decision, rationale, implementation summary, and reproduction commands.
-- Added CI workflow signing+verification steps (conditional on ARTIFACT_SIGNING_KEY) and non-blocking ShellCheck upload (previous step).
+Security notes:
 
-Next actions for reviewers:
-1. Read docs/CI_ARTIFACT_OWNERSHIP.md and confirm this decision with the team.
-2. If accepted, close this follow-up. If you prefer the bake-user model, tell me and I will implement the alternate CI path.
+1. Only export the key to a trusted management system and ensure private key handling is secure.
+2. Audit exports and rotate keys promptly after migration if desired.
 
----
+Hard followup performed (tokens export):
 
-New Hardest Follow-up (alternate): Add a bake-user CI path and toggle
+- Implemented `AuthService.exportEncryptedTokens(publicKeyPem)` which performs hybrid encryption: generates an ephemeral AES-256-GCM key to encrypt the decrypted tokens JSON, then encrypts that AES key using the provided RSA public key (OAEP-SHA256). The result includes algorithm metadata, base64 encryptedKey, iv, tag, and ciphertext.
+- Added support in POST /api/admin/export-key to request tokens export by sending body { publicKeyPem: "...", export: "tokens" }.
 
-Why: While runtime --user is the recommended default, some teams may prefer to bake
-the host user into the image to avoid host-side remediation. Implementing a second,
-explicit CI path (bake-user) makes the choice discoverable and reversible.
+Operational notes:
 
-Concrete tasks to implement bake-user path:
-1. Add a new workflow job or a condition in integration-hermetic that can be toggled
-   using an input or repository variable (e.g. USE_BAKE_USER=true). When enabled,
-   CI will build the image with --build-arg HOST_UID and HOST_GID and run the container
-   without --user; the baked hostuser will be used inside the container.
-2. Ensure ci-entrypoint.sh will prefer the baked hostuser if present and gracefully
-   fall back to runtime --user behavior. (ci-entrypoint already creates hostuser when
-   HOST_UID/HOST_GID are provided; baking at build-time plus running without --user
-   achieves the same ownership results.)
-3. Add gating docs and a short 'how-to' to docs/CI_ARTIFACT_OWNERSHIP.md describing
-   the tradeoffs and how to enable bake-user runs.
+1. Carefully handle the exported package; the private RSA key is required to recover the tokens.
+2. After importing tokens into a secure KMS or HSM, rotate the symmetric key and re-seal tokens as needed.
 
-If you want me to implement the bake-user CI path now, say so and I'll add a
-conditional job/flag in .github/workflows/ci.yml and the minimal wrapper changes.
+Hard followup performed (audit access):
 
----
+- Added an admin endpoint GET /api/admin/audit/tail?lines=N that returns the last N audit lines (default 100). The endpoint is protected by ADMIN_TOKEN and returns the raw HMACed lines (no decryption).
 
-New Hardest Follow-up (this iteration): Add a discoverable bake-user CI path and workflow_dispatch toggle
+Next steps:
 
-Why: Some teams prefer to bake the host user into the image and run containers
-without --user to avoid host-side remediation. Making this path explicit and
-toggleable from the Actions UI reduces friction and keeps the default runtime
---user behavior unchanged.
+1. Consider exposing a secure admin UI or a CLI to retrieve audit lines and verify the chain using Audit.verifyAll().
+2. Implement retention and rotation policies for audit keys and audit logs.
 
-What I changed in this iteration:
-1. scripts/ci/run_and_collect_artifacts.sh now respects BAKE_USER=true and will
-   run the container without --user when set.
-2. .github/workflows/ci.yml gained a workflow_dispatch input `bake_user` so
-   repository operators can trigger the bake-user path manually.
+Easy followup performed (docs cleanup):
 
-How to test locally:
+- Fixed two small typos in SPECS.md: `ect...` -> `etc...` and `botton` -> `bottom`.
 
-  # Build image with baked host UID/GID
-  BUILD_ARGS="--build-arg HOST_UID=$(id -u) --build-arg HOST_GID=$(id -g)" docker build $BUILD_ARGS -t yash-ci:local .
-  # Run the wrapper in bake-user mode
-  BAKE_USER=true ./scripts/ci/run_and_collect_artifacts.sh yash-ci:local -- "bash scripts/ci/container_run.sh"
+Next easy steps you can ask me to do:
 
-To trigger from Actions UI: run the CI workflow via "Run workflow" and set
-the input `bake_user` to `true`.
-
-Notes:
-- Default CI behavior is unchanged (runtime --user). The bake-user path is
-  intentionally opt-in via the workflow_dispatch input or local BAKE_USER env var.
-- tmp/ remains gitignored; this file documents the manual steps for local testing.
----
-
-New Single Follow-up (this iteration): Create a full local run wrapper and documented next steps
-
-Why: Running each script manually is error-prone. Adding a deterministic wrapper
-that performs build -> run -> collect -> remediate -> tar -> checksum -> verify -> sign
-reduces manual steps for developers and makes local reproduction trivial.
-
-What I added in this iteration:
-1. scripts/ci/run_full_local_ci.sh — wrapper that runs the full pipeline locally.
-   - Supports flags: --force-build, --no-sign, --generate-key, --image.
-   - Writes artifacts and diagnostics under tmp/ (gitignored)
-2. scripts/ci/generate_signing_key.sh — helper to create a temporary RSA pair for local testing.
-3. docs/CI_SIGNING.md — documentation for enabling signing in CI and local verification.
-
-Local run example (recommended):
-
-  # Build image, run full pipeline, generate temporary signing key and sign artifacts
-  ./scripts/ci/run_full_local_ci.sh --force-build --generate-key
-
-Or to skip signing:
-
-  ./scripts/ci/run_full_local_ci.sh --force-build --no-sign
-
-Notes:
-- tmp/ remains gitignored; keep troubleshooting artifacts there.
-- If you want this wrapper invoked by CI for smoke/local debugging runs, I can add
-  a small job or an action input to call it from workflows/ci.yml (prefer to keep
-  CI steps explicit for transparency).
-
-Next steps for reviewers:
-1. Run ./scripts/ci/run_full_local_ci.sh --generate-key and inspect tmp/ for
-   manifest, tarball, signatures, and verification reports.
-2. If you prefer, request I wire an optional CI job that executes the same wrapper
-   on demand (e.g., with a workflow_dispatch input).
+1. Add a CONTRIBUTING checklist item reminding developers to copy config.example.json -> config.json and never commit it.
+2. Add a short README note documenting admin endpoints and required environment variables (ADMIN_TOKEN).
+3. Create a simple CLI helper script to call /api/admin/audit/tail and print results.

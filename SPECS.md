@@ -5,7 +5,7 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
 
 ## Goals
 - Usable TUI
-    * Command /settings to configure display of UI elements ect...
+    * Command /settings to configure display of UI elements etc...
         * Element : Number of viewers
             * displayed: on/off
             * mode: per platform/cumulative/both
@@ -20,7 +20,7 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
 - Usable webviews
     * Route to show unified view of all chats
     * Route to show view of chats side by side with config options to enable any platform (saved in browser)
-    * All chats view must have a message box to send messages like TUI, display top/botton/hide (saved in browser individually)
+    * All chats view must have a message box to send messages like TUI, display top/bottom/hide (saved in browser individually)
 
 ## Out of scope
 - Contributing
