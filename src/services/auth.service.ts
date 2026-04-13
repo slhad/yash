@@ -205,6 +205,71 @@ export class AuthService {
   }
 
   /**
+   * Export all decrypted tokens encrypted for a provided RSA public key.
+   * Returns an object containing the RSA-encrypted AES key and the AES-GCM
+   * ciphertext containing the tokens JSON. The caller must provide a trusted
+   * PEM-encoded RSA public key.
+   */
+  async exportEncryptedTokens(publicKeyPem: string): Promise<{
+    algorithm: string;
+    encryptedKey: string;
+    iv: string;
+    tag: string;
+    ciphertext: string;
+  }> {
+    try {
+      await this.waitForReady(5000);
+    } catch (err) {
+      // proceed
+    }
+
+    if (!publicKeyPem || typeof publicKeyPem !== 'string') throw new Error('publicKeyPem required');
+
+    // Serialize in-memory tokens (decrypted) to JSON
+    const tokensObj: Record<string, TokenData> = {};
+    for (const [platform, token] of this.tokens.entries()) {
+      tokensObj[platform] = token;
+    }
+    const plaintext = JSON.stringify(tokensObj);
+
+    // Hybrid encrypt: generate random AES key, encrypt plaintext with AES-256-GCM,
+    // then encrypt the AES key with the provided RSA public key (OAEP-SHA256).
+    const aesKey = crypto.randomBytes(32);
+    const iv = crypto.randomBytes(12); // recommended nonce size for GCM
+
+    const cipher = crypto.createCipheriv('aes-256-gcm', aesKey, iv);
+    const encryptedBuf = Buffer.concat([
+      cipher.update(Buffer.from(plaintext, 'utf8')),
+      cipher.final(),
+    ]);
+    const authTag = cipher.getAuthTag();
+
+    // Encrypt AES key with RSA-OAEP-SHA256
+    let encryptedKeyBuf: Buffer;
+    try {
+      encryptedKeyBuf = crypto.publicEncrypt(
+        {
+          key: publicKeyPem,
+          padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
+          oaepHash: 'sha256',
+        },
+        aesKey,
+      );
+    } catch (err) {
+      defaultLogger.error('Failed to encrypt AES key with provided public key', err);
+      throw err;
+    }
+
+    return {
+      algorithm: 'rsa-oaep-sha256+aes-256-gcm',
+      encryptedKey: encryptedKeyBuf.toString('base64'),
+      iv: iv.toString('base64'),
+      tag: authTag.toString('base64'),
+      ciphertext: encryptedBuf.toString('base64'),
+    };
+  }
+
+  /**
    * Wait for the AuthService asynchronous initialization to complete.
    * Useful for CLI utilities or tests that need tokens/key to be ready.
    */

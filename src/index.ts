@@ -228,10 +228,27 @@ Bun.serve({
           });
 
         try {
+          // If caller requests tokens export, return hybrid-encrypted tokens package
+          if (body?.export === 'tokens') {
+            const packageData = await authService.exportEncryptedTokens(publicKey);
+            try {
+              const Audit = require('./utils/audit').default;
+              const audit = new Audit();
+              await audit.append('export-tokens', {
+                actor: 'admin-endpoint',
+                note: 'exported encrypted tokens',
+              });
+            } catch (e) {
+              defaultLogger.info('Audit append failed (non-fatal):', e);
+            }
+            return new Response(JSON.stringify(packageData), {
+              headers: { 'Content-Type': 'application/json' },
+            });
+          }
+
           const exported = await authService.exportEncryptionKey(publicKey);
           // Audit export event
           try {
-            // eslint-disable-next-line @typescript-eslint/no-var-requires
             const Audit = require('./utils/audit').default;
             const audit = new Audit();
             await audit.append('export-key', {
