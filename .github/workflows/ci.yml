@@ -129,55 +129,12 @@ jobs:
           # The Docker image builds dependencies (bun install + Playwright) at image build
           # time to speed up CI; do not reinstall inside the container here.
           CONTAINER_NAME="yash-ci-run-$(date +%s)-$RANDOM"
-          # Run container as the host runner user so files written into the mounted
-          # ${GITHUB_WORKSPACE}/tmp directory are owned by the runner and can be
-          # uploaded by actions/upload-artifact without UID/GID surprises.
-          docker run --name "$CONTAINER_NAME" --user "$(id -u):$(id -g)" -e RUN_PLAYWRIGHT=1 -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" -v "${{ github.workspace }}/tmp:/app/tmp" yash-ci:latest /bin/bash -lc '
-            set -euo pipefail
-
-            echo "Starting server inside container"
-            bun run src/index.ts &
-            pid=$!
-
-            echo "Waiting for server readiness"
-            for i in $(seq 1 60); do
-              if curl -sSf http://localhost:3000/api/status -o /dev/null; then
-                echo "Server ready"
-                break
-              fi
-              sleep 1
-            done
-            if ! curl -sSf http://localhost:3000/api/status -o /dev/null; then
-              echo "Server failed to start" >&2
-              ps aux || true
-              exit 1
-            fi
-
-
-            echo "Using pre-baked dependencies in the image; skipping in-container install"
-
-            echo "Running full test suite (bun test)"
-            # Run the full unit test suite inside the hermetic image to validate CI-like runtime.
-            # Fail the container early if tests fail (exit code 4) so CI shows a clear failure.
-            bun test --reporter=list || exit 4
-
-            echo "Running Playwright webview test"
-            npx playwright test e2e-tests/webview.spec.ts --reporter=list || exit 2
-
-            echo "Running reconnection integration test"
-            bun test test/obs.websocket.reconnect.test.ts --reporter=list || exit 3
-
-            echo "Running artifact verification script"
-            bash scripts/ci/verify_artifact.sh || true
-
-            echo "Capturing metrics and OBS status into /app/tmp for artifact inspection"
-            # Capture Prometheus text and JSON snapshots for debugging
-            curl -sS http://localhost:3000/metrics -o /app/tmp/metrics.txt || echo "metrics fetch failed" > /app/tmp/metrics_fetch_failed.txt || true
-            curl -sS http://localhost:3000/api/metrics -o /app/tmp/metrics.json || echo "api metrics fetch failed" > /app/tmp/metrics_api_fetch_failed.txt || true
-            curl -sS http://localhost:3000/api/obs/status -o /app/tmp/obs_status.json || echo "obs status fetch failed" > /app/tmp/obs_status_fetch_failed.txt || true
-
-            echo "Integration tests finished"
-          '
+          # Run the container via the host-side wrapper script which will ensure
+          # robust artifact collection and ownership fixing. The wrapper will
+          # manage docker cp/tar fallbacks and run the fixer before upload.
+          chmod +x scripts/ci/run_and_collect_artifacts.sh
+          chmod +x scripts/ci/container_run.sh
+          ./scripts/ci/run_and_collect_artifacts.sh yash-ci:latest -- "bash scripts/ci/container_run.sh"
 
           RUN_EXIT=$?
           echo "Container $CONTAINER_NAME exited with status $RUN_EXIT"

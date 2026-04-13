@@ -60,9 +60,20 @@ RUN if [ "${HOST_UID}" != "1000" ] || [ "${HOST_GID}" != "1000" ]; then \
       useradd -u "${HOST_UID}" -g "${HOST_GID}" -m -d /home/hostuser -s /bin/bash hostuser 2>/dev/null || true; \
     fi || true
 
-# Install dependencies via Bun and ensure Playwright browsers are available
+# Install dependencies via Bun
 RUN bun install --no-save || true
-RUN npx playwright install --with-deps || true
+
+# Configure Playwright browsers to be installed into a global, world-readable
+# directory so non-root users (containers run with --user) can execute them.
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright-browsers
+RUN mkdir -p /ms-playwright-browsers \
+    && chown root:root /ms-playwright-browsers \
+    && chmod 0755 /ms-playwright-browsers
+
+# Install Playwright browsers into the shared path and make them readable/executable
+# by non-root users at runtime.
+RUN PLAYWRIGHT_BROWSERS_PATH=/ms-playwright-browsers npx playwright install --with-deps || true
+RUN chmod -R a+rX /ms-playwright-browsers || true
 
 # Expose server port
 EXPOSE 3000
