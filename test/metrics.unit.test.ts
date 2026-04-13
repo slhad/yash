@@ -13,16 +13,18 @@ describe('metrics.toPrometheusText', () => {
 
     const txt = toPrometheusText();
 
-    expect(txt).toContain('# TYPE test_counter counter');
-    expect(txt).toContain('test_counter 3');
+    // counters become <name>_total
+    expect(txt).toContain('# TYPE test_counter_total counter');
+    expect(txt).toContain('test_counter_total 3');
 
+    // gauges keep their name
     expect(txt).toContain('# TYPE test_gauge gauge');
     expect(txt).toContain('test_gauge 7');
 
-    // timestamp exported as seconds
+    // timestamps become <name>_timestamp_seconds
     const expectedSeconds = String(Number(ts) / 1000);
-    expect(txt).toContain(`# TYPE test_ts gauge`);
-    expect(txt).toContain(`test_ts ${expectedSeconds}`);
+    expect(txt).toContain(`# TYPE test_ts_timestamp_seconds gauge`);
+    expect(txt).toContain(`test_ts_timestamp_seconds ${expectedSeconds}`);
   });
 
   test('empty snapshot returns just a newline', () => {

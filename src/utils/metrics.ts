@@ -65,22 +65,38 @@ export function toPrometheusText(snapshot?: {
   const snap = snapshot ?? metrics.getAll();
   const lines: string[] = [];
 
+  const sanitize = (n: string) => {
+    // Replace invalid characters with underscore and ensure it starts with [A-Za-z_:]
+    let s = n.replace(/[^a-zA-Z0-9_:]/g, '_');
+    if (!/^[a-zA-Z_:]/.test(s)) s = `m_${s}`;
+    return s;
+  };
+
+  // Counters: export as <sanitized>_total (Prometheus convention)
   for (const [name, value] of Object.entries(snap.counters || {})) {
-    lines.push(`# TYPE ${name} counter`);
-    lines.push(`${name} ${value}`);
+    const promName = `${sanitize(name)}_total`;
+    lines.push(`# HELP ${promName} Auto-generated counter metric from YASH`);
+    lines.push(`# TYPE ${promName} counter`);
+    lines.push(`${promName} ${value}`);
   }
 
+  // Gauges: export as <sanitized>
   for (const [name, value] of Object.entries(snap.gauges || {})) {
-    lines.push(`# TYPE ${name} gauge`);
-    lines.push(`${name} ${value}`);
+    const promName = sanitize(name);
+    lines.push(`# HELP ${promName} Auto-generated gauge metric from YASH`);
+    lines.push(`# TYPE ${promName} gauge`);
+    lines.push(`${promName} ${value}`);
   }
 
-  // Export timestamps as gauges in seconds
+  // Timestamps: export as <sanitized>_timestamp_seconds (gauge)
   for (const [name, value] of Object.entries(snap.timestamps || {})) {
-    lines.push(`# TYPE ${name} gauge`);
+    const promName = `${sanitize(name)}_timestamp_seconds`;
     const seconds = Number(value) / 1000;
-    lines.push(`${name} ${seconds}`);
+    lines.push(`# HELP ${promName} Auto-generated timestamp metric from YASH`);
+    lines.push(`# TYPE ${promName} gauge`);
+    lines.push(`${promName} ${seconds}`);
   }
 
+  if (lines.length === 0) return '\n';
   return lines.join('\n') + '\n';
 }

@@ -88,6 +88,15 @@ Keys currently exported (examples)
 - obs.reconnect.exhausted (counter)
 - obs.reconnect.exhaustedTs (timestamp, ms)
 
+Prometheus naming conventions
+---------------------------
+When exported to Prometheus format (/metrics), metric names are sanitized and follow these conventions:
+- Counters are exported as <sanitized_name>_total (Prometheus counter convention).
+- Gauges are exported as <sanitized_name>.
+- Timestamps are exported as <sanitized_name>_timestamp_seconds (gauge, seconds since epoch).
+
+Example: counter obs.reconnect.failures -> obs_reconnect_failures_total
+
 Security note: /api/metrics and /metrics are unauthenticated by default. If you plan to
 expose them on a public network, add an ACL or authentication layer before enabling scraping.
 
