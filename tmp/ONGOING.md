@@ -39,11 +39,24 @@ Next steps (ongoing) - do not commit
       admin keys and HMAC metadata encrypted for the provided RSA public key.
 
 5) Followups (future):
-   - Consider integrating mutual TLS or other network-level protections for admin endpoints.
-   - Add RBAC for admin actions beyond single ADMIN_TOKEN and admin keys. (Basic roles support added to AdminService: `roles` on keys, and listKeys now returns roles.)
-   - Endpoints added:
-     - POST /api/admin/keys/update-roles { id, roles } (requires admin role)
-     - RBAC enforcement added to create/revoke operations (requires admin role unless ADMIN_TOKEN used)
+    - Consider integrating mutual TLS or other network-level protections for admin endpoints.
+    - Add RBAC for admin actions beyond single ADMIN_TOKEN and admin keys. (Basic roles support added to AdminService: `roles` on keys, and listKeys now returns roles.)
+    - Endpoints added:
+      - POST /api/admin/keys/update-roles { id, roles } (requires admin role)
+      - RBAC enforcement added to create/revoke operations (requires admin role unless ADMIN_TOKEN used)
+
+6) Easiest followup (this run)
+   - Documented new import endpoint in README.md
+   - Exported small testable handlers for update-roles and keys import so endpoints can be
+     unit-tested without starting the server (src/handlers/adminKeysHandlers.ts).
+   - Added AdminService.updateKey API to avoid direct internal map mutation.
+   - Added tests for endpoint-level RBAC and import/update behaviours.
+
+7) Next small tasks (low effort):
+   - Add a dry-run flag to AdminService.importEncryptedAdminKeys and expose it via
+     the import endpoint so operators can preview actions before committing.
+   - Add a README section describing safe import/merge workflows and the overwrite flag behaviour.
+   - Remove any debug helpers in tmp/ (tmp/debug_admin.ts) when they are no longer needed.
 
 Notes:
 - tmp directory is git-ignored by .gitignore and should not be committed.

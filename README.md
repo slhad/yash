@@ -92,6 +92,12 @@ Endpoints (summary):
   `{ id, token, createdAt }` (token shown once).
 - GET `/api/admin/keys` : List admin keys metadata (id, label, createdAt, revoked).
 - POST `/api/admin/keys/revoke` : Revoke a key by id. Body: `{ "id": "..." }`.
+ - POST `/api/admin/keys/import` : Import admin keys exported from another
+   instance. Accepts `{ "privateKeyPem": "...", "package": { algorithm, encryptedKey, iv, tag, ciphertext } }`.
+   The package must be produced by `exportEncryptedAdminKeys()` from the source
+   instance. The import operation merges incoming keys and HMAC metadata so
+   tokens issued by the source instance remain verifiable. By default the
+   import skips keys with existing IDs (no overwrite).
 - GET  `/api/admin/audit/tail?lines=N` : Return the last N lines of the
   append-only audit log (default 100).
 - GET  `/api/admin/audit/verify` : Verify the chained HMAC audit log and
