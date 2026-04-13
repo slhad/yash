@@ -163,3 +163,20 @@ docker run --rm -e RUN_PLAYWRIGHT=1 -v "${{ github.workspace }}/tmp:/app/tmp" --
 Notes:
 - The CI workflows in `.github/workflows/` already reference this image name. If you mirror or rename the image, update the workflows accordingly.
 - The `--user "$(id -u):$(id -g)"` flag ensures files written into the mounted `tmp/` directory are owned by the host runner user so the Actions upload step can read them.
+
+Local hermetic reproduction helper
+---------------------------------
+
+If you want to reproduce the hermetic CI run locally (useful for debugging artifact ownership, Playwright failures, or timing issues) there's a helper script at `scripts/ci/run_hermetic_local.sh`.
+
+Usage:
+
+```
+# Build image if missing and run the verification script inside the container
+./scripts/ci/run_hermetic_local.sh
+
+# Force rebuild of the image before running
+FORCE_BUILD=1 ./scripts/ci/run_hermetic_local.sh
+```
+
+The script mounts the repository `tmp/` to the container's `/app/tmp` and runs `scripts/ci/verify_artifact.sh` inside the image so you can inspect files and ownership on the host after the run.
