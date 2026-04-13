@@ -321,3 +321,11 @@ Next plan:
   - Why: Ensure the hermetic image can chown /app/tmp at container startup when HOST_UID/HOST_GID are provided by CI, which helps artifact ownership on the host.
   - What changed: Dockerfile now COPYs scripts/ci/ci-entrypoint.sh to /usr/local/bin/ci-entrypoint.sh, makes it executable, and sets ENTRYPOINT to that script.
   - Follow-ups: Build the image locally and run the hermetic reproduction helper to verify artifacts written into mounted /app/tmp are owned by the host UID/GID when CI provides HOST_UID/HOST_GID.
+
+2026-04-13 (this turn)
+- Action: Hardened ci-entrypoint to create host-matching user when running as root
+  - Why: In some CI environments (especially self-hosted), creating a user inside the image that matches the host UID/GID makes mounted artifact files owned by the host user without requiring --user at docker run time.
+  - What changed: scripts/ci/ci-entrypoint.sh now:
+    - If HOST_UID/HOST_GID provided and running as root: creates a hostgroup and hostuser with those IDs, chowns /app/tmp, and attempts to exec the command as that user via su.
+    - If not running as root: does a best-effort chown of /app/tmp then runs the command.
+  - Follow-ups: Test locally with ./scripts/ci/run_hermetic_local.sh and in CI. If su is not available in the image, the entrypoint falls back to running commands as root and still attempts chown.
