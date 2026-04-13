@@ -121,3 +121,45 @@ Then access metrics with a header:
 ```
 curl -H "Authorization: Bearer supersecret-token" http://localhost:3000/metrics
 ```
+
+Using The Prebuilt Hermetic Docker Image
+---------------------------------------
+
+We publish a hermetic Docker image that contains Bun, Node (for Playwright tooling), and preinstalled Playwright browsers. The image name is:
+
+```
+ghcr.io/<OWNER>/<REPO>/yash-ci:latest
+```
+
+Replace `<OWNER>/<REPO>` with your GitHub repository path (the publish workflow tags the image as `ghcr.io/${{ github.repository }}/yash-ci:latest` and `:${{ github.sha }}`).
+
+Quick examples:
+
+- Pull the image:
+
+```
+docker pull ghcr.io/<OWNER>/<REPO>/yash-ci:latest
+```
+
+- Run the server from the image (mounts the repo `tmp/` to `/app/tmp` inside the container so artifacts can be collected):
+
+```
+mkdir -p tmp
+docker run --rm -p 3000:3000 -v "$(pwd)/tmp:/app/tmp" --user "$(id -u):$(id -g)" ghcr.io/<OWNER>/<REPO>/yash-ci:latest /bin/bash -lc 'bun run src/index.ts'
+```
+
+- CI / hermetic invocation (example taken from the repository CI):
+
+```
+docker run --rm -e RUN_PLAYWRIGHT=1 -v "${{ github.workspace }}/tmp:/app/tmp" --user "$(id -u):$(id -g)" ghcr.io/<OWNER>/<REPO>/yash-ci:latest /bin/bash -lc '
+  bun run src/index.ts &
+  for i in $(seq 1 60); do
+    curl -sSf http://localhost:3000/api/status -o /dev/null && break || sleep 1
+  done
+  # run tests inside the image as needed (Playwright / bun test)
+'
+```
+
+Notes:
+- The CI workflows in `.github/workflows/` already reference this image name. If you mirror or rename the image, update the workflows accordingly.
+- The `--user "$(id -u):$(id -g)"` flag ensures files written into the mounted `tmp/` directory are owned by the host runner user so the Actions upload step can read them.
