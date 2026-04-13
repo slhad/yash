@@ -78,10 +78,9 @@ describe('ObsService WebSocket reconnection (integration)', () => {
     const obs = new ObsService('localhost', 4455, null, true, baseMs, 0);
 
     // connect while server is available
-    const p = obs.connect();
-    // wait for next tick to allow FakeWebSocket to call onopen
-    await new Promise((r) => setTimeout(r, 0));
-    await p;
+    await obs.connect();
+    const { waitFor } = await import('./_helpers/waitFor');
+    await waitFor(() => obs.isConnected(), 2000);
     expect(obs.isConnected()).toBe(true);
 
     // simulate server going down -> connected should become false
@@ -89,16 +88,14 @@ describe('ObsService WebSocket reconnection (integration)', () => {
     // allow the close callbacks to run (next tick)
     await new Promise((r) => setTimeout(r, 0));
     await Promise.resolve();
+    await waitFor(() => !obs.isConnected(), 2000);
     expect(obs.isConnected()).toBe(false);
 
     // bring server back up before the scheduled reconnect attempt occurs
     FakeServer.setAvailable(true);
 
-    // scheduled reconnect delay with random=1 equals baseMs. Wait a bit longer than baseMs
-    await new Promise((r) => setTimeout(r, baseMs + 200));
-    // allow microtasks (onopen) to run
-    await Promise.resolve();
-
+    // Wait for reconnect to succeed; poll instead of fixed sleep
+    await waitFor(() => obs.isConnected(), baseMs + 2000);
     expect(obs.isConnected()).toBe(true);
 
     // cleanup

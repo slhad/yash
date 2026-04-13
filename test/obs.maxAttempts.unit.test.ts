@@ -24,13 +24,10 @@ describe('ObsService maxAttempts', () => {
 
     (obs as any).scheduleReconnectAttempt();
 
-    // advance through attempts: each attempt schedules next with base*2^(attempt-1)
-    // We use Math.random = 1 implicitly in production randomness; just advance a safe amount
-    // Advance time by waiting real time; compute a safe total timeout
-    // Add some buffer for CI timing variability
-    const totalWait = baseMs * Math.pow(2, maxAttempts + 1) + 500;
-    await new Promise((resolve) => setTimeout(resolve, totalWait));
-
+    // Poll for the emitted callback instead of sleeping a fixed amount to make the
+    // test CI-friendly.
+    const { waitFor } = await import('./_helpers/waitFor');
+    await waitFor(() => emitted === true, baseMs * Math.pow(2, maxAttempts + 1) + 2000);
     expect(emitted).toBe(true);
 
     loggerSpy.mockRestore();

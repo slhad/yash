@@ -38,10 +38,16 @@ describe('ObsService backoff', () => {
     expect(firstAttempt).toBe(1);
     expect(firstDelay).toBe(baseMs); // with random=1 delay == base
 
-    // Wait for the scheduled attempt to fire (add a small margin for CI)
-    await new Promise((resolve) => setTimeout(resolve, firstDelay + 200));
-    // allow promise microtasks to run so the .catch handler schedules next attempt
-    await Promise.resolve();
+    // Wait for the scheduled attempt to fire using polling so CI slowdown doesn't
+    // make this test flaky.
+    const { waitFor } = await import('./_helpers/waitFor');
+    await waitFor(
+      () =>
+        loggerSpy.mock.calls.some((c) =>
+          ((c[0] as string) || '').includes('Attempting to reconnect to OBS...'),
+        ),
+      firstDelay + 1000,
+    );
 
     // Find the next scheduling message
     const allCalls = loggerSpy.mock.calls.map((c) => c[0] as string);

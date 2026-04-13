@@ -11,11 +11,11 @@ describe('ObsService reconnection', () => {
 
     const obsService = new ObsService('localhost', 4455, null, false, 30000, 1000);
 
-    // Connect (simulated delay inside connect is 1000ms)
-    const connectPromise = obsService.connect();
-    // wait for the connection delay
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-    await connectPromise;
+    // Connect (simulated delay inside connect is connectDelayMs)
+    await obsService.connect();
+    // Wait for connected state via polling helper to be robust in CI
+    const { waitFor } = await import('./_helpers/waitFor');
+    await waitFor(() => obsService.isConnected(), 5000);
     expect(obsService.isConnected()).toBe(true);
 
     // Disconnect and verify disconnected
@@ -26,21 +26,19 @@ describe('ObsService reconnection', () => {
     // but scheduleReconnectAttempt is idempotent and safe to call directly for the test)
     (obsService as any).scheduleReconnectAttempt();
 
-    // The computed delay uses full jitter: delay = random() * base * multiplier^attempt
-    // With Math.random() stubbed to 0.5, and base 30000, the delay will be 15000ms.
-    // Wait a bit longer than the computed delay to accommodate CI scheduling jitter
-    await new Promise((resolve) => setTimeout(resolve, 15000 + 250));
+    // With deterministic Math.random stub the computed delay is known; instead of waiting
+    // a fixed long sleep, poll for the log message and for connected state. This reduces
+    // flakiness and makes the test CI-friendly.
+    await waitFor(
+      () =>
+        loggerSpy.mock.calls.some((c) =>
+          ((c[0] as string) || '').includes('Attempting to reconnect to OBS...'),
+        ),
+      20000,
+    );
 
-    // The reconnection attempt logs a message before calling connect
-    const calls = loggerSpy.mock.calls.map((c) => c[0] as string);
-    expect(calls.some((s) => s.includes('Attempting to reconnect to OBS...'))).toBe(true);
-
-    // The reconnection's connect call uses a 1000ms delay; wait for it and allow promise resolution
-    // Allow extra margin for the connect delay to settle in CI
-    await new Promise((resolve) => setTimeout(resolve, 1000 + 220));
-    // Give promise microtasks a chance to run
-    await Promise.resolve();
-
+    // Wait until service reports connected (allowing internal connect delay to finish)
+    await waitFor(() => obsService.isConnected(), 5000);
     expect(obsService.isConnected()).toBe(true);
 
     mathRandomSpy.mockRestore();

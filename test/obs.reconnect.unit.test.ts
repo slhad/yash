@@ -21,10 +21,9 @@ test('ObsService reconnection interval is configurable and attempts reconnect wh
   await obs.disconnect();
   expect(obs.isConnected()).toBe(false);
 
-  // Wait up to a short period for reconnection (since reconnectIntervalMs=200ms)
-  // Wait enough time for the scheduled reconnect attempt (100ms) plus connectDelayMs (50ms)
-  await new Promise((resolve) => setTimeout(resolve, 300));
-
+  // Wait up to a short period for reconnection using polling
+  const { waitFor } = await import('./_helpers/waitFor');
+  await waitFor(() => obs.isConnected(), 1000);
   expect(obs.isConnected()).toBe(true);
 
   // Clean up
