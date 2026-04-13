@@ -10,12 +10,15 @@ expected file ownership and no permission surprises.
 
 Steps to reproduce and validate locally:
 1. Ensure helpers are executable:
-   chmod +x scripts/ci/run_hermetic_local.sh scripts/ci/fix_host_artifact_ownership.sh
+   chmod +x scripts/ci/run_hermetic_local.sh scripts/ci/fix_host_artifact_ownership.sh scripts/ci/run_and_collect_artifacts.sh
 2. Build+run hermetic locally (force rebuild with host UID/GID baked):
    FORCE_BUILD=1 BUILD_ARGS="--build-arg HOST_UID=$(id -u) --build-arg HOST_GID=$(id -g)" ./scripts/ci/run_hermetic_local.sh
 3. After the container run exits, run the host-side fixer (this is safe if
    the owner file is missing):
    ./scripts/ci/fix_host_artifact_ownership.sh tmp
+4. Alternatively use the new wrapper which runs the container detached and
+   reliably collects artifacts with fallbacks:
+   ./scripts/ci/run_and_collect_artifacts.sh yash-ci:local -- "bash scripts/ci/verify_artifact.sh"
 4. Update CI workflow to run the fixer before uploading artifacts (done in
    .github/workflows/ci.yml - the step is named "Fix host artifact ownership").
 4. Inspect tmp/: ls -la tmp && cat tmp/ci-artifact-owner.txt
