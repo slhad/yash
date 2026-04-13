@@ -36,8 +36,23 @@ else
 			echo "To remediate run as a user with privileges: sudo chown -R $OWNER $TARGET_DIR"
 		fi
 	else
-		echo "No sudo available and chown failed; cannot remediate automatically."
-		echo "To remediate run as root or on a runner with appropriate permissions: chown -R $OWNER $TARGET_DIR"
+		echo "No sudo available and chown failed; attempting remediation via Docker container (bind-mount)"
+		if command -v docker >/dev/null 2>&1; then
+			# Use a small base image with chown (busybox) to run as root inside the
+			# container and chown the mounted host directory. This avoids requiring
+			# interactive sudo on the host and works on runners that can run docker.
+			HELPER_IMAGE="busybox:1.36.1"
+			echo "Attempting docker-based chown using image: $HELPER_IMAGE"
+			if docker run --rm -v "$(pwd)/$TARGET_DIR:/host_tmp" "$HELPER_IMAGE" sh -c "chown -R $OWNER /host_tmp"; then
+				echo "Docker-based chown succeeded"
+			else
+				echo "Docker-based chown failed; cannot remediate automatically"
+				echo "To remediate run as root or on a runner with appropriate permissions: chown -R $OWNER $TARGET_DIR"
+			fi
+		else
+			echo "No docker available and chown failed; cannot remediate automatically."
+			echo "To remediate run as root or on a runner with appropriate permissions: chown -R $OWNER $TARGET_DIR"
+		fi
 	fi
 fi
 
