@@ -18,5 +18,13 @@ Next (candidate) tasks
 - Wire backoff parameters to getConfig() so they can be set from config file (medium).
 - Add integration test with fake WS server to validate reconnection in a more realistic environment (hard).
 
+Done this turn
+- Added WebSocket reconnection integration test: test/obs.websocket.reconnect.test.ts
+
+Next (candidate) tasks
+- Implement maxAttempts with an event when exceeded (hard).
+- Wire backoff parameters to getConfig() so they can be set from config file (medium).
+- Add CI job to run Playwright + reconnection integration tests in a hermetic environment (very hard).
+
 Notes
 - tmp/ is gitignored; file created to satisfy the workflow requirement. Will be force-added to commit per instruction.
