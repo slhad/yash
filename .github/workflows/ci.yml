@@ -191,6 +191,17 @@ jobs:
             exit $RUN_EXIT
           fi
 
+      - name: Fix host artifact ownership
+        if: always()
+        run: |
+          echo "Running host-side artifact ownership fixer (if present)"
+          # Use bash to avoid requiring executable bit on the script
+          if [ -f scripts/ci/fix_host_artifact_ownership.sh ]; then
+            bash scripts/ci/fix_host_artifact_ownership.sh tmp || echo "fixer failed or not permitted"
+          else
+            echo "No fixer script present; skipping"
+          fi
+
       - name: Inspect host tmp artifacts
         if: always()
         run: |

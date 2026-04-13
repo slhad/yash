@@ -16,6 +16,8 @@ Steps to reproduce and validate locally:
 3. After the container run exits, run the host-side fixer (this is safe if
    the owner file is missing):
    ./scripts/ci/fix_host_artifact_ownership.sh tmp
+4. Update CI workflow to run the fixer before uploading artifacts (done in
+   .github/workflows/ci.yml - the step is named "Fix host artifact ownership").
 4. Inspect tmp/: ls -la tmp && cat tmp/ci-artifact-owner.txt
 
 Notes:
