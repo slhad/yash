@@ -52,3 +52,35 @@ export class Metrics {
 }
 
 export const metrics = new Metrics();
+
+/**
+ * Convert a metrics snapshot into Prometheus text exposition format.
+ * If no snapshot is provided, uses the in-memory `metrics` instance.
+ */
+export function toPrometheusText(snapshot?: {
+  counters: Record<string, number>;
+  gauges: Record<string, number>;
+  timestamps: Record<string, number>;
+}): string {
+  const snap = snapshot ?? metrics.getAll();
+  const lines: string[] = [];
+
+  for (const [name, value] of Object.entries(snap.counters || {})) {
+    lines.push(`# TYPE ${name} counter`);
+    lines.push(`${name} ${value}`);
+  }
+
+  for (const [name, value] of Object.entries(snap.gauges || {})) {
+    lines.push(`# TYPE ${name} gauge`);
+    lines.push(`${name} ${value}`);
+  }
+
+  // Export timestamps as gauges in seconds
+  for (const [name, value] of Object.entries(snap.timestamps || {})) {
+    lines.push(`# TYPE ${name} gauge`);
+    const seconds = Number(value) / 1000;
+    lines.push(`${name} ${seconds}`);
+  }
+
+  return lines.join('\n') + '\n';
+}

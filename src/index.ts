@@ -180,34 +180,8 @@ Bun.serve({
       GET: () => {
         try {
           const metricsModule = require('./utils/metrics');
-          const snapshot =
-            metricsModule && metricsModule.metrics && metricsModule.metrics.getAll
-              ? metricsModule.metrics.getAll()
-              : { counters: {}, gauges: {}, timestamps: {} };
-
-          const lines: string[] = [];
-
-          // Counters
-          for (const [name, value] of Object.entries(snapshot.counters || {})) {
-            lines.push(`# TYPE ${name} counter`);
-            lines.push(`${name} ${value}`);
-          }
-
-          // Gauges
-          for (const [name, value] of Object.entries(snapshot.gauges || {})) {
-            lines.push(`# TYPE ${name} gauge`);
-            lines.push(`${name} ${value}`);
-          }
-
-          // Timestamps (export as gauge in seconds)
-          for (const [name, value] of Object.entries(snapshot.timestamps || {})) {
-            lines.push(`# TYPE ${name} gauge`);
-            // convert ms -> seconds with fractional part
-            const seconds = Number(value) / 1000;
-            lines.push(`${name} ${seconds}`);
-          }
-
-          const body = lines.join('\n') + '\n';
+          const body =
+            metricsModule && metricsModule.toPrometheusText ? metricsModule.toPrometheusText() : '';
           return new Response(body, { headers: { 'Content-Type': 'text/plain; version=0.0.4' } });
         } catch (err) {
           return new Response('', { status: 500 });
