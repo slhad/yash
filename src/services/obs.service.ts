@@ -8,9 +8,15 @@ import { defaultLogger } from '../utils/logger';
 export class ObsService {
   private connected: boolean = false;
   private connectionPromise: Promise<void> | null = null;
-  private reconnectInterval: NodeJS.Timeout | null = null;
-  // Allow configurable reconnection interval for tests (ms)
+  // Scheduled reconnect timer (replaces the old interval-based approach)
+  private reconnectTimer: NodeJS.Timeout | null = null;
+  // Allow configurable reconnection base interval for tests (ms)
+  // This value is used as the base delay for exponential backoff.
   private reconnectIntervalMs: number = 30000;
+  // Backoff state
+  private reconnectAttempt: number = 0;
+  private reconnectMaxMs: number = 5 * 60 * 1000; // 5 minutes cap
+  private reconnectMultiplier: number = 2; // exponential multiplier
   // Simulated connect delay for testability (ms)
   private connectDelayMs: number = 1000;
   // Optional WebSocket transport support
@@ -37,6 +43,8 @@ export class ObsService {
     useWebSocketTransport: boolean = false,
     reconnectIntervalMs?: number,
     connectDelayMs?: number,
+    reconnectMaxMs?: number,
+    reconnectMultiplier?: number,
   ) {
     this.loadConfigSync();
     if (host) this.host = host;
@@ -48,6 +56,12 @@ export class ObsService {
     }
     if (typeof connectDelayMs === 'number' && connectDelayMs >= 0) {
       this.connectDelayMs = connectDelayMs;
+    }
+    if (typeof reconnectMaxMs === 'number' && reconnectMaxMs > 0) {
+      this.reconnectMaxMs = reconnectMaxMs;
+    }
+    if (typeof reconnectMultiplier === 'number' && reconnectMultiplier > 1) {
+      this.reconnectMultiplier = reconnectMultiplier;
     }
   }
 
@@ -114,6 +128,8 @@ export class ObsService {
             this.connected = false;
             this.notifyStatusChange(false);
             defaultLogger.info('Disconnected from OBS');
+            // Start reconnection attempts using exponential backoff + jitter
+            this.scheduleReconnectAttempt();
           };
 
           ws.onerror = (err: any) => {
@@ -146,7 +162,7 @@ export class ObsService {
         // Notify status change
         this.notifyStatusChange(true);
 
-        // Set up reconnection interval
+        // Clear any scheduled reconnection attempts when we've successfully connected
         this.setupReconnection();
 
         defaultLogger.info('Connected to OBS');
@@ -190,6 +206,9 @@ export class ObsService {
     this.notifyStatusChange(false);
 
     defaultLogger.info('Disconnected from OBS');
+
+    // Start reconnection attempts (tests expect reconnection behavior after disconnect)
+    this.scheduleReconnectAttempt();
   }
 
   /**
@@ -294,20 +313,52 @@ export class ObsService {
    * Set up reconnection logic
    */
   private setupReconnection(): void {
-    // Clear any existing interval
-    if (this.reconnectInterval) {
-      clearInterval(this.reconnectInterval);
+    // Clear any existing scheduled reconnect attempt and reset backoff
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
     }
+    // Reset attempt counter when we are connected
+    this.reconnectAttempt = 0;
+  }
 
-    // Set up reconnection attempt every 30 seconds if disconnected
-    this.reconnectInterval = setInterval(() => {
-      if (!this.connected) {
-        defaultLogger.info('Attempting to reconnect to OBS...');
-        this.connect().catch((error) => {
-          defaultLogger.error('Reconnection attempt failed:', error);
-        });
+  /**
+   * Schedule a reconnect attempt using exponential backoff with full jitter.
+   * Uses: delay = random() * min(reconnectIntervalMs * (multiplier ^ attempt), reconnectMaxMs)
+   */
+  private scheduleReconnectAttempt(): void {
+    // If already scheduled or we are connected, do nothing
+    if (this.reconnectTimer || this.connected) return;
+
+    const maxDelay = Math.min(
+      this.reconnectIntervalMs * Math.pow(this.reconnectMultiplier, this.reconnectAttempt),
+      this.reconnectMaxMs,
+    );
+
+    // full jitter
+    const delay = Math.floor(Math.random() * maxDelay);
+
+    defaultLogger.info(
+      `Scheduling reconnection attempt in ${delay}ms (attempt ${this.reconnectAttempt + 1})`,
+    );
+
+    this.reconnectTimer = setTimeout(() => {
+      // clear the timer handle first
+      this.reconnectTimer = null;
+
+      if (this.connected) {
+        this.reconnectAttempt = 0;
+        return;
       }
-    }, this.reconnectIntervalMs);
+
+      defaultLogger.info('Attempting to reconnect to OBS...');
+      this.connect().catch((error) => {
+        defaultLogger.error('Reconnection attempt failed:', error);
+        // increase attempt count and schedule next attempt
+        this.reconnectAttempt++;
+        this.scheduleReconnectAttempt();
+      });
+    }, delay);
   }
 
   // Convenience methods for common OBS operations

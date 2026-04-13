@@ -7,7 +7,10 @@ describe('ObsService reconnection', () => {
     vi.useFakeTimers();
     const loggerSpy = vi.spyOn(defaultLogger, 'info').mockImplementation(() => {});
 
-    const obsService = new ObsService('localhost', 4455, null);
+    // Stub Math.random to make jitter deterministic in tests
+    const mathRandomSpy = vi.spyOn(Math, 'random').mockImplementation(() => 0.5);
+
+    const obsService = new ObsService('localhost', 4455, null, false, 30000, 1000);
 
     // Connect (simulated delay inside connect is 1000ms)
     const connectPromise = obsService.connect();
@@ -20,10 +23,13 @@ describe('ObsService reconnection', () => {
     await obsService.disconnect();
     expect(obsService.isConnected()).toBe(false);
 
-    // Setup the reconnection interval using the service's method so fake timers apply
-    (obsService as any).setupReconnection();
-    // Advance timers by reconnection interval (30000ms) to trigger reconnection attempt
-    vi.advanceTimersByTime(30000);
+    // Trigger scheduling of a reconnect attempt (disconnect should have scheduled it already,
+    // but scheduleReconnectAttempt is idempotent and safe to call directly for the test)
+    (obsService as any).scheduleReconnectAttempt();
+
+    // The computed delay uses full jitter: delay = random() * base * multiplier^attempt
+    // With Math.random() stubbed to 0.5, and base 30000, the delay will be 15000ms.
+    vi.advanceTimersByTime(15000);
 
     // The reconnection attempt logs a message before calling connect
     const calls = loggerSpy.mock.calls.map((c) => c[0] as string);
@@ -36,6 +42,7 @@ describe('ObsService reconnection', () => {
 
     expect(obsService.isConnected()).toBe(true);
 
+    mathRandomSpy.mockRestore();
     loggerSpy.mockRestore();
     vi.useRealTimers();
   });
