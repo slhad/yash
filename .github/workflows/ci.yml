@@ -128,6 +128,23 @@ jobs:
           # exit non-zero if the health check fails.
           ./scripts/ci/run_and_collect_artifacts.sh yash-ci:latest -- "bash scripts/ci/image_health_check.sh"
 
+      - name: Lint CI helper scripts (ShellCheck)
+        if: always()
+        run: |
+          echo "Running ShellCheck against CI helper scripts (non-blocking)"
+          mkdir -p tmp
+          chmod +x scripts/ci/lint_ci_scripts.sh || true
+          # The lint script writes results to tmp/ci-shellcheck.txt and exits 0
+          # even when shellcheck is not installed. Keep this non-failing.
+          ./scripts/ci/lint_ci_scripts.sh tmp/ci-shellcheck.txt || true
+
+      - name: Upload CI ShellCheck results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-shellcheck
+          path: tmp/ci-shellcheck.txt
+
       - name: Run hermetic integration tests inside Docker image
         run: |
           # Ensure host tmp exists and is writable by the runner user
