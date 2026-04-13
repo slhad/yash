@@ -7,6 +7,7 @@ import { ObsService } from './services/obs.service';
 import { StreamService } from './services/stream.service';
 import { defaultLogger } from './utils/logger';
 import { AuthService } from './services/auth.service';
+import AdminService from './services/admin.service';
 import { apiMetricsHandler, prometheusMetricsHandler } from './utils/metricsHandlers';
 
 export const youtube = new YouTubeProvider();
@@ -17,6 +18,7 @@ export const chatService = new ChatService();
 export const streamService = new StreamService();
 export const obsService = new ObsService('localhost', 4455, null);
 export const authService = new AuthService();
+export const adminService = new AdminService();
 
 chatService.registerProvider('youtube', youtube);
 chatService.registerProvider('twitch', twitch);
@@ -193,6 +195,82 @@ Bun.serve({
             headers: { 'Content-Type': 'application/json' },
           });
         }
+      },
+    },
+    '/api/admin/keys': {
+      POST: async (req) => {
+        // Create new admin key (returns plaintext token once)
+        const admin = process.env.ADMIN_TOKEN;
+        // allow local dev if ADMIN_TOKEN not set: require no auth
+        if (admin) {
+          const authHeader = (req.headers.get('authorization') || '').trim();
+          if (
+            !authHeader.toLowerCase().startsWith('bearer ') ||
+            authHeader.slice(7).trim() !== admin
+          ) {
+            return new Response(JSON.stringify({ error: 'unauthorized' }), {
+              status: 401,
+              headers: { 'Content-Type': 'application/json' },
+            });
+          }
+        }
+
+        const body = await req.json().catch(() => ({}));
+        const label = body?.label;
+        await adminService.init();
+        const created = await adminService.createKey(label);
+        return new Response(JSON.stringify(created), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      },
+      GET: async (req) => {
+        const admin = process.env.ADMIN_TOKEN;
+        if (admin) {
+          const authHeader = (req.headers.get('authorization') || '').trim();
+          if (
+            !authHeader.toLowerCase().startsWith('bearer ') ||
+            authHeader.slice(7).trim() !== admin
+          ) {
+            return new Response(JSON.stringify({ error: 'unauthorized' }), {
+              status: 401,
+              headers: { 'Content-Type': 'application/json' },
+            });
+          }
+        }
+        await adminService.init();
+        const list = adminService.listKeys();
+        return new Response(JSON.stringify({ keys: list }), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      },
+    },
+    '/api/admin/keys/revoke': {
+      POST: async (req) => {
+        const admin = process.env.ADMIN_TOKEN;
+        if (admin) {
+          const authHeader = (req.headers.get('authorization') || '').trim();
+          if (
+            !authHeader.toLowerCase().startsWith('bearer ') ||
+            authHeader.slice(7).trim() !== admin
+          ) {
+            return new Response(JSON.stringify({ error: 'unauthorized' }), {
+              status: 401,
+              headers: { 'Content-Type': 'application/json' },
+            });
+          }
+        }
+        const body = await req.json().catch(() => ({}));
+        const id = body?.id;
+        if (!id)
+          return new Response(JSON.stringify({ error: 'id required' }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        await adminService.init();
+        const ok = await adminService.revokeKey(id);
+        return new Response(JSON.stringify({ success: ok }), {
+          headers: { 'Content-Type': 'application/json' },
+        });
       },
     },
     '/api/admin/export-key': {
