@@ -18,7 +18,7 @@ const patterns = [
   /-----BEGIN PRIVATE KEY-----/i,
   /-----BEGIN RSA PRIVATE KEY-----/i,
   /AKIA[0-9A-Z]{16}/, // AWS access key id
-  /aws_secret_access_key\s*[:=]\s*[A-Za-z0-9\/+=]{40}/i,
+  /aws_secret_access_key\s*[:=]\s*[A-Za-z0-9/+=]{40}/i,
   /-----BEGIN OPENSSH PRIVATE KEY-----/i,
   /api_key\s*[:=]\s*[A-Za-z0-9\-_.]{20,}/i,
 ];

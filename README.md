@@ -75,29 +75,26 @@ See SPECS.md for architecture and conventions.
 Admin API
 ---------
 This repository exposes several admin-only endpoints under `/api/admin/*` for
-managing encryption keys, exporting tokens, and auditing operations. These
-endpoints are protected by `ADMIN_TOKEN` (optional) and support per-IP
-allowlisting and rate-limiting via environment variables.
+managing admin keys and auditing operations. Note: encryption-related
+operations (encryption key rotation, exporting encryption keys, and hybrid
+export/import of admin keys or tokens) have been removed in this build and
+corresponding endpoints return 501 Not Implemented. The remaining admin
+endpoints support key creation, listing, revocation, and audit operations.
 
 Endpoints (summary):
 
-- POST `/api/admin/rotate-key` : Rotate the symmetric encryption key used to
-  encrypt stored tokens. Accepts optional JSON body `{ "key": "..." }` to
-  set a specific key (not recommended). Requires admin authorization.
-- POST `/api/admin/export-key` : Export the current symmetric key encrypted
-  with a provided RSA public key PEM in the request body `{ "publicKeyPem": "..." }`.
-  Pass `{ "export": "tokens", "publicKeyPem": "..." }` to export the
-  tokens as a hybrid-encrypted package instead.
+- POST `/api/admin/rotate-key` : (Removed) Rotation of encryption keys is no
+  longer supported; this endpoint returns 501 Not Implemented.
+- POST `/api/admin/export-key` : (Removed) Exporting encryption keys or
+  hybrid-encrypted token packages is no longer supported and will return 501.
 - POST `/api/admin/keys` : Create a one-time-display admin token. Returns
   `{ id, token, createdAt }` (token shown once).
 - GET `/api/admin/keys` : List admin keys metadata (id, label, createdAt, revoked).
 - POST `/api/admin/keys/revoke` : Revoke a key by id. Body: `{ "id": "..." }`.
- - POST `/api/admin/keys/import` : Import admin keys exported from another
-   instance. Accepts `{ "privateKeyPem": "...", "package": { algorithm, encryptedKey, iv, tag, ciphertext } }`.
-   The package must be produced by `exportEncryptedAdminKeys()` from the source
-   instance. The import operation merges incoming keys and HMAC metadata so
-   tokens issued by the source instance remain verifiable. By default the
-   import skips keys with existing IDs (no overwrite).
+- POST `/api/admin/keys/import` : (Removed) Importing encrypted admin key
+  packages is no longer supported and will return 501 Not Implemented. To
+  restore keys from backups, restore the `admin_keys.json` file in your data
+  directory and ensure it has strict filesystem permissions.
 - GET  `/api/admin/audit/tail?lines=N` : Return the last N lines of the
   append-only audit log (default 100).
 - GET  `/api/admin/audit/verify` : Verify the chained HMAC audit log and

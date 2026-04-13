@@ -389,7 +389,7 @@ export class ObsService {
     }
 
     const maxDelay = Math.min(
-      this.reconnectIntervalMs * Math.pow(this.reconnectMultiplier, this.reconnectAttempt),
+      this.reconnectIntervalMs * this.reconnectMultiplier ** this.reconnectAttempt,
       this.reconnectMaxMs,
     );
 

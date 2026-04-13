@@ -214,11 +214,10 @@ export class AdminService {
   }
 
   /**
-   * Export admin keys and HMAC metadata encrypted for a provided RSA public key.
-   * Returns a hybrid-encrypted package (RSA-OAEP-SHA256 + AES-256-GCM) that the
-   * holder of the corresponding private key can decrypt to recover the admin
-   * keys (including stored HMACs). This is intended for secure transfer between
-   * instances or backups.
+   * NOTE: Export/import of encrypted admin key packages is not available in
+   * this build. exportEncryptedAdminKeys/importEncryptedAdminKeys are present
+   * only as disabled stubs that throw. The service continues to support
+   * HMAC-based admin key storage, rotation and verification.
    */
   async exportEncryptedAdminKeys(publicKeyPem: string): Promise<{
     algorithm: string;
@@ -227,52 +226,10 @@ export class AdminService {
     tag: string;
     ciphertext: string;
   }> {
-    await this.init();
-
-    if (!publicKeyPem || typeof publicKeyPem !== 'string') throw new Error('publicKeyPem required');
-
-    // Prepare payload: keys and hmac metadata
-    const keysArr = Array.from(this.keys.values());
-    const payload = {
-      keys: keysArr,
-      hmacKeys: { current: this.hmacKey, previous: this.prevHmacKeys },
-    };
-
-    const plaintext = JSON.stringify(payload);
-
-    // Hybrid encrypt: AES-256-GCM for payload, RSA-OAEP-SHA256 for AES key
-    const aesKey = crypto.randomBytes(32);
-    const iv = crypto.randomBytes(12);
-
-    const cipher = crypto.createCipheriv('aes-256-gcm', aesKey, iv);
-    const encryptedBuf = Buffer.concat([
-      cipher.update(Buffer.from(plaintext, 'utf8')),
-      cipher.final(),
-    ]);
-    const authTag = cipher.getAuthTag();
-
-    let encryptedKeyBuf: Buffer;
-    try {
-      encryptedKeyBuf = crypto.publicEncrypt(
-        {
-          key: publicKeyPem,
-          padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
-          oaepHash: 'sha256',
-        },
-        aesKey,
-      );
-    } catch (err) {
-      defaultLogger.error('Failed to encrypt AES key with provided public key', err);
-      throw err;
-    }
-
-    return {
-      algorithm: 'rsa-oaep-sha256+aes-256-gcm',
-      encryptedKey: encryptedKeyBuf.toString('base64'),
-      iv: iv.toString('base64'),
-      tag: authTag.toString('base64'),
-      ciphertext: encryptedBuf.toString('base64'),
-    };
+    // Disabled: callers should not expect this functionality.
+    throw new Error(
+      'exportEncryptedAdminKeys removed: admin encryption features have been removed',
+    );
   }
 
   /**
@@ -305,138 +262,10 @@ export class AdminService {
     preview?: { toAdd: string[]; toReplace: string[] };
     mergedHmacsAdded?: string[];
   }> {
-    await this.init();
-
-    if (!privateKeyPem || typeof privateKeyPem !== 'string')
-      throw new Error('privateKeyPem required');
-    if (!pkg || !pkg.encryptedKey || !pkg.iv || !pkg.ciphertext) throw new Error('invalid package');
-
-    try {
-      const encKeyBuf = Buffer.from(pkg.encryptedKey, 'base64');
-      const aesKey = crypto.privateDecrypt(
-        {
-          key: privateKeyPem,
-          padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
-          oaepHash: 'sha256',
-        },
-        encKeyBuf,
-      );
-
-      const ivBuf = Buffer.from(pkg.iv, 'base64');
-      const tagBuf = pkg.tag ? Buffer.from(pkg.tag, 'base64') : null;
-      const cipherBuf = Buffer.from(pkg.ciphertext, 'base64');
-
-      const decipher = crypto.createDecipheriv('aes-256-gcm', aesKey, ivBuf);
-      if (tagBuf) decipher.setAuthTag(tagBuf);
-      const decryptedBuf = Buffer.concat([decipher.update(cipherBuf), decipher.final()]);
-      const plaintext = decryptedBuf.toString('utf8');
-
-      const parsed = JSON.parse(plaintext || '{}');
-      const incomingKeys = Array.isArray(parsed.keys) ? parsed.keys : [];
-      const hmacMeta: any = parsed.hmacKeys || parsed.hmac_keys || null;
-
-      const imported: string[] = [];
-      const skipped: string[] = [];
-      const errors: string[] = [];
-
-      // Build preview lists
-      const toAdd: string[] = [];
-      const toReplace: string[] = [];
-      for (const ik of incomingKeys) {
-        const id = ik.id || crypto.randomBytes(8).toString('hex');
-        if (this.keys.has(id)) {
-          if (options?.overwrite) toReplace.push(id);
-          else skipped.push(id);
-        } else {
-          toAdd.push(id);
-        }
-      }
-
-      // If dry-run requested, return a preview without mutating state
-      if (options?.dryRun) {
-        const hmacsToAdd: string[] = [];
-        if (hmacMeta) {
-          if (typeof hmacMeta.current === 'string' && hmacMeta.current.length > 0) {
-            if (hmacMeta.current !== this.hmacKey && !this.prevHmacKeys.includes(hmacMeta.current))
-              hmacsToAdd.push(hmacMeta.current);
-          }
-          if (Array.isArray(hmacMeta.previous)) {
-            for (const k of hmacMeta.previous) {
-              if (
-                k &&
-                k !== this.hmacKey &&
-                !this.prevHmacKeys.includes(k) &&
-                !hmacsToAdd.includes(k)
-              )
-                hmacsToAdd.push(k);
-            }
-          }
-        }
-
-        return {
-          imported: [],
-          skipped,
-          errors,
-          preview: { toAdd, toReplace },
-          mergedHmacsAdded: hmacsToAdd,
-        };
-      }
-
-      // Apply changes
-      for (const ik of incomingKeys) {
-        try {
-          const id = ik.id || crypto.randomBytes(8).toString('hex');
-          const keyObj: AdminKey = {
-            id,
-            label: ik.label,
-            hash: ik.hash,
-            roles: Array.isArray(ik.roles) ? ik.roles : ik.roles ? [ik.roles] : ['admin'],
-            createdAt: typeof ik.createdAt === 'number' ? ik.createdAt : Date.now(),
-            revoked: !!ik.revoked,
-          };
-
-          if (this.keys.has(id)) {
-            if (options?.overwrite) {
-              this.keys.set(id, keyObj);
-              imported.push(id);
-            } else {
-              skipped.push(id);
-            }
-          } else {
-            this.keys.set(id, keyObj);
-            imported.push(id);
-          }
-        } catch (e: any) {
-          errors.push(String(e));
-        }
-      }
-
-      // Merge incoming HMAC metadata so tokens signed under the source
-      // instance's HMAC keys remain verifiable here.
-      const mergedHmacsAdded: string[] = [];
-      if (hmacMeta) {
-        if (typeof hmacMeta.current === 'string' && hmacMeta.current.length > 0) {
-          if (hmacMeta.current !== this.hmacKey && !this.prevHmacKeys.includes(hmacMeta.current)) {
-            this.prevHmacKeys.unshift(hmacMeta.current);
-            mergedHmacsAdded.push(hmacMeta.current);
-          }
-        }
-        if (Array.isArray(hmacMeta.previous)) {
-          for (const k of hmacMeta.previous) {
-            if (k && k !== this.hmacKey && !this.prevHmacKeys.includes(k)) {
-              this.prevHmacKeys.unshift(k);
-              mergedHmacsAdded.push(k);
-            }
-          }
-        }
-        if (this.prevHmacKeys.length > 50) this.prevHmacKeys = this.prevHmacKeys.slice(0, 50);
-      }
-
-      await this.save();
-      return { imported, skipped, errors, preview: { toAdd, toReplace }, mergedHmacsAdded };
-    } catch (e: any) {
-      throw e;
-    }
+    // Disabled: import of encrypted admin key packages. Callers should not invoke.
+    throw new Error(
+      'importEncryptedAdminKeys removed: admin encryption features have been removed',
+    );
   }
 
   // Create a new admin key and return plaintext token (one-time display)

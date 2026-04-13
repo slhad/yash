@@ -1,4 +1,4 @@
-import { test, expect } from 'bun:test';
+import { expect, test } from 'bun:test';
 import { ObsService } from '../src/services/obs.service';
 
 test('ObsService reconnection interval is configurable and attempts reconnect when disconnected', async () => {

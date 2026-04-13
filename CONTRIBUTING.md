@@ -1,66 +1,22 @@
-Contributing to YASH
-===================
+Contributing To YASH — Temporarily Closed
+=========================================
 
-Thanks for helping improve YASH. This file contains the minimal, low-friction steps to get a developer environment running and follow contributor hygiene for secrets and local configuration.
+This repository is currently closed to external contributions. Pull requests,
+patches, and feature contributions will NOT be accepted until the project
+author or maintainer explicitly declares the codebase "ready for contributions."
 
-Local setup (quick)
--------------------
-1. Install Bun (https://bun.sh) if you don't have it.
-2. Install dependencies:
+What this means
+- Do not open pull requests. Any PRs submitted while this notice is in place
+  will be closed without review.
+- Do not submit feature requests as issues. Non-critical issues may be
+  acknowledged but will not be worked on until the project reopens.
+- Security vulnerabilities: If you discover a critical security issue, open an
+  issue immediately and include reproduction steps and impact. For highly
+  sensitive information (private keys, credentials), contact the maintainers
+  privately rather than posting secrets in issues.
 
-   ```sh
-   bun install
-   ```
+If you are the author/maintainer
+- When the project is ready to accept contributions again, update this file
+  and the README to reflect the change and provide contribution guidelines.
 
-3. Create your local config from the template (do NOT commit config.json):
-
-   ```sh
-   cp config.example.json config.json
-   # Edit config.json locally to add your OBS password and stream keys
-   ```
-
-4. Install local repository hooks (optional but recommended):
-
-   ```sh
-   sh scripts/install-hooks.sh
-   ```
-
-   The pre-commit hook will warn or block commits that include `config.json` or likely plaintext secret patterns.
-
-Key management notes
---------------------
-- The app will use an encryption key to persist tokens. It prefers the following (in order):
-  1. `YASH_ENCRYPTION_KEY` environment variable (normalized to a 32-byte hex string)
- 2. OS keyring via `keytar` (optional runtime dependency) — keys are stored under service `yash`, account `encryption-key`
- 3. File-based key at `~/.yash/key` (created with restricted file permissions)
-
-If you want keytar integrated for local development, add it as a dev dependency:
-
-```sh
-bun add -d keytar
-```
-
-Secrets and config
-------------------
-- Never commit secrets or `config.json`. Use `config.example.json` as the template.
-- If a secret was committed in the past, follow the project's purge guidance and rotate credentials immediately.
-
-Coding conventions and CI
-------------------------
-- Formatting and linting are enforced with Biome. CI runs `biome check --write` and `bun test`.
-- There is a GitHub Action that runs gitleaks to detect secrets in history and PRs.
-
-Workflow tips
--------------
-- Make small, focused PRs and run the pre-commit hooks locally before pushing.
-- If you need to run a development TUI session:
-
-  ```sh
-  bun --hot ./src/main.tsx
-  ```
-
-Reporting issues
-----------------
-- Open a GitHub issue with a concise title, steps to reproduce, and any logs or error messages. For security-sensitive leaks, contact repo owners directly and do not post secrets in issues.
-
-Thank you for contributing!
+Thank you for understanding.

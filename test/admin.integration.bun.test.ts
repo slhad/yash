@@ -1,9 +1,9 @@
-import { describe, test, expect } from 'bun:test';
+import { describe, expect, test } from 'bun:test';
+import * as crypto from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import * as crypto from 'node:crypto';
+import { importKeysHandler, updateRolesHandler } from '../src/handlers/adminKeysHandlers';
 import AdminService from '../src/services/admin.service';
-import { updateRolesHandler, importKeysHandler } from '../src/handlers/adminKeysHandlers';
 
 describe('Admin endpoints integration (Bun.serve)', () => {
   test('runs a minimal Bun server and exercises update-roles and import endpoints', async () => {
@@ -50,31 +50,17 @@ describe('Admin endpoints integration (Bun.serve)', () => {
     const j1 = await resp1.json();
     expect(j1.success).toBe(true);
 
-    // Prepare a source store and export a package
-    process.env.YASH_DATA_DIR = tmpSrc;
-    const src = new AdminService('src_int_hmac');
-    await src.init();
-    await src.createKey('s1', ['admin']);
-    await src.createKey('s2', ['ops']);
-    const { publicKey, privateKey } = crypto.generateKeyPairSync('rsa', {
-      modulusLength: 2048,
-      publicKeyEncoding: { type: 'pkcs1', format: 'pem' },
-      privateKeyEncoding: { type: 'pkcs1', format: 'pem' },
-    });
-    const pkg = await src.exportEncryptedAdminKeys(publicKey as string);
-
-    // Switch back server to use server store env
+    // Import endpoint has been removed (returns 501). Ensure it responds
+    // with Not Implemented when called.
     process.env.YASH_DATA_DIR = tmpServer;
-
-    // Call import endpoint
     const resp2 = await fetch(`http://localhost:${port}/api/admin/keys/import`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${created.token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ privateKeyPem: privateKey as string, package: pkg }),
+      body: JSON.stringify({}),
     });
-    expect(resp2.status).toBe(200);
+    expect(resp2.status).toBe(501);
     const j2 = await resp2.json();
-    expect((j2.imported?.length || 0) + (j2.skipped?.length || 0)).toBeGreaterThan(0);
+    expect(j2.error).toBeTruthy();
 
     // Stop server
     server.stop();

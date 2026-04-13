@@ -27,7 +27,7 @@ class MockKeytar {
   }
 }
 
-describe('AuthService with mocked keytar', () => {
+describe('AuthService (file-backed tokens)', () => {
   let authService: AuthService;
 
   beforeEach(async () => {
@@ -37,13 +37,12 @@ describe('AuthService with mocked keytar', () => {
       await fs.rm(yashDir, { recursive: true, force: true });
     } catch (err) {}
 
-    const mockKeytar = new MockKeytar();
-    authService = new AuthService(mockKeytar as any);
+    authService = new AuthService();
     // wait briefly for async init; give small buffer for CI
     await new Promise((resolve) => setTimeout(resolve, 50));
   });
 
-  test('uses injected keytar to store and load tokens', async () => {
+  test('stores and loads tokens from file-backed store', async () => {
     const mockAuthResult = { accessToken: 'kt_test_token', expiresIn: 3600 };
     await authService.saveTokensForPlatform('youtube', mockAuthResult as any);
 

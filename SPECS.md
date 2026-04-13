@@ -24,7 +24,13 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
 
 ## Out of scope
 - Contributing
-- Secrets security
+- Secrets security (encryption at rest, key rotation, OS keyring integration)
+- OS keyring integration (keytar) and related token migration scripts
+- Encrypted token storage and encryption-based admin key export/import (hybrid RSA+AES packages)
+- Admin endpoints that perform encryption/key export/import or rotation (e.g., /api/admin/rotate-key, /api/admin/export-key, /api/admin/keys/import)
+- Repository pre-commit hook installer and .githooks management (pre-commit hook installer scripts)
+- Any feature that depends on native keyring binaries or OS-specific keyring modules
+- Automatic migration/backup tooling for encrypted secrets
 
 ## Deliverables
 * Screenshots of webviews made with playwright
@@ -46,7 +52,7 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
 - Individual implementations for YouTube, Twitch, and Kick platforms
 - Modular service layer (AuthService, ChatService, StreamService, ObsService)
 - Event-driven architecture for real-time communication
-- Encrypted token storage for authentication credentials
+ - Token storage for authentication credentials (file-backed). Encryption/keyring-based storage is considered out of scope for this build.
 - OBS-studio integration via obs-websocket library
 - Configuration is stored in [root]/config.json
 

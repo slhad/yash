@@ -1,9 +1,9 @@
-import { defaultLogger } from '../utils/logger';
+import * as fsSync from 'node:fs';
+import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
 import AdminService from '../services/admin.service';
 import { authorizeAdmin } from '../utils/adminAuth';
-import * as fs from 'node:fs/promises';
-import * as fsSync from 'node:fs';
-import * as path from 'node:path';
+import { defaultLogger } from '../utils/logger';
 
 // Note: small, focused handlers exported for easier unit testing without
 // starting the full Bun.serve server.
@@ -86,95 +86,19 @@ export async function importKeysHandler(req: Request): Promise<Response> {
       status: auth.status,
       headers: { 'Content-Type': 'application/json' },
     });
-  // Parse body and support options: overwrite (explicit), dryRun
-  const body = await req.json().catch(() => ({}));
-  const privateKeyPem = body?.privateKeyPem;
-  const pkg = body?.package;
-  const overwrite = !!body?.overwrite;
-  const explicitDryRun = typeof body?.dryRun === 'boolean' ? body.dryRun : undefined;
-
-  if (!privateKeyPem || !pkg)
-    return new Response(JSON.stringify({ error: 'privateKeyPem and package required' }), {
-      status: 400,
+  // Import of encrypted admin keys has been removed along with the
+  // encryption/keyring features. Return 501 Not Implemented to inform
+  // callers that this functionality is no longer available.
+  return new Response(
+    JSON.stringify({
+      error: 'admin-keys-import-removed',
+      message: 'import of encrypted admin keys has been removed',
+    }),
+    {
+      status: 501,
       headers: { 'Content-Type': 'application/json' },
-    });
-
-  try {
-    const svc = new AdminService();
-    await svc.init();
-
-    // Default behavior: perform actual import by default unless dryRun=true is specified.
-    const dryRun = explicitDryRun !== undefined ? explicitDryRun : false;
-
-    // Extra protection for destructive imports: require ADMIN_TOKEN (admin-token method)
-    // to proceed with overwrite=true. Dry-run previews are allowed with admin keys.
-    if (overwrite) {
-      if ((auth as any).method !== 'admin-token') {
-        return new Response(
-          JSON.stringify({ error: 'overwrite requires ADMIN_TOKEN (explicit confirmation)' }),
-          {
-            status: 403,
-            headers: { 'Content-Type': 'application/json' },
-          },
-        );
-      }
-    }
-
-    // If performing an actual import with overwrite, snapshot existing admin file first
-    let snapshotPath: string | null = null;
-    if (overwrite && !dryRun) {
-      try {
-        const dataDir = process.env.YASH_DATA_DIR || path.join(process.env.HOME || '.', '.yash');
-        const adminFile = path.join(dataDir, 'admin_keys.json');
-        const snapDir = path.join(dataDir, 'import-snapshots');
-        await fs.mkdir(snapDir, { recursive: true });
-        const snapFile = path.join(snapDir, `admin_keys_snapshot_${Date.now()}.json`);
-        if (fsSync.existsSync(adminFile)) {
-          const raw = await fs.readFile(adminFile, 'utf8');
-          await fs.writeFile(snapFile, raw, { encoding: 'utf8' });
-        } else {
-          await fs.writeFile(snapFile, JSON.stringify({ keys: svc.listKeys() }, null, 2), {
-            encoding: 'utf8',
-          });
-        }
-        snapshotPath = snapFile;
-      } catch (e) {
-        defaultLogger.warn('Failed to create pre-import snapshot (non-fatal):', e);
-      }
-    }
-
-    const result = await svc.importEncryptedAdminKeys(privateKeyPem, pkg, {
-      overwrite: overwrite && !dryRun,
-      dryRun,
-    });
-
-    try {
-      const Audit = require('../utils/audit').default;
-      const audit = new Audit();
-      await audit.append('admin-keys-imported', {
-        actor: 'admin-endpoint',
-        clientIp: (auth as any).clientIp || 'unknown',
-        adminKeyId: (auth as any).adminKeyId || null,
-        method: (auth as any).method || null,
-        imported: result.imported.length,
-        skipped: result.skipped.length,
-        dryRun: !!dryRun,
-        snapshotPath: snapshotPath || null,
-      });
-    } catch (e) {
-      defaultLogger.info('Audit append failed (non-fatal):', e);
-    }
-
-    return new Response(JSON.stringify(result), {
-      headers: { 'Content-Type': 'application/json' },
-    });
-  } catch (e) {
-    defaultLogger.error('admin keys import failed', e);
-    return new Response(JSON.stringify({ error: 'failed' }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
+    },
+  );
 }
 
 export default { updateRolesHandler, importKeysHandler };

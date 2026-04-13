@@ -1,4 +1,4 @@
-import { describe, test, expect, vi } from 'bun:test';
+import { describe, expect, test, vi } from 'bun:test';
 import { ObsService } from '../src/services/obs.service';
 import { defaultLogger } from '../src/utils/logger';
 
@@ -27,7 +27,7 @@ describe('ObsService maxAttempts', () => {
     // Poll for the emitted callback instead of sleeping a fixed amount to make the
     // test CI-friendly.
     const { waitFor } = await import('./_helpers/waitFor');
-    await waitFor(() => emitted === true, baseMs * Math.pow(2, maxAttempts + 1) + 2000);
+    await waitFor(() => emitted === true, baseMs * 2 ** (maxAttempts + 1) + 2000);
     expect(emitted).toBe(true);
 
     loggerSpy.mockRestore();

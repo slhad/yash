@@ -1,9 +1,9 @@
-import { test, expect } from 'bun:test';
-import AdminService from '../src/services/admin.service';
-import * as path from 'node:path';
-import * as fs from 'node:fs/promises';
-import * as fsSync from 'node:fs';
+import { expect, test } from 'bun:test';
 import * as crypto from 'node:crypto';
+import * as fsSync from 'node:fs';
+import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
+import AdminService from '../src/services/admin.service';
 
 test('AdminService respects runtime YASH_DATA_DIR and persists admin file there', async () => {
   const orig = process.env.YASH_DATA_DIR;

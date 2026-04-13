@@ -1,4 +1,4 @@
-import { describe, test, expect } from 'bun:test';
+import { describe, expect, test } from 'bun:test';
 import { metrics, toPrometheusText } from '../src/utils/metrics';
 
 describe('metrics.toPrometheusText', () => {

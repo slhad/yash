@@ -2,13 +2,13 @@ import index from '../index.html';
 import { KickProvider } from './platforms/kick';
 import { TwitchProvider } from './platforms/twitch';
 import { YouTubeProvider } from './platforms/youtube';
+import AdminService from './services/admin.service';
+import { AuthService } from './services/auth.service';
 import { ChatService } from './services/chat.service';
 import { ObsService } from './services/obs.service';
 import { StreamService } from './services/stream.service';
-import { defaultLogger } from './utils/logger';
-import { AuthService } from './services/auth.service';
-import AdminService from './services/admin.service';
 import { authorizeAdmin } from './utils/adminAuth';
+import { defaultLogger } from './utils/logger';
 import { apiMetricsHandler, prometheusMetricsHandler } from './utils/metricsHandlers';
 
 export const youtube = new YouTubeProvider();
@@ -144,54 +144,21 @@ Bun.serve({
     // intentionally simple: it accepts an optional JSON body { key: "..." }
     // to set a specific key (not recommended). Use POST and include the
     // header Authorization: Bearer <ADMIN_TOKEN>.
+    // Admin rotate-key endpoint removed: rotation and encryption key operations
+    // were intentionally removed from the codebase. Return a clear 501 response
+    // so callers receive an explicit message instead of a runtime error.
     '/api/admin/rotate-key': {
-      POST: async (req) => {
-        // Centralize admin authorization checks (IP allowlist, rate limiting,
-        // and ADMIN_TOKEN when configured).
-        const auth = await authorizeAdmin(req);
-        if (!auth.ok)
-          return new Response(JSON.stringify(auth.body), {
-            status: auth.status,
+      POST: async (_req) => {
+        return new Response(
+          JSON.stringify({
+            error: 'rotation-removed',
+            message: 'encryption key rotation feature has been removed',
+          }),
+          {
+            status: 501,
             headers: { 'Content-Type': 'application/json' },
-          });
-
-        let body = null;
-        try {
-          body = await req.json();
-        } catch (_) {
-          // ignore parse errors; allow empty body
-        }
-
-        try {
-          await authService.rotateEncryptionKey(body?.key);
-          // Audit the operation if audit helper is available
-          try {
-            // eslint-disable-next-line @typescript-eslint/no-var-requires
-            const Audit = require('./utils/audit').default;
-            const audit = new Audit();
-            // Do not record secrets in audit payload; include actor and caller IP
-            await audit.append('rotate-key', {
-              actor: 'admin-endpoint',
-              clientIp: (auth as any).clientIp || 'unknown',
-              adminKeyId: (auth as any).adminKeyId || null,
-              method: (auth as any).method || null,
-              note: 'rotation invoked',
-            });
-          } catch (e) {
-            // Non-fatal: audit best-effort
-            defaultLogger.info('Audit append failed (non-fatal):', e);
-          }
-
-          return new Response(JSON.stringify({ success: true }), {
-            headers: { 'Content-Type': 'application/json' },
-          });
-        } catch (err) {
-          defaultLogger.error('Admin rotate-key failed:', err);
-          return new Response(JSON.stringify({ error: 'failed' }), {
-            status: 500,
-            headers: { 'Content-Type': 'application/json' },
-          });
-        }
+          },
+        );
       },
     },
     '/api/admin/keys': {
@@ -359,32 +326,19 @@ Bun.serve({
             headers: { 'Content-Type': 'application/json' },
           });
 
-        try {
-          const packageData = await adminService.exportEncryptedAdminKeys(publicKey);
-          try {
-            const Audit = require('./utils/audit').default;
-            const audit = new Audit();
-            await audit.append('admin-keys-exported', {
-              actor: 'admin-endpoint',
-              clientIp: (auth as any).clientIp || 'unknown',
-              adminKeyId: (auth as any).adminKeyId || null,
-              method: (auth as any).method || null,
-              note: 'exported admin keys (encrypted)',
-            });
-          } catch (e) {
-            defaultLogger.info('Audit append failed (non-fatal):', e);
-          }
-
-          return new Response(JSON.stringify(packageData), {
+        // Admin keys export (encrypted) removed. Respond with 501 to inform
+        // callers that export/import of encrypted admin key packages is no
+        // longer supported in this build.
+        return new Response(
+          JSON.stringify({
+            error: 'admin-keys-export-removed',
+            message: 'export of encrypted admin keys has been removed',
+          }),
+          {
+            status: 501,
             headers: { 'Content-Type': 'application/json' },
-          });
-        } catch (e) {
-          defaultLogger.error('admin keys export failed', e);
-          return new Response(JSON.stringify({ error: 'failed' }), {
-            status: 500,
-            headers: { 'Content-Type': 'application/json' },
-          });
-        }
+          },
+        );
       },
     },
     '/api/admin/keys/update-roles': {
@@ -414,54 +368,18 @@ Bun.serve({
             headers: { 'Content-Type': 'application/json' },
           });
 
-        try {
-          // If caller requests tokens export, return hybrid-encrypted tokens package
-          if (body?.export === 'tokens') {
-            const packageData = await authService.exportEncryptedTokens(publicKey);
-            try {
-              const Audit = require('./utils/audit').default;
-              const audit = new Audit();
-              await audit.append('export-tokens', {
-                actor: 'admin-endpoint',
-                clientIp: (auth as any).clientIp || 'unknown',
-                adminKeyId: (auth as any).adminKeyId || null,
-                method: (auth as any).method || null,
-                note: 'exported encrypted tokens',
-              });
-            } catch (e) {
-              defaultLogger.info('Audit append failed (non-fatal):', e);
-            }
-            return new Response(JSON.stringify(packageData), {
-              headers: { 'Content-Type': 'application/json' },
-            });
-          }
-
-          const exported = await authService.exportEncryptionKey(publicKey);
-          // Audit export event
-          try {
-            const Audit = require('./utils/audit').default;
-            const audit = new Audit();
-            await audit.append('export-key', {
-              actor: 'admin-endpoint',
-              clientIp: (auth as any).clientIp || 'unknown',
-              adminKeyId: (auth as any).adminKeyId || null,
-              method: (auth as any).method || null,
-              note: 'exported encryption key (encrypted)',
-            });
-          } catch (e) {
-            defaultLogger.info('Audit append failed (non-fatal):', e);
-          }
-
-          return new Response(JSON.stringify({ key: exported }), {
+        // Export-key and tokens export endpoints removed with the keyring/encryption
+        // removal. Return 501 Not Implemented so callers receive a clear message.
+        return new Response(
+          JSON.stringify({
+            error: 'export-removed',
+            message: 'export of encryption keys or tokens has been removed',
+          }),
+          {
+            status: 501,
             headers: { 'Content-Type': 'application/json' },
-          });
-        } catch (err) {
-          defaultLogger.error('Export-key failed:', err);
-          return new Response(JSON.stringify({ error: 'failed' }), {
-            status: 500,
-            headers: { 'Content-Type': 'application/json' },
-          });
-        }
+          },
+        );
       },
     },
     '/api/admin/audit/tail': {

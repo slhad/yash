@@ -1,4 +1,3 @@
-import * as crypto from 'node:crypto';
 import * as fsSync from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
@@ -12,662 +11,81 @@ interface TokenData {
   platform: string;
 }
 
-interface EncryptedTokenData {
-  iv: string; // initialization vector
-  data: string; // encrypted data
-}
-
 export class AuthService {
-  // Allow overriding the data directory (useful for tests/CI). Default to ~/.yash
+  // Simple, file-backed token store with no OS keyring or encryption.
   private static DATA_DIR =
     process.env.YASH_DATA_DIR || path.join(process.env.HOME || '.', '.yash');
   private static TOKENS_FILE = path.join(AuthService.DATA_DIR, 'tokens.json');
-  private encryptionKey: string;
-  private keytar: any | null = null;
-  private useKeytar: boolean = false;
 
   private tokens: Map<string, TokenData> = new Map();
-  private refreshInterval: NodeJS.Timeout | null = null;
-  // Promise that resolves when async initialization (key + tokens load) completes
-  private readyPromise: Promise<void>;
-  private readyResolve?: () => void;
 
-  // Allow optional keytar injection for testing
-  constructor(keytarOverride?: any) {
-    // ready promise for callers/tests to await initialization
-    this.readyPromise = new Promise((res) => {
-      this.readyResolve = res;
-    });
-    // Use environment variable, OS keyring, or persist a generated key to disk so tokens remain readable across runs.
-    // In production, a proper key management system should be used instead.
-    const envKey = process.env.YASH_ENCRYPTION_KEY;
-    if (envKey) {
-      // Normalize env key to a 32-byte hex string to ensure crypto buffers work consistently.
-      try {
-        // If the envKey already looks like hex of correct length, use it; otherwise derive via SHA256.
-        if (/^[0-9a-fA-F]{64}$/.test(envKey)) {
-          this.encryptionKey = envKey;
-        } else {
-          this.encryptionKey = crypto.createHash('sha256').update(envKey).digest('hex');
-        }
-      } catch (err) {
-        defaultLogger.warn('Invalid YASH_ENCRYPTION_KEY provided; generating ephemeral key:', err);
-        this.encryptionKey = crypto.randomBytes(32).toString('hex');
-      }
-      // Load tokens asynchronously after key is set
-      (async () => {
-        await this.loadTokens();
-        this.readyResolve?.();
-      })();
-    } else {
-      // If a test injected a keytar implementation, honor it and let initEncryptionKey
-      // use the provided keytar. Then run the async init flow as before.
-      if (keytarOverride) {
-        this.keytar = keytarOverride;
-        this.useKeytar = true;
-      }
-
-      // Async initialization that attempts OS keyring (keytar) first, then falls back to file storage.
-      (async () => {
-        try {
-          await this.initEncryptionKey();
-        } catch (err) {
-          defaultLogger.warn(
-            'Failed to initialize persistent encryption key, using ephemeral key:',
-            err,
-          );
-          this.encryptionKey = crypto.randomBytes(32).toString('hex');
-        }
-        // Load tokens after the key is initialized
-        await this.loadTokens();
-        this.readyResolve?.();
-      })();
-    }
+  // Accept an optional injected keytar-like object for compatibility with
+  // existing tests. The object is ignored because OS keyring integration has
+  // been removed.
+  constructor(_keytar?: any) {
+    // Load tokens synchronously-ish (fire-and-forget) to keep API simple.
+    void this.loadTokens();
   }
 
-  /**
-   * Rotate the encryption key used to encrypt token blobs.
-   * If `providedKey` is supplied it will be used (if not already a 64-char hex
-   * string it will be normalized via SHA256). Otherwise a new random key is
-   * generated. The method attempts to persist the new key in the OS keyring
-   * (keytar) if available; otherwise it falls back to the file-based key.
-   * After the key is updated, all in-memory tokens are re-encrypted and saved
-   * using the new key.
-   */
-  async rotateEncryptionKey(providedKey?: string): Promise<void> {
-    try {
-      await this.waitForReady(5000);
-    } catch (err) {
-      // proceed anyway
-    }
-
-    // Normalize or generate key as a 32-byte hex string
-    let newKeyHex: string;
-    if (providedKey) {
-      if (/^[0-9a-fA-F]{64}$/.test(providedKey)) {
-        newKeyHex = providedKey;
-      } else {
-        newKeyHex = crypto.createHash('sha256').update(providedKey).digest('hex');
-      }
-    } else {
-      newKeyHex = crypto.randomBytes(32).toString('hex');
-    }
-
-    const keyFile = path.join(AuthService.DATA_DIR, 'key');
-
-    let persisted = false;
-
-    // Try to persist into keytar if available
-    try {
-      if (this.keytar && typeof this.keytar.setPassword === 'function') {
-        await this.keytar.setPassword('yash', 'encryption-key', newKeyHex);
-        this.useKeytar = true;
-        persisted = true;
-      } else {
-        // Try dynamic import of keytar if not already available
-        try {
-          // eslint-disable-next-line @typescript-eslint/no-var-requires
-          const keytar = await import('keytar');
-          this.keytar = keytar;
-          if (keytar && typeof keytar.setPassword === 'function') {
-            await keytar.setPassword('yash', 'encryption-key', newKeyHex);
-            this.useKeytar = true;
-            persisted = true;
-          }
-        } catch (err) {
-          // keytar not present; will fall through to file-based persistence
-        }
-      }
-    } catch (err) {
-      defaultLogger.warn(
-        'Failed to persist new encryption key in keytar, will try file-based persistence:',
-        err,
-      );
-    }
-
-    // File-based fallback
-    if (!persisted) {
-      try {
-        fsSync.mkdirSync(path.dirname(keyFile), { recursive: true });
-        fsSync.writeFileSync(keyFile, newKeyHex, { mode: 0o600 });
-        this.useKeytar = false;
-        persisted = true;
-      } catch (err) {
-        defaultLogger.warn(
-          'Failed to persist new encryption key to file; key will be ephemeral:',
-          err,
-        );
-      }
-    }
-
-    // Update in-memory key and re-encrypt tokens
-    this.encryptionKey = newKeyHex;
-    try {
-      await this.saveTokens();
-      defaultLogger.info(
-        'Encryption key rotated and tokens re-encrypted' + (persisted ? '' : ' (not persisted)'),
-      );
-    } catch (err) {
-      defaultLogger.error('Failed to re-save tokens after key rotation:', err);
-      throw err;
-    }
+  // Stubbed methods for compatibility. These features were removed: callers
+  // should not expect encryption, key export, or migration APIs to be present.
+  async rotateEncryptionKey(_providedKey?: string): Promise<void> {
+    throw new Error('rotateEncryptionKey removed: encryption/keyring features have been removed');
   }
 
-  /**
-   * Export the current encryption key encrypted with the provided RSA public key (PEM).
-   * Returns the encrypted key as a base64 string. The caller must provide a
-   * PEM-encoded RSA public key and have appropriate authorization in the API.
-   */
-  async exportEncryptionKey(publicKeyPem: string): Promise<string> {
-    try {
-      await this.waitForReady(5000);
-    } catch (err) {
-      // proceed
-    }
-
-    if (!this.encryptionKey) throw new Error('encryption key not initialized');
-    if (!publicKeyPem || typeof publicKeyPem !== 'string') throw new Error('publicKeyPem required');
-
-    try {
-      const encrypted = crypto.publicEncrypt(
-        {
-          key: publicKeyPem,
-          padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
-          oaepHash: 'sha256',
-        },
-        Buffer.from(this.encryptionKey, 'hex'),
-      );
-      return encrypted.toString('base64');
-    } catch (err) {
-      defaultLogger.error('Failed to export encryption key', err);
-      throw err;
-    }
+  async exportEncryptionKey(_publicKeyPem: string): Promise<string> {
+    throw new Error('exportEncryptionKey removed: encryption/keyring features have been removed');
   }
 
-  /**
-   * Export all decrypted tokens encrypted for a provided RSA public key.
-   * Returns an object containing the RSA-encrypted AES key and the AES-GCM
-   * ciphertext containing the tokens JSON. The caller must provide a trusted
-   * PEM-encoded RSA public key.
-   */
-  async exportEncryptedTokens(publicKeyPem: string): Promise<{
-    algorithm: string;
-    encryptedKey: string;
-    iv: string;
-    tag: string;
-    ciphertext: string;
-  }> {
-    try {
-      await this.waitForReady(5000);
-    } catch (err) {
-      // proceed
-    }
+  async exportEncryptedTokens(_publicKeyPem: string): Promise<any> {
+    throw new Error('exportEncryptedTokens removed: encryption/keyring features have been removed');
+  }
 
-    if (!publicKeyPem || typeof publicKeyPem !== 'string') throw new Error('publicKeyPem required');
-
-    // Serialize in-memory tokens (decrypted) to JSON
-    const tokensObj: Record<string, TokenData> = {};
-    for (const [platform, token] of this.tokens.entries()) {
-      tokensObj[platform] = token;
-    }
-    const plaintext = JSON.stringify(tokensObj);
-
-    // Hybrid encrypt: generate random AES key, encrypt plaintext with AES-256-GCM,
-    // then encrypt the AES key with the provided RSA public key (OAEP-SHA256).
-    const aesKey = crypto.randomBytes(32);
-    const iv = crypto.randomBytes(12); // recommended nonce size for GCM
-
-    const cipher = crypto.createCipheriv('aes-256-gcm', aesKey, iv);
-    const encryptedBuf = Buffer.concat([
-      cipher.update(Buffer.from(plaintext, 'utf8')),
-      cipher.final(),
-    ]);
-    const authTag = cipher.getAuthTag();
-
-    // Encrypt AES key with RSA-OAEP-SHA256
-    let encryptedKeyBuf: Buffer;
-    try {
-      encryptedKeyBuf = crypto.publicEncrypt(
-        {
-          key: publicKeyPem,
-          padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
-          oaepHash: 'sha256',
-        },
-        aesKey,
-      );
-    } catch (err) {
-      defaultLogger.error('Failed to encrypt AES key with provided public key', err);
-      throw err;
-    }
-
-    return {
-      algorithm: 'rsa-oaep-sha256+aes-256-gcm',
-      encryptedKey: encryptedKeyBuf.toString('base64'),
-      iv: iv.toString('base64'),
-      tag: authTag.toString('base64'),
-      ciphertext: encryptedBuf.toString('base64'),
-    };
+  async migrateTokensToKeyring(): Promise<boolean> {
+    throw new Error(
+      'migrateTokensToKeyring removed: encryption/keyring features have been removed',
+    );
   }
 
   /**
    * Wait for the AuthService asynchronous initialization to complete.
    * Useful for CLI utilities or tests that need tokens/key to be ready.
    */
-  async waitForReady(timeoutMs: number = 5000): Promise<void> {
-    return await Promise.race([
-      this.readyPromise,
-      new Promise((_, rej) =>
-        setTimeout(() => rej(new Error('AuthService init timeout')), timeoutMs),
-      ),
-    ]);
+  async waitForReady(_timeoutMs: number = 5000): Promise<void> {
+    // always ready in simplified implementation
+    return Promise.resolve();
   }
 
   /**
    * Migrate tokens currently stored in file-based tokens.json into the OS keyring
    * (keytar) if available. Returns true if migration occurred.
    */
-  async migrateTokensToKeyring(): Promise<boolean> {
-    // Ensure initialization completed so encryptionKey/tokens are loaded
-    try {
-      await this.waitForReady(5000);
-    } catch (err) {
-      defaultLogger.info('AuthService initialization did not complete before migration attempt');
-      // proceed anyway; methods below will handle missing state
-    }
-
-    // Ensure keytar is available
-    if (!this.keytar || typeof this.keytar.setPassword !== 'function') {
-      try {
-        // Dynamic import optional dependency
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const keytar = await import('keytar');
-        this.keytar = keytar;
-        this.useKeytar = true;
-      } catch (err) {
-        defaultLogger.info('OS keyring (keytar) not available; cannot migrate tokens');
-        return false;
-      }
-    }
-
-    // If still no keytar API, bail
-    if (!this.keytar || typeof this.keytar.setPassword !== 'function') {
-      return false;
-    }
-
-    try {
-      // If there are already credentials in keyring, don't overwrite
-      if (typeof this.keytar.findCredentials === 'function') {
-        const existing = await this.keytar.findCredentials('yash.tokens');
-        if (Array.isArray(existing) && existing.length > 0) {
-          defaultLogger.info('Keyring already contains token entries; skipping migration');
-          return false;
-        }
-      }
-
-      for (const [platform, token] of this.tokens.entries()) {
-        const encrypted = this.encryptToken(token);
-        await this.keytar.setPassword('yash.tokens', platform, JSON.stringify(encrypted));
-      }
-
-      // Remove file-based tokens.json if present
-      try {
-        await fs.unlink(AuthService.TOKENS_FILE);
-        defaultLogger.info('Removed tokens.json after migration');
-      } catch (err) {
-        // ignore if file not present or removal failed
-      }
-
-      defaultLogger.info('Migrated tokens.json entries into OS keyring');
-      return true;
-    } catch (err) {
-      defaultLogger.warn('Failed to migrate tokens to keyring', err);
-      return false;
-    }
-  }
-
-  // Attempt to initialize encryption key using OS keyring (keytar) if available; otherwise use file-based key.
-  private async initEncryptionKey(): Promise<void> {
-    const keyFile = path.join(AuthService.DATA_DIR, 'key');
-
-    // Helper: Try to read encryption key from HashiCorp Vault (KV v2).
-    const tryVaultGetKey = async (): Promise<string | null> => {
-      const addr = process.env.VAULT_ADDR;
-      const token = process.env.VAULT_TOKEN;
-      if (!addr || !token) return null;
-      const mount = process.env.VAULT_KV_MOUNT || 'secret';
-      const secretPath = process.env.VAULT_SECRET_PATH || 'yash';
-      const url = `${addr.replace(/\/$/, '')}/v1/${mount}/data/${secretPath}`;
-      try {
-        const res = await fetch(url, { headers: { 'X-Vault-Token': token } });
-        if (!res.ok) return null;
-        const j = await res.json();
-        const data = j?.data?.data || {};
-        // Accept several possible field names
-        return data['encryption-key'] || data['encryption_key'] || data['key'] || null;
-      } catch (e) {
-        return null;
-      }
-    };
-
-    const tryVaultSetKey = async (newKey: string): Promise<boolean> => {
-      const addr = process.env.VAULT_ADDR;
-      const token = process.env.VAULT_TOKEN;
-      if (!addr || !token) return false;
-      const mount = process.env.VAULT_KV_MOUNT || 'secret';
-      const secretPath = process.env.VAULT_SECRET_PATH || 'yash';
-      const url = `${addr.replace(/\/$/, '')}/v1/${mount}/data/${secretPath}`;
-      try {
-        const res = await fetch(url, {
-          method: 'POST',
-          headers: { 'X-Vault-Token': token, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ data: { 'encryption-key': newKey } }),
-        });
-        return res.ok;
-      } catch (e) {
-        return false;
-      }
-    };
-
-    // If a keytar instance was injected (e.g., during tests), prefer it and skip the dynamic import.
-    if (this.keytar && typeof this.keytar.getPassword === 'function') {
-      try {
-        const keytar = this.keytar;
-        this.useKeytar = true;
-        const existing = await keytar.getPassword('yash', 'encryption-key');
-        if (existing && existing.length > 0) {
-          if (/^[0-9a-fA-F]{64}$/.test(existing)) {
-            this.encryptionKey = existing;
-          } else {
-            this.encryptionKey = crypto.createHash('sha256').update(existing).digest('hex');
-          }
-          return;
-        }
-
-        // No key in keytar: check whether a legacy file-based key exists and migrate it into keytar.
-        try {
-          if (fsSync.existsSync(keyFile)) {
-            const fileExisting = fsSync.readFileSync(keyFile, 'utf8').trim();
-            if (fileExisting && fileExisting.length > 0) {
-              let migratedKey = fileExisting;
-              if (!/^[0-9a-fA-F]{64}$/.test(migratedKey)) {
-                migratedKey = crypto.createHash('sha256').update(migratedKey).digest('hex');
-              }
-              await keytar.setPassword('yash', 'encryption-key', migratedKey);
-              this.encryptionKey = migratedKey;
-              defaultLogger.info('Migrated existing file-based encryption key into OS keyring');
-              return;
-            }
-          }
-        } catch (err) {
-          defaultLogger.warn(
-            'Failed to migrate file-based key into OS keyring, will generate a fresh key:',
-            err,
-          );
-        }
-
-        const generated = crypto.randomBytes(32).toString('hex');
-        await keytar.setPassword('yash', 'encryption-key', generated);
-        this.encryptionKey = generated;
-        return;
-      } catch (err) {
-        defaultLogger.info(
-          'Provided keytar instance failed; falling back to dynamic import or file-based key.',
-          err,
-        );
-      }
-    }
-
-    // Try OS keyring via dynamic import of keytar
-    try {
-      // Dynamic import so keytar remains optional
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const keytar = await import('keytar');
-      this.keytar = keytar;
-      this.useKeytar = true;
-      if (keytar && typeof keytar.getPassword === 'function') {
-        const existing = await keytar.getPassword('yash', 'encryption-key');
-        if (existing && existing.length > 0) {
-          // If stored key is not hex, derive a proper hex key
-          if (/^[0-9a-fA-F]{64}$/.test(existing)) {
-            this.encryptionKey = existing;
-          } else {
-            this.encryptionKey = crypto.createHash('sha256').update(existing).digest('hex');
-          }
-          return;
-        }
-
-        // No key in keytar: check whether a legacy file-based key exists and migrate it into keytar.
-        try {
-          if (fsSync.existsSync(keyFile)) {
-            const fileExisting = fsSync.readFileSync(keyFile, 'utf8').trim();
-            if (fileExisting && fileExisting.length > 0) {
-              // Normalize to hex if needed
-              let migratedKey = fileExisting;
-              if (!/^[0-9a-fA-F]{64}$/.test(migratedKey)) {
-                migratedKey = crypto.createHash('sha256').update(migratedKey).digest('hex');
-              }
-              await keytar.setPassword('yash', 'encryption-key', migratedKey);
-              this.encryptionKey = migratedKey;
-              defaultLogger.info('Migrated existing file-based encryption key into OS keyring');
-              return;
-            }
-          }
-        } catch (err) {
-          defaultLogger.warn(
-            'Failed to migrate file-based key into OS keyring, will generate a fresh key:',
-            err,
-          );
-        }
-
-        // Try reading key from Vault if available
-        try {
-          const vkey = await tryVaultGetKey();
-          if (vkey && vkey.length > 0) {
-            if (/^[0-9a-fA-F]{64}$/.test(vkey)) this.encryptionKey = vkey;
-            else this.encryptionKey = crypto.createHash('sha256').update(vkey).digest('hex');
-            defaultLogger.info('Loaded encryption key from Vault');
-            return;
-          }
-        } catch (e) {
-          defaultLogger.info('Vault key read failed (continuing):', e);
-        }
-
-        // No existing key anywhere: generate and store
-        const generated = crypto.randomBytes(32).toString('hex');
-        await keytar.setPassword('yash', 'encryption-key', generated);
-        this.encryptionKey = generated;
-        return;
-      }
-    } catch (err) {
-      // keytar not available or failed; fall back to file-based key
-      defaultLogger.info(
-        'OS keyring not available or keytar import failed, falling back to file-based key.',
-      );
-    }
-
-    // File-based key storage (synchronous filesystem interaction)
-    try {
-      if (fsSync.existsSync(keyFile)) {
-        const existing = fsSync.readFileSync(keyFile, 'utf8').trim();
-        if (existing.length > 0) {
-          this.encryptionKey = existing;
-          return;
-        } else {
-          throw new Error('empty key file');
-        }
-      } else {
-        const generated = crypto.randomBytes(32).toString('hex');
-        // ensure data directory exists and write key with restricted permissions
-        fsSync.mkdirSync(path.dirname(keyFile), { recursive: true });
-        fsSync.writeFileSync(keyFile, generated, { mode: 0o600 });
-        this.encryptionKey = generated;
-        // Try to persist key in Vault if configured (best-effort)
-        try {
-          const ok = await tryVaultSetKey(generated);
-          if (ok) defaultLogger.info('Persisted encryption key to Vault (best-effort)');
-        } catch (e) {
-          defaultLogger.info('Vault persist attempt failed (non-fatal)', e);
-        }
-        return;
-      }
-    } catch (err) {
-      defaultLogger.warn(
-        'Failed to read/write persistent encryption key (file-based), falling back to ephemeral key:',
-        err,
-      );
-      this.encryptionKey = crypto.randomBytes(32).toString('hex');
-    }
-  }
 
   private async loadTokens() {
     try {
-      // If keytar is available, prefer keyring for token storage
-      if (this.keytar && typeof this.keytar.findCredentials === 'function') {
-        try {
-          const creds = await this.keytar.findCredentials('yash.tokens');
-          if (Array.isArray(creds) && creds.length > 0) {
-            for (const cred of creds) {
-              try {
-                const account = cred.account;
-                const password = cred.password; // expected to be JSON string of EncryptedTokenData
-                const encrypted = JSON.parse(password) as EncryptedTokenData;
-                const decrypted = this.decryptToken(encrypted);
-                this.tokens.set(account, decrypted);
-              } catch (err) {
-                defaultLogger.warn(
-                  'Failed to parse/ decrypt token from keyring for account:',
-                  cred.account,
-                  err,
-                );
-              }
-            }
-            return;
-          }
-        } catch (err) {
-          // If keytar findCredentials fails, fallback to file-based tokens
-          defaultLogger.info(
-            'keytar findCredentials failed; falling back to file-based token load',
-          );
-        }
-      }
-
-      // File-based fallback
       const tokensDir = path.dirname(AuthService.TOKENS_FILE);
       await fs.mkdir(tokensDir, { recursive: true });
-
       const data = await fs.readFile(AuthService.TOKENS_FILE, 'utf8');
-      const parsed = JSON.parse(data);
-
-      for (const [platform, encrypted] of Object.entries(parsed)) {
-        const decrypted = this.decryptToken(encrypted as EncryptedTokenData);
-        this.tokens.set(platform, decrypted);
+      const parsed = JSON.parse(data || '{}');
+      for (const [platform, token] of Object.entries(parsed)) {
+        this.tokens.set(platform, token as TokenData);
       }
     } catch (error) {
-      // If file doesn't exist or is invalid, start with empty tokens
-      defaultLogger.info('No existing token file found or invalid format, starting fresh');
       this.tokens = new Map();
     }
   }
 
   private async saveTokens() {
-    // If keytar is available, store per-platform encrypted token blobs in the keyring
-    if (this.keytar && typeof this.keytar.setPassword === 'function') {
-      try {
-        // Remove any keyring entries for platforms that no longer exist
-        if (
-          typeof this.keytar.findCredentials === 'function' &&
-          typeof this.keytar.deletePassword === 'function'
-        ) {
-          try {
-            const existing = await this.keytar.findCredentials('yash.tokens');
-            for (const e of existing) {
-              if (!this.tokens.has(e.account)) {
-                await this.keytar.deletePassword('yash.tokens', e.account);
-              }
-            }
-          } catch (err) {
-            // Non-fatal: proceed to write current tokens
-            defaultLogger.warn('Failed to prune keyring token entries:', err);
-          }
-        }
-
-        for (const [platform, token] of this.tokens.entries()) {
-          const encrypted = this.encryptToken(token);
-          await this.keytar.setPassword('yash.tokens', platform, JSON.stringify(encrypted));
-        }
-        return;
-      } catch (err) {
-        defaultLogger.warn(
-          'Failed to save tokens to keyring, falling back to file-based storage:',
-          err,
-        );
-      }
-    }
-
-    // File-based fallback
-    const tokensObj: Record<string, EncryptedTokenData> = {};
-
+    const tokensObj: Record<string, TokenData> = {};
     for (const [platform, token] of this.tokens.entries()) {
-      tokensObj[platform] = this.encryptToken(token);
+      tokensObj[platform] = token;
     }
-
     const tokensDir = path.dirname(AuthService.TOKENS_FILE);
     await fs.mkdir(tokensDir, { recursive: true });
     await fs.writeFile(AuthService.TOKENS_FILE, JSON.stringify(tokensObj, null, 2));
   }
 
-  private encryptToken(token: TokenData): EncryptedTokenData {
-    const iv = crypto.randomBytes(16);
-    const cipher = crypto.createCipheriv('aes-256-gcm', Buffer.from(this.encryptionKey, 'hex'), iv);
-
-    const tokenJson = JSON.stringify(token);
-    let encrypted = cipher.update(tokenJson, 'utf8', 'hex');
-    encrypted += cipher.final('hex');
-
-    const authTag = cipher.getAuthTag();
-
-    return {
-      iv: iv.toString('hex'),
-      data: `${encrypted}:${authTag.toString('hex')}`,
-    };
-  }
-
-  private decryptToken(encrypted: EncryptedTokenData): TokenData {
-    const [encryptedData, authTagHex] = encrypted.data.split(':');
-    const iv = Buffer.from(encrypted.iv, 'hex');
-    const authTag = Buffer.from(authTagHex, 'hex');
-    const decipher = crypto.createDecipheriv(
-      'aes-256-gcm',
-      Buffer.from(this.encryptionKey, 'hex'),
-      iv,
-    );
-    decipher.setAuthTag(authTag);
-
-    let decrypted = decipher.update(encryptedData, 'hex', 'utf8');
-    decrypted += decipher.final('utf8');
-
-    return JSON.parse(decrypted);
-  }
+  // encryption helpers removed - tokens are stored as plain JSON in file
 
   async saveTokensForPlatform(platform: string, authResult: any): Promise<void> {
     const tokenData: TokenData = {

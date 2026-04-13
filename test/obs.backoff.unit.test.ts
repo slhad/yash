@@ -1,4 +1,4 @@
-import { describe, test, expect, vi } from 'bun:test';
+import { describe, expect, test, vi } from 'bun:test';
 import { ObsService } from '../src/services/obs.service';
 import { defaultLogger } from '../src/utils/logger';
 

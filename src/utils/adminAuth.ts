@@ -1,5 +1,5 @@
-import { defaultLogger } from './logger';
 import AdminService from '../services/admin.service';
+import { defaultLogger } from './logger';
 
 type AuthResult =
   | {

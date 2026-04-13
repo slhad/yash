@@ -1,11 +1,10 @@
+import * as readline from 'node:readline';
 import {
   BoxRenderable,
   createCliRenderer,
   ScrollBoxRenderable,
   TextRenderable,
 } from '@opentui/core';
-import * as readline from 'node:readline';
-import SettingsStore from './utils/settings';
 import { KickProvider } from './platforms/kick';
 import { TwitchProvider } from './platforms/twitch';
 import { YouTubeProvider } from './platforms/youtube';
@@ -13,6 +12,7 @@ import { ChatService } from './services/chat.service';
 import { ObsService } from './services/obs.service';
 import { StreamService } from './services/stream.service';
 import { defaultLogger } from './utils/logger';
+import SettingsStore from './utils/settings';
 
 const youtube = new YouTubeProvider();
 const twitch = new TwitchProvider();

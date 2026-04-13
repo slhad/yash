@@ -18,44 +18,12 @@ export class Audit {
   }
 
   private key: string | null = null;
-  private keytar: any | null = null;
 
-  constructor(keytarOverride?: any) {
-    this.keytar = keytarOverride || null;
-  }
+  constructor() {}
 
   // Ensure audit key exists (prefer OS keyring, then file-based)
   async init(): Promise<void> {
     if (this.key) return;
-
-    // Try injected keytar first
-    if (this.keytar && typeof this.keytar.getPassword === 'function') {
-      try {
-        const k = await this.keytar.getPassword('yash', 'audit-key');
-        if (k && k.length > 0) {
-          this.key = k;
-          return;
-        }
-      } catch (e) {
-        defaultLogger.info('Injected keytar for audit init failed, falling back', e);
-      }
-    }
-
-    // Try dynamic import of keytar
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const keytar = await import('keytar');
-      this.keytar = this.keytar || keytar;
-      if (keytar && typeof keytar.getPassword === 'function') {
-        const k = await keytar.getPassword('yash', 'audit-key');
-        if (k && k.length > 0) {
-          this.key = k;
-          return;
-        }
-      }
-    } catch (e) {
-      // keytar not available; continue to file fallback
-    }
 
     // File-based key
     try {
@@ -74,16 +42,6 @@ export class Audit {
     // Generate new key and persist
     const newKey = crypto.randomBytes(32).toString('hex');
     let persisted = false;
-
-    if (this.keytar && typeof this.keytar.setPassword === 'function') {
-      try {
-        await this.keytar.setPassword('yash', 'audit-key', newKey);
-        this.key = newKey;
-        persisted = true;
-      } catch (e) {
-        defaultLogger.warn('Failed to persist audit key to keytar, will try file', e);
-      }
-    }
 
     if (!persisted) {
       try {
