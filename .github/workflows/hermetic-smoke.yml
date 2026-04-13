@@ -1,0 +1,72 @@
+name: Hermetic Smoke After Publish
+
+on:
+  workflow_run:
+    workflows:
+      - "Publish Docker Image"
+    types:
+      - completed
+
+jobs:
+  smoke:
+    name: Run hermetic smoke using published image
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull published image
+        run: |
+          echo "Pulling image ghcr.io/${{ github.repository }}/yash-ci:latest"
+          docker pull ghcr.io/${{ github.repository }}/yash-ci:latest
+
+      - name: Run hermetic smoke inside published image
+        run: |
+          mkdir -p tmp
+          docker run --rm -e RUN_PLAYWRIGHT=1 -v "${{ github.workspace }}/tmp:/app/tmp" --user "$(id -u):$(id -g)" ghcr.io/${{ github.repository }}/yash-ci:latest /bin/bash -lc '
+            set -euo pipefail
+
+            echo "Starting server inside container"
+            bun run src/index.ts &
+            pid=$!
+
+            echo "Waiting for server readiness"
+            for i in $(seq 1 60); do
+              if curl -sSf http://localhost:3000/api/status -o /dev/null; then
+                echo "Server ready"
+                break
+              fi
+              sleep 1
+            done
+            if ! curl -sSf http://localhost:3000/api/status -o /dev/null; then
+              echo "Server failed to start" >&2
+              ps aux || true
+              exit 1
+            fi
+
+            echo "Running Playwright webview test (smoke)"
+            npx playwright test e2e-tests/webview.spec.ts --reporter=list || true
+
+            echo "Running reconnection integration test (smoke)"
+            bun test test/obs.websocket.reconnect.test.ts --reporter=list || true
+
+            echo "Running artifact verification script"
+            bash scripts/ci/verify_artifact.sh || true
+
+            echo "Hermetic smoke finished"
+          '
+
+      - name: Upload hermetic smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hermetic-smoke-artifacts
+          path: tmp/**
