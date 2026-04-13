@@ -116,7 +116,12 @@ jobs:
 
       - name: Run hermetic integration tests inside Docker image
         run: |
-          docker run --rm -e RUN_PLAYWRIGHT=1 -v "${{ github.workspace }}/tmp:/app/tmp" yash-ci:latest /bin/bash -lc '
+          # Ensure host tmp exists and is writable by the runner user
+          mkdir -p tmp
+
+          # Run container as current host user so artifacts written into the mounted
+          # tmp directory are owned by the runner and can be uploaded as artifacts.
+          docker run --rm -e RUN_PLAYWRIGHT=1 -v "${{ github.workspace }}/tmp:/app/tmp" --user "$(id -u):$(id -g)" yash-ci:latest /bin/bash -lc '
             set -euo pipefail
 
             echo "Starting server inside container"
