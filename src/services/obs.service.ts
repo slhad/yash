@@ -82,6 +82,28 @@ export class ObsService {
         this.host = config.obs.websocket.server;
         this.port = parseInt(config.obs.websocket.port, 10);
         this.password = config.obs.websocket.password || null;
+        // Backoff and timing overrides from config (may be strings from env)
+        const wb = config.obs.websocket;
+        if (wb.reconnectBaseMs !== undefined) {
+          const v = Number(wb.reconnectBaseMs);
+          if (!Number.isNaN(v) && v > 0) this.reconnectIntervalMs = v;
+        }
+        if (wb.reconnectMaxMs !== undefined) {
+          const v = Number(wb.reconnectMaxMs);
+          if (!Number.isNaN(v) && v > 0) this.reconnectMaxMs = v;
+        }
+        if (wb.reconnectMultiplier !== undefined) {
+          const v = Number(wb.reconnectMultiplier);
+          if (!Number.isNaN(v) && v > 1) this.reconnectMultiplier = v;
+        }
+        if (wb.reconnectMaxAttempts !== undefined) {
+          const v = Number(wb.reconnectMaxAttempts);
+          if (!Number.isNaN(v) && v >= 0) this.reconnectMaxAttempts = v;
+        }
+        if (wb.connectDelayMs !== undefined) {
+          const v = Number(wb.connectDelayMs);
+          if (!Number.isNaN(v) && v >= 0) this.connectDelayMs = v;
+        }
       }
     } catch {
       // Config not loaded yet, use defaults

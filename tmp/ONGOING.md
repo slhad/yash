@@ -67,5 +67,14 @@ Next (candidate) tasks
 - Add more metrics (successes, attempts, lastAttemptTs) and expose them via a /api/metrics endpoint (medium).
 - Add CI-level retries around flaky integration steps (medium).
 
+Done this turn
+- Wired backoff and timing parameters to runtime config/env via src/utils/config and ObsService.loadConfigSync.
+- Supported env vars: YASH_OBS_RECONNECT_BASE_MS, YASH_OBS_RECONNECT_MAX_MS, YASH_OBS_RECONNECT_MULTIPLIER, YASH_OBS_RECONNECT_MAX_ATTEMPTS, YASH_OBS_CONNECT_DELAY_MS
+
+Next (candidate) tasks
+- Add more metrics (successes, attempts, lastAttemptTs) and expose them via a /api/metrics endpoint (medium).
+- Add CI-level retries around flaky integration steps (medium).
+- Consider adding documentation in README for configuring OBS reconnection behavior via env/config (low).
+
 Notes
 - tmp/ is gitignored; file created to satisfy the workflow requirement. Will be force-added to commit per instruction.

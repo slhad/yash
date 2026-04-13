@@ -67,6 +67,17 @@ function applyEnvOverrides(cfg: any): any {
   if (process.env.YASH_OBS_SERVER) config.obs.websocket.server = process.env.YASH_OBS_SERVER;
   if (process.env.YASH_OBS_PORT) config.obs.websocket.port = process.env.YASH_OBS_PORT;
   if (process.env.YASH_OBS_PASSWORD) config.obs.websocket.password = process.env.YASH_OBS_PASSWORD;
+  // Reconnection/backoff overrides (ms and numeric values)
+  if (process.env.YASH_OBS_RECONNECT_BASE_MS)
+    config.obs.websocket.reconnectBaseMs = process.env.YASH_OBS_RECONNECT_BASE_MS;
+  if (process.env.YASH_OBS_RECONNECT_MAX_MS)
+    config.obs.websocket.reconnectMaxMs = process.env.YASH_OBS_RECONNECT_MAX_MS;
+  if (process.env.YASH_OBS_RECONNECT_MULTIPLIER)
+    config.obs.websocket.reconnectMultiplier = process.env.YASH_OBS_RECONNECT_MULTIPLIER;
+  if (process.env.YASH_OBS_RECONNECT_MAX_ATTEMPTS)
+    config.obs.websocket.reconnectMaxAttempts = process.env.YASH_OBS_RECONNECT_MAX_ATTEMPTS;
+  if (process.env.YASH_OBS_CONNECT_DELAY_MS)
+    config.obs.websocket.connectDelayMs = process.env.YASH_OBS_CONNECT_DELAY_MS;
 
   // Platform stream key overrides (env names: YASH_PLATFORM_<PLATFORM>_STREAMKEY)
   config.platforms = config.platforms || {};
