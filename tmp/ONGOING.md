@@ -45,3 +45,15 @@ Planned next steps for OBS work:
 3. Run `bun test` and ensure the new unit test passes.
 
 I will implement step 2 (minor code change) and step 1 (unit test), update this file, and commit (force-add tmp). Proceeding now.
+
+- 2026-04-13T00:40:00Z: Added an explicit visible H1 in index.html to ensure Playwright and accessibility tools reliably find the page title for e2e screenshots.
+
+Next hardest follow-up (new):
+- Improve web accessibility and ensure end-to-end tests are robust: add an explicit H1, ensure images/alt texts, and add a small Playwright smoke test for /api/status.
+
+Planned next steps:
+1. Add smoke Playwright test to request /api/status and validate JSON structure (this will be guarded by RUN_PLAYWRIGHT env var).
+2. Update tmp/ONGOING.md (this file).
+3. Commit changes (force-add tmp and commit).
+
+Proceeding to add the Playwright smoke test and commit.
