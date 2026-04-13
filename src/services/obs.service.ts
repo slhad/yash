@@ -59,6 +59,12 @@ export class ObsService {
     reconnectMultiplier?: number,
     reconnectMaxAttempts?: number,
   ) {
+    // Allow optional injection of a deterministic random function via env for tests
+    const rnd = (globalThis as any).__YASH_RANDOM_FN;
+    if (rnd && typeof rnd === 'function') {
+      (Math as any)._original_random = Math.random;
+      (Math as any).random = rnd;
+    }
     this.loadConfigSync();
     if (host) this.host = host;
     if (port) this.port = port;

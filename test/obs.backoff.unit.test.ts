@@ -8,8 +8,10 @@ describe('ObsService backoff', () => {
     // Spy on logger to capture scheduled delay messages
     const loggerSpy = vi.spyOn(defaultLogger, 'info').mockImplementation(() => {});
 
-    // Make jitter deterministic (use max jitter to simplify arithmetic)
-    const randomSpy = vi.spyOn(Math, 'random').mockImplementation(() => 1);
+    // Provide deterministic random function to the instance via global hook used
+    // by ObsService when running under tests. This avoids stubbing Math.random
+    // which can interfere with parallel tests.
+    (globalThis as any).__YASH_RANDOM_FN = () => 1;
 
     // Create a subclass that always fails to connect so backoff grows
     class AlwaysFailObs extends ObsService {
@@ -84,7 +86,7 @@ describe('ObsService backoff', () => {
     }
 
     // cleanup
-    randomSpy.mockRestore();
+    delete (globalThis as any).__YASH_RANDOM_FN;
     loggerSpy.mockRestore();
   });
 });

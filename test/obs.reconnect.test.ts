@@ -6,9 +6,10 @@ describe('ObsService reconnection', () => {
   test('should attempt reconnection after disconnect (uses real timers)', async () => {
     const loggerSpy = vi.spyOn(defaultLogger, 'info').mockImplementation(() => {});
 
-    // Stub Math.random to make jitter deterministic in tests
-    const mathRandomSpy = vi.spyOn(Math, 'random').mockImplementation(() => 0.5);
-
+    // Provide deterministic random function to the instance via global hook used
+    // by ObsService when running under tests. This avoids stubbing Math.random
+    // which can interfere with parallel tests.
+    (globalThis as any).__YASH_RANDOM_FN = () => 0.5;
     const obsService = new ObsService('localhost', 4455, null, false, 30000, 1000);
 
     // Connect (simulated delay inside connect is connectDelayMs)
@@ -41,7 +42,7 @@ describe('ObsService reconnection', () => {
     await waitFor(() => obsService.isConnected(), 5000);
     expect(obsService.isConnected()).toBe(true);
 
-    mathRandomSpy.mockRestore();
+    delete (globalThis as any).__YASH_RANDOM_FN;
     loggerSpy.mockRestore();
   });
 });
