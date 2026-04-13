@@ -3,7 +3,7 @@ import { ObsService } from '../src/services/obs.service';
 import { defaultLogger } from '../src/utils/logger';
 
 describe('ObsService reconnection', () => {
-  test('should attempt reconnection after disconnect (using fake timers)', async () => {
+  test('should attempt reconnection after disconnect (uses real timers)', async () => {
     const loggerSpy = vi.spyOn(defaultLogger, 'info').mockImplementation(() => {});
 
     // Stub Math.random to make jitter deterministic in tests
