@@ -15,7 +15,7 @@ describe('AdminService', () => {
   test('create, list, revoke, verifyToken', async () => {
     const svc = new AdminService('test_hmac_key');
     await svc.init();
-    const created = await svc.createKey('ci-test');
+    const created = await svc.createKey('ci-test', ['admin', 'ops']);
     expect(created).toHaveProperty('id');
     expect(created).toHaveProperty('token');
 
@@ -27,6 +27,8 @@ describe('AdminService', () => {
 
     const listed = svc.listKeys();
     expect(listed.find((k) => k.id === created.id)).toBeTruthy();
+    const found = listed.find((k) => k.id === created.id);
+    expect(found?.roles).toContain('ops');
 
     const revoked = await svc.revokeKey(created.id);
     expect(revoked).toBe(true);

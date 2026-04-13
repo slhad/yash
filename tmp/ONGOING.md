@@ -27,7 +27,7 @@ Next steps (ongoing) - do not commit
 
 5) Followups (future):
    - Consider integrating mutual TLS or other network-level protections for admin endpoints.
-   - Add RBAC for admin actions beyond single ADMIN_TOKEN and admin keys.
+   - Add RBAC for admin actions beyond single ADMIN_TOKEN and admin keys. (Basic roles support added to AdminService: `roles` on keys, and listKeys now returns roles.)
 
 Notes:
 - tmp directory is git-ignored by .gitignore and should not be committed.

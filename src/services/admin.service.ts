@@ -8,6 +8,7 @@ interface AdminKey {
   id: string;
   label?: string;
   hash: string; // HMAC of token
+  roles?: string[];
   createdAt: number;
   revoked?: boolean;
 }
@@ -67,7 +68,10 @@ export class AdminService {
   }
 
   // Create a new admin key and return plaintext token (one-time display)
-  async createKey(label?: string): Promise<{ id: string; token: string; createdAt: number }> {
+  async createKey(
+    label?: string,
+    roles?: string[],
+  ): Promise<{ id: string; token: string; createdAt: number }> {
     const tokenBuf = crypto.randomBytes(32);
     // url-safe base64
     const token = tokenBuf
@@ -80,6 +84,7 @@ export class AdminService {
       id,
       label,
       hash: this.hmac(token),
+      roles: roles || ['admin'],
       createdAt: Date.now(),
       revoked: false,
     };
@@ -115,7 +120,16 @@ export class AdminService {
       label: k.label,
       createdAt: k.createdAt,
       revoked: !!k.revoked,
+      roles: k.roles || [],
     }));
+  }
+
+  hasRole(id: string, role: string): boolean {
+    const k = this.keys.get(id);
+    if (!k || k.revoked) return false;
+    const roles = k.roles || [];
+    if (roles.includes('admin')) return true;
+    return roles.includes(role);
   }
 
   async revokeKey(id: string): Promise<boolean> {

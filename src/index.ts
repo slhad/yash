@@ -207,8 +207,9 @@ Bun.serve({
 
         const body = await req.json().catch(() => ({}));
         const label = body?.label;
+        const roles = Array.isArray(body?.roles) ? body.roles : undefined;
         await adminService.init();
-        const created = await adminService.createKey(label);
+        const created = await adminService.createKey(label, roles);
 
         // Audit creation (do not include the plaintext token)
         try {
@@ -222,6 +223,7 @@ Bun.serve({
             method: (auth as any).method || null,
             id: created.id,
             label: label || null,
+            roles: roles || null,
           });
         } catch (e) {
           defaultLogger.info('Audit append failed (non-fatal):', e);
