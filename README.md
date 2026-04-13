@@ -164,6 +164,27 @@ Notes:
 - The CI workflows in `.github/workflows/` already reference this image name. If you mirror or rename the image, update the workflows accordingly.
 - The `--user "$(id -u):$(id -g)"` flag ensures files written into the mounted `tmp/` directory are owned by the host runner user so the Actions upload step can read them.
 
+Building the hermetic image with host UID/GID baked in
+-----------------------------------------------------
+
+In some CI setups it's helpful to bake a host-matching user into the image at build time so files created by processes in the container already have the correct UID/GID on the host. The Dockerfile supports build args `HOST_UID` and `HOST_GID` for this purpose.
+
+Example:
+
+```
+docker build --build-arg HOST_UID=$(id -u) --build-arg HOST_GID=$(id -g) -t yash-ci:local .
+```
+
+You can also use the local helper which defaults to passing these build args:
+
+```
+# Force a rebuild and run the verification script inside the built image
+FORCE_BUILD=1 ./scripts/ci/run_hermetic_local.sh
+
+# Explicitly set BUILD_ARGS to control which args are passed
+FORCE_BUILD=1 BUILD_ARGS="--build-arg HOST_UID=$(id -u) --build-arg HOST_GID=$(id -g)" ./scripts/ci/run_hermetic_local.sh
+```
+
 Local hermetic reproduction helper
 ---------------------------------
 
