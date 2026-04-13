@@ -34,5 +34,13 @@ Next (candidate) tasks
 - Add logging metrics for reconnection attempts and failures (medium).
 - Harden integration test to run under CI runners without fake timers (hard).
 
+Done this turn
+- Added a hermetic CI job to run Playwright e2e and reconnection integration tests: .github/workflows/ci.yml -> integration-hermetic
+
+Next (candidate) tasks
+- Wire backoff parameters to getConfig() and environment variables (medium).
+- Add metrics/logging for reconnection attempts (medium).
+- Replace fake-timer integration tests with real-network based end-to-end runs under a controlled CI container (very hard).
+
 Notes
 - tmp/ is gitignored; file created to satisfy the workflow requirement. Will be force-added to commit per instruction.
