@@ -223,30 +223,3 @@ Example:
 ```
 docker build --build-arg HOST_UID=$(id -u) --build-arg HOST_GID=$(id -g) -t yash-ci:local .
 ```
-
-You can also use the local helper which defaults to passing these build args:
-
-```
-# Force a rebuild and run the verification script inside the built image
-FORCE_BUILD=1 ./scripts/ci/run_hermetic_local.sh
-
-# Explicitly set BUILD_ARGS to control which args are passed
-FORCE_BUILD=1 BUILD_ARGS="--build-arg HOST_UID=$(id -u) --build-arg HOST_GID=$(id -g)" ./scripts/ci/run_hermetic_local.sh
-```
-
-Local hermetic reproduction helper
----------------------------------
-
-If you want to reproduce the hermetic CI run locally (useful for debugging artifact ownership, Playwright failures, or timing issues) there's a helper script at `scripts/ci/run_hermetic_local.sh`.
-
-Usage:
-
-```
-# Build image if missing and run the verification script inside the container
-./scripts/ci/run_hermetic_local.sh
-
-# Force rebuild of the image before running
-FORCE_BUILD=1 ./scripts/ci/run_hermetic_local.sh
-```
-
-The script mounts the repository `tmp/` to the container's `/app/tmp` and runs `scripts/ci/verify_artifact.sh` inside the image so you can inspect files and ownership on the host after the run.

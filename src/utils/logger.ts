@@ -131,3 +131,27 @@ export class Logger {
 // output in TUI/console contexts; tests create their own Logger instances and
 // control timestamp behavior explicitly.
 export const defaultLogger = new Logger({ level: LogLevel.INFO, prefix: 'YASH', timestamp: false });
+
+// Integrate with in-TUI log collector if available. This is a best-effort
+// integration: require the module dynamically so server builds that don't
+// include the TUI won't fail. The collector receives simple level/text
+// messages and stores them for display inside the TUI.
+try {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const collector = require('./logCollector').default || require('./logCollector');
+  // Wrap methods to append to collector as well as console
+  const levels = ['debug', 'info', 'warn', 'error'];
+  for (const l of levels) {
+    const fn = (defaultLogger as any)[l];
+    if (typeof fn === 'function') {
+      (defaultLogger as any)[l] = function (msg: string, ...args: unknown[]) {
+        try {
+          collector.append(l.toUpperCase(), [msg, ...args.map(String)].join(' '));
+        } catch (_) {}
+        return fn.call(this, msg, ...args);
+      };
+    }
+  }
+} catch (e) {
+  // no-op if collector not present
+}

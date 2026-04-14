@@ -62,8 +62,10 @@ jobs:
             echo "Running reconnection integration test (smoke)"
             bun test test/obs.websocket.reconnect.test.ts --reporter=list || true
 
-            echo "Running artifact verification script"
-            bash scripts/ci/verify_artifact.sh || true
+            echo "Running artifact verification (skipped - repository does not include verification helpers)"
+            # Verification helper scripts were removed from this repository.
+            # If you want artifact verification here, add a small verifier script
+            # to your CI tooling and invoke it in this step.
 
             echo "Hermetic smoke finished"
           '

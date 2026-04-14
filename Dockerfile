@@ -39,10 +39,12 @@ WORKDIR /app
 # Copy project files
 COPY . /app
 
-# Copy CI entrypoint that can chown mounted /app/tmp when HOST_UID/HOST_GID provided
-# This makes artifact ownership easier when the CI job passes host UID/GID.
-COPY scripts/ci/ci-entrypoint.sh /usr/local/bin/ci-entrypoint.sh
-RUN chmod +x /usr/local/bin/ci-entrypoint.sh || true
+# NOTE: This repository previously included a small CI entrypoint script
+# (scripts/ci/ci-entrypoint.sh) that helped with chowning mounted artifact
+# directories when CI passed HOST_UID/HOST_GID. That helper has been removed
+# from the repository. CI builders who need similar behavior should COPY a
+# small entrypoint during their own image build or add a dedicated tooling
+# repository containing CI helpers.
  
 # Install gosu for reliable privilege drop in ci-entrypoint (used to run commands
 # as a host-matching user without relying on su). We download the prebuilt
@@ -87,6 +89,3 @@ EXPOSE 3000
 
 # Default command: show usage (CI will override)
 CMD ["/bin/bash", "-lc", "echo 'Image built. Run tests with: bun test or npx playwright test'"]
-
-# Default entrypoint: allow CI to pass HOST_UID/HOST_GID and have the image chown /app/tmp early
-ENTRYPOINT ["/usr/local/bin/ci-entrypoint.sh"]

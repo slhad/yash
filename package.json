@@ -4,7 +4,9 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "start": "bun run src/index.ts",
+    "start": "bun run src/index.tsx",
+    "start:tui": "bun run src/index.tsx",
+    "start:web": "bun run src/index.ts",
 
     "pretest": "bun lint",
     "test": "bun test",

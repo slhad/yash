@@ -22,7 +22,7 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
     * Route to show view of chats side by side with config options to enable any platform (saved in browser)
     * All chats view must have a message box to send messages like TUI, display top/bottom/hide (saved in browser individually)
 
-## Out of scope
+## Out of scope (do not touch)
 - Contributing
 - Secrets security (encryption at rest, key rotation, OS keyring integration)
 - OS keyring integration (keytar) and related token migration scripts
@@ -31,6 +31,7 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
 - Repository pre-commit hook installer and .githooks management (pre-commit hook installer scripts)
 - Any feature that depends on native keyring binaries or OS-specific keyring modules
 - Automatic migration/backup tooling for encrypted secrets
+- manifest/checksum generation, signing and verification, ownership remediation
 
 ## Deliverables
 * Screenshots of webviews made with playwright

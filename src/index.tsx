@@ -12,6 +12,7 @@ import { ChatService } from './services/chat.service';
 import { ObsService } from './services/obs.service';
 import { StreamService } from './services/stream.service';
 import { defaultLogger } from './utils/logger';
+import logCollector from './utils/logCollector';
 import SettingsStore from './utils/settings';
 
 const youtube = new YouTubeProvider();
@@ -31,6 +32,9 @@ streamService.registerProvider('twitch', twitch);
 streamService.registerProvider('kick', kick);
 
 const platforms = ['youtube', 'twitch', 'kick'];
+// Global settings instance used by the TUI. SettingsStore starts an async
+// initialization in the constructor but is safe to instantiate eagerly.
+const settings = new SettingsStore();
 
 async function renderUI(
   renderer: Awaited<ReturnType<typeof createCliRenderer>>,
@@ -123,6 +127,63 @@ async function renderUI(
   chatBox.add(scrollBox);
   mainBox.add(chatBox);
 
+  // Logs window (shows recent application logs collected by the logger).
+  // Configurable via settings keys: logs.visible, logs.height, logs.width, logs.tail
+  const logsVisibleSetting = settings.get('logs.visible', true) ?? true;
+  const logsVisible =
+    typeof logsVisibleSetting === 'boolean'
+      ? logsVisibleSetting
+      : String(logsVisibleSetting).toLowerCase() === 'true';
+
+  if (logsVisible) {
+    const logsWidth = settings.get('logs.width', '50%') || '50%';
+    const logsHeightSetting = settings.get('logs.height', 10) ?? 10;
+    const logsHeight =
+      typeof logsHeightSetting === 'number'
+        ? logsHeightSetting
+        : parseInt(String(logsHeightSetting), 10) || 10;
+    const logsTailSetting = settings.get('logs.tail', 20) ?? 20;
+    const logsTail =
+      typeof logsTailSetting === 'number'
+        ? logsTailSetting
+        : parseInt(String(logsTailSetting), 10) || 20;
+
+    const logsBox = new BoxRenderable(renderer, {
+      marginTop: 1,
+      border: { style: 'rounded' },
+      padding: 1,
+      width: logsWidth,
+    });
+
+    logsBox.add(
+      new TextRenderable(renderer, {
+        content: `Logs (tail ${logsTail})`,
+        style: { bold: true },
+      }),
+    );
+
+    const logsScroll = new ScrollBoxRenderable(renderer, { height: logsHeight });
+    try {
+      const entries = logCollector.tail(logsTail);
+      for (const e of entries) {
+        const time = new Date(e.ts).toLocaleTimeString();
+        const prefix = `[${time}] [${e.level}]`;
+        const fg = e.level === 'ERROR' ? 'red' : e.level === 'WARN' ? 'yellow' : 'gray';
+        logsScroll.add(
+          new TextRenderable(renderer, {
+            content: `${prefix} ${e.text}`,
+            style: { foreground: fg },
+          }),
+        );
+      }
+    } catch (err) {
+      // best-effort: don't fail the UI if logs can't be rendered
+    }
+
+    logsBox.add(logsScroll);
+    mainBox.add(logsBox);
+  }
+
   renderer.root.add(mainBox);
   await renderer.flush();
 }
@@ -154,7 +215,6 @@ async function main() {
   // Simple stdin command handler for TUI -- supports /connect and /settings
   try {
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-    const settings = new SettingsStore();
 
     rl.on('line', async (line: string) => {
       const trimmed = line.trim();
@@ -209,6 +269,37 @@ async function main() {
             lastMessages.push(
               '[system] Usage: /settings get <key> | /settings set <key> <json-value>',
             );
+          }
+        } else if (cmd === '/logs') {
+          // /logs clear
+          // /logs tail <n>
+          const op = parts[1];
+          if (op === 'clear') {
+            try {
+              logCollector.clear();
+              lastMessages.push('[logs] cleared');
+            } catch (e) {
+              lastMessages.push('[logs] failed to clear');
+            }
+          } else if (op === 'tail' && parts[2]) {
+            const n = parseInt(parts[2], 10) || 0;
+            if (n > 0) {
+              // save default tail in settings so UI respects it
+              await settings.set('logs.tail', n);
+              lastMessages.push(`[logs] tail set to ${n}`);
+            } else {
+              lastMessages.push('[logs] Usage: /logs tail <n>');
+            }
+          } else if (op === 'visible' && parts[2]) {
+            const v = String(parts[2]).toLowerCase();
+            if (v === 'true' || v === 'false') {
+              await settings.set('logs.visible', v === 'true');
+              lastMessages.push(`[logs] visible set to ${v}`);
+            } else {
+              lastMessages.push('[logs] Usage: /logs visible <true|false>');
+            }
+          } else {
+            lastMessages.push('[logs] Usage: /logs clear | /logs tail <n>');
           }
         } else {
           lastMessages.push(`[system] Unknown command: ${trimmed}`);
