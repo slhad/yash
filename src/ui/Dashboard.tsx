@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { ChatDisplay } from './ChatDisplay';
 import { MessageInput } from './MessageInput';
 import { StatusBar } from './StatusBar';
-import { StreamControls } from './StreamControls';
+import { StreamControls, type StreamMetadata } from './StreamControls';
 
 interface DashboardProps {
   platforms: string[];
@@ -140,22 +140,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
     return () => clearInterval(interval);
   }, [getChatMessages]);
 
-  const handleStartStream = async () => {
-    await onStartStream(selectedPlatforms, {
-      title: 'My Stream',
-      game: 'Just Chatting',
-    });
+  const handleStartStream = async (metadata: StreamMetadata) => {
+    await onStartStream(selectedPlatforms, metadata);
   };
 
   const handleStopStream = async () => {
     await onStopStream(selectedPlatforms);
   };
 
-  const handleUpdateMetadata = async () => {
-    await onUpdateMetadata(selectedPlatforms, {
-      title: 'Updated Stream Title',
-      game: 'Updated Game',
-    });
+  const handleUpdateMetadata = async (metadata: StreamMetadata) => {
+    await onUpdateMetadata(selectedPlatforms, metadata);
   };
 
   const getStreamStatusFn = (platform: string) => streamStatus[platform] || 'OFFLINE';

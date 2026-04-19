@@ -534,6 +534,7 @@ async function handleCommand(trimmed: string): Promise<void> {
   } else if (cmd === '/exit') {
     isRunning = false;
     await obsService.disconnect();
+    killWebServer();
     cliRenderer?.destroy();
     process.exit(0);
   } else if (cmd === '/help') {
@@ -556,6 +557,18 @@ let isRunning = true;
 const lastMessages: string[] = [];
 let cliRenderer: Awaited<ReturnType<typeof createCliRenderer>> | null = null;
 
+// Kill the web server process started by `bun run start` (passed via YASH_WEB_PID)
+function killWebServer(): void {
+  const pid = process.env.YASH_WEB_PID ? parseInt(process.env.YASH_WEB_PID, 10) : null;
+  if (pid) {
+    try {
+      process.kill(pid);
+    } catch {
+      // process may have already exited
+    }
+  }
+}
+
 function transformMessage(msg: { platform: string; username: string; message: string }) {
   return `[${msg.platform}] ${msg.username}: ${msg.message}`;
 }
@@ -567,6 +580,25 @@ async function main() {
     consoleMode: 'disabled',
     useKittyKeyboard: null,
     useMouse: false,
+    // Intercept Tab at raw sequence level so it triggers autocomplete
+    // instead of cycling focus or inserting a literal \t.
+    prependInputHandlers: [
+      (sequence: string): boolean => {
+        if (sequence !== '\t' || !uiNodes) return false;
+        const val = uiNodes.inputEl.value;
+        const { completion, hints } = getAutocomplete(val);
+        if (completion) {
+          uiNodes.inputEl.value = completion;
+        }
+        if (hints.length > 1) {
+          uiNodes.autocompleteHint.content = `  ${hints.join('  ')}`;
+          uiNodes.autocompleteHint.visible = true;
+        } else {
+          uiNodes.autocompleteHint.visible = false;
+        }
+        return true; // consumed — do not pass Tab to InputRenderable
+      },
+    ],
   });
   cliRenderer = renderer;
 
@@ -594,20 +626,6 @@ async function main() {
   uiNodes.inputEl.on(InputRenderableEvents.INPUT, () => {
     const val = uiNodes!.inputEl.value;
     const hint = uiNodes!.autocompleteHint;
-
-    // Tab intercept: complete and remove \t
-    if (val.includes('\t')) {
-      const before = val.replace(/\t/g, '');
-      const { completion, hints } = getAutocomplete(before);
-      uiNodes!.inputEl.value = completion ?? before;
-      if (hints.length > 1) {
-        hint.content = `  ${hints.join('  ')}`;
-        hint.visible = true;
-      } else {
-        hint.visible = false;
-      }
-      return;
-    }
 
     // Live hint while typing a command
     if (val.startsWith('/') && val.length > 0) {
@@ -642,6 +660,7 @@ async function main() {
     isRunning = false;
     clearInterval(updateLoop);
     await obsService.disconnect();
+    killWebServer();
     renderer.destroy();
     process.exit(0);
   });

@@ -9,13 +9,38 @@ const btnStyle: React.CSSProperties = {
   borderRadius: '3px',
 };
 
+const inputStyle: React.CSSProperties = {
+  width: '100%',
+  backgroundColor: '#0f0f1a',
+  color: '#fff',
+  border: '1px solid #444',
+  borderRadius: '3px',
+  padding: '4px 8px',
+  boxSizing: 'border-box',
+};
+
+const labelStyle: React.CSSProperties = {
+  display: 'block',
+  marginBottom: '2px',
+  color: '#aaa',
+  fontSize: '0.85em',
+};
+
+export interface StreamMetadata {
+  title: string;
+  description: string;
+  tags: string;
+  game: string;
+  notification: string;
+}
+
 interface StreamControlsProps {
   platforms: string[];
   selectedPlatforms: string[];
   onSelectPlatforms: (platforms: string[]) => void;
-  onStartStream: () => Promise<void>;
+  onStartStream: (metadata: StreamMetadata) => Promise<void>;
   onStopStream: () => Promise<void>;
-  onUpdateMetadata: () => Promise<void>;
+  onUpdateMetadata: (metadata: StreamMetadata) => Promise<void>;
   getStreamStatus: (platform: string) => string;
 }
 
@@ -30,7 +55,18 @@ export const StreamControls: React.FC<StreamControlsProps> = ({
 }) => {
   const [streamTitle, setStreamTitle] = useState('');
   const [streamGame, setStreamGame] = useState('');
+  const [streamDescription, setStreamDescription] = useState('');
+  const [streamTags, setStreamTags] = useState('');
+  const [streamNotification, setStreamNotification] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+
+  const currentMetadata = (): StreamMetadata => ({
+    title: streamTitle,
+    description: streamDescription,
+    tags: streamTags,
+    game: streamGame,
+    notification: streamNotification,
+  });
 
   const togglePlatform = (platform: string) => {
     if (selectedPlatforms.includes(platform)) {
@@ -53,7 +89,7 @@ export const StreamControls: React.FC<StreamControlsProps> = ({
   const handleStart = async () => {
     setIsProcessing(true);
     try {
-      await onStartStream();
+      await onStartStream(currentMetadata());
     } catch (error) {
       defaultLogger.error('Failed to start stream:', error);
     } finally {
@@ -75,7 +111,7 @@ export const StreamControls: React.FC<StreamControlsProps> = ({
   const handleUpdate = async () => {
     setIsProcessing(true);
     try {
-      await onUpdateMetadata();
+      await onUpdateMetadata(currentMetadata());
     } catch (error) {
       defaultLogger.error('Failed to update metadata:', error);
     } finally {
@@ -148,41 +184,59 @@ export const StreamControls: React.FC<StreamControlsProps> = ({
       {!anyOnline && (
         <div style={{ marginBottom: '8px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
           <div>
-            <label style={{ display: 'block', marginBottom: '2px', color: '#aaa' }}>Title</label>
+            <label style={labelStyle}>Title</label>
             <input
               type="text"
               value={streamTitle}
               onChange={(e) => setStreamTitle(e.target.value)}
-              placeholder="Stream title"
-              style={{
-                width: '100%',
-                backgroundColor: '#0f0f1a',
-                color: '#fff',
-                border: '1px solid #444',
-                borderRadius: '3px',
-                padding: '4px 8px',
-                boxSizing: 'border-box',
-              }}
+              placeholder="Stream title (all platforms)"
+              style={inputStyle}
             />
           </div>
           <div>
-            <label style={{ display: 'block', marginBottom: '2px', color: '#aaa' }}>Game</label>
+            <label style={labelStyle}>Subject / Category / Game</label>
             <input
               type="text"
               value={streamGame}
               onChange={(e) => setStreamGame(e.target.value)}
-              placeholder="Game/category"
-              style={{
-                width: '100%',
-                backgroundColor: '#0f0f1a',
-                color: '#fff',
-                border: '1px solid #444',
-                borderRadius: '3px',
-                padding: '4px 8px',
-                boxSizing: 'border-box',
-              }}
+              placeholder="Game or category (all platforms)"
+              style={inputStyle}
             />
           </div>
+          <div>
+            <label style={labelStyle}>Tags (comma-separated)</label>
+            <input
+              type="text"
+              value={streamTags}
+              onChange={(e) => setStreamTags(e.target.value)}
+              placeholder="tag1, tag2, tag3"
+              style={inputStyle}
+            />
+          </div>
+          {selectedPlatforms.includes('youtube') && (
+            <div>
+              <label style={labelStyle}>Description (YouTube)</label>
+              <textarea
+                value={streamDescription}
+                onChange={(e) => setStreamDescription(e.target.value)}
+                placeholder="Stream description"
+                rows={3}
+                style={{ ...inputStyle, resize: 'vertical' }}
+              />
+            </div>
+          )}
+          {selectedPlatforms.includes('twitch') && (
+            <div>
+              <label style={labelStyle}>Notification (Twitch)</label>
+              <input
+                type="text"
+                value={streamNotification}
+                onChange={(e) => setStreamNotification(e.target.value)}
+                placeholder="Going live notification message"
+                style={inputStyle}
+              />
+            </div>
+          )}
         </div>
       )}
 
