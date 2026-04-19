@@ -1,7 +1,3 @@
-import { baseComponents } from '@opentui/react';
-
-const { Box, Scrollbox, Text } = baseComponents;
-
 import React from 'react';
 
 interface ChatDisplayProps {
@@ -23,35 +19,45 @@ export const ChatDisplay: React.FC<ChatDisplayProps> = ({ messages, showTimestam
   const getPlatformColor = (platform: string) => {
     switch (platform) {
       case 'youtube':
-        return 'red';
+        return '#ef4444';
       case 'twitch':
-        return 'purple';
+        return '#a855f7';
       case 'kick':
-        return 'green';
+        return '#22c55e';
       default:
-        return 'white';
+        return '#ffffff';
     }
   };
 
   return (
-    <Box border="rounded" padding={1} height={20} style={{ backgroundColor: '#1a1a2e' }}>
-      <Scrollbox autoScroll>
+    <div
+      style={{
+        border: '1px solid #444',
+        borderRadius: '4px',
+        padding: '8px',
+        height: '320px',
+        backgroundColor: '#1a1a2e',
+      }}
+    >
+      <div style={{ height: '100%', overflowY: 'auto' }}>
         {messages.length === 0 ? (
-          <Text color="gray">No messages yet...</Text>
+          <span style={{ color: '#6b7280' }}>No messages yet...</span>
         ) : (
           messages.map((msg) => (
-            <Box key={msg.id} marginY={0}>
-              <Text>
-                {showTimestamps && <Text color="gray">[{formatTime(msg.timestamp)}] </Text>}
-                <Text color={getPlatformColor(msg.platform)} bold>
+            <div key={msg.id}>
+              <span>
+                {showTimestamps && (
+                  <span style={{ color: '#6b7280' }}>[{formatTime(msg.timestamp)}] </span>
+                )}
+                <span style={{ color: getPlatformColor(msg.platform), fontWeight: 'bold' }}>
                   [{msg.platform}]
-                </Text>{' '}
-                <Text color="cyan">{msg.username}:</Text> {msg.message}
-              </Text>
-            </Box>
+                </span>{' '}
+                <span style={{ color: '#06b6d4' }}>{msg.username}:</span> {msg.message}
+              </span>
+            </div>
           ))
         )}
-      </Scrollbox>
-    </Box>
+      </div>
+    </div>
   );
 };

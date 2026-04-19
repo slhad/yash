@@ -1,7 +1,3 @@
-import { baseComponents } from '@opentui/react';
-
-const { Box, Text, Button } = baseComponents;
-
 import React, { useEffect, useState } from 'react';
 import { ChatDisplay } from './ChatDisplay';
 import { MessageInput } from './MessageInput';
@@ -17,13 +13,15 @@ interface DashboardProps {
   onSendMessage: (message: string, targetPlatforms: string[]) => Promise<void>;
   getPlatformStatus: (platform: string) => any;
   getObsStatus: () => boolean;
-  getChatMessages: () => Array<{
-    id: string;
-    platform: string;
-    username: string;
-    message: string;
-    timestamp: number;
-  }>;
+  getChatMessages: () => Promise<
+    Array<{
+      id: string;
+      platform: string;
+      username: string;
+      message: string;
+      timestamp: number;
+    }>
+  >;
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({
@@ -37,23 +35,24 @@ export const Dashboard: React.FC<DashboardProps> = ({
   getObsStatus,
   getChatMessages,
 }) => {
-  // Settings store (file-backed). We use it to persist simple UI preferences.
-  // Initialize lazily so server-side rendering or test runs don't block.
-  const [settings] = useState(() => new (require('../utils/settings').default)());
-
   // Whether to show the settings panel
   const [showSettings, setShowSettings] = useState(false);
 
-  // Persisted setting: whether to show the platform status panel
-  const [showPlatformStatus, setShowPlatformStatus] = useState<boolean>(() =>
-    settings.get('showPlatformStatus', true),
-  );
+  // Persisted setting: whether to show the platform status panel (browser localStorage)
+  const [showPlatformStatus, setShowPlatformStatus] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('yash_showPlatformStatus') !== 'false';
+    } catch {
+      return true;
+    }
+  });
 
   // When showPlatformStatus changes, persist it
   useEffect(() => {
-    // write asynchronously
-    void settings.set('showPlatformStatus', showPlatformStatus);
-  }, [showPlatformStatus, settings]);
+    try {
+      localStorage.setItem('yash_showPlatformStatus', String(showPlatformStatus));
+    } catch {}
+  }, [showPlatformStatus]);
   const [authStatus, setAuthStatus] = useState<Record<string, boolean>>({});
   const [streamStatus, setStreamStatus] = useState<Record<string, string>>({});
   const [connectionStatus, setConnectionStatus] = useState<Record<string, string>>({});
@@ -130,8 +129,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
   }, [platforms, getPlatformStatus, getObsStatus]);
 
   useEffect(() => {
-    const updateMessages = () => {
-      setMessages(getChatMessages());
+    const updateMessages = async () => {
+      const msgs = await getChatMessages();
+      setMessages(msgs);
     };
 
     const interval = setInterval(updateMessages, 2000);
@@ -175,39 +175,74 @@ export const Dashboard: React.FC<DashboardProps> = ({
     {} as Record<string, any>,
   );
 
+  const btnStyle: React.CSSProperties = {
+    color: '#fff',
+    border: 'none',
+    padding: '4px 8px',
+    cursor: 'pointer',
+    borderRadius: '3px',
+  };
+
   return (
-    <Box padding={1} style={{ backgroundColor: '#0f0f1a' }}>
-      <Box marginBottom={1}>
-        <Box flexDirection="row" gap={1} alignItems="center">
-          <Box>
-            <Text bold color="cyan" fontSize={2}>
+    <div style={{ padding: '8px', backgroundColor: '#0f0f1a' }}>
+      <div style={{ marginBottom: '8px' }}>
+        <div style={{ display: 'flex', flexDirection: 'row', gap: '8px', alignItems: 'center' }}>
+          <div>
+            <span style={{ fontWeight: 'bold', color: '#06b6d4', fontSize: '1.5em' }}>
               YASH - Yet Another Streamer Helper
-            </Text>
-            <Text color="gray">Unified platform management for YouTube, Twitch, and Kick</Text>
-          </Box>
-          <Box marginLeft="auto">
-            <Button onClick={() => setShowSettings((s) => !s)} style={{ backgroundColor: '#333' }}>
+            </span>
+            <br />
+            <span style={{ color: '#6b7280' }}>
+              Unified platform management for YouTube, Twitch, and Kick
+            </span>
+          </div>
+          <div style={{ marginLeft: 'auto' }}>
+            <button
+              type="button"
+              onClick={() => setShowSettings((s) => !s)}
+              style={{ ...btnStyle, backgroundColor: '#333' }}
+            >
               {showSettings ? 'Close Settings' : 'Settings'}
-            </Button>
-          </Box>
-        </Box>
+            </button>
+          </div>
+        </div>
         {showSettings && (
-          <Box marginTop={1} border="rounded" padding={1} width="50%">
-            <Text bold>UI Settings</Text>
-            <Box marginTop={1} flexDirection="row" gap={1} alignItems="center">
-              <Button
+          <div
+            style={{
+              marginTop: '8px',
+              border: '1px solid #444',
+              borderRadius: '4px',
+              padding: '8px',
+              width: '50%',
+            }}
+          >
+            <span style={{ fontWeight: 'bold' }}>UI Settings</span>
+            <div
+              style={{
+                marginTop: '8px',
+                display: 'flex',
+                flexDirection: 'row',
+                gap: '8px',
+                alignItems: 'center',
+              }}
+            >
+              <button
+                type="button"
                 onClick={() => setShowPlatformStatus((v) => !v)}
-                style={{ backgroundColor: showPlatformStatus ? 'green' : '#333' }}
+                style={{
+                  ...btnStyle,
+                  backgroundColor: showPlatformStatus ? '#22c55e' : '#333',
+                }}
               >
                 {showPlatformStatus ? '[x] Show Platform Status' : '[ ] Show Platform Status'}
-              </Button>
-            </Box>
-          </Box>
+              </button>
+            </div>
+          </div>
         )}
-      </Box>
+      </div>
 
-      <Box flexDirection="row" gap={1}>
-        <Box flexDirection="column" gap={1} width="50%">
+      <div style={{ display: 'flex', flexDirection: 'row', gap: '8px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '50%' }}>
           <StreamControls
             platforms={platforms}
             selectedPlatforms={selectedPlatforms}
@@ -221,15 +256,22 @@ export const Dashboard: React.FC<DashboardProps> = ({
           {showPlatformStatus && (
             <StatusBar platformStatus={combinedPlatformStatus} obsConnected={obsConnected} />
           )}
-        </Box>
+        </div>
 
-        <Box flexDirection="column" gap={1} width="50%">
-          <Box border="rounded" padding={1} style={{ backgroundColor: '#1a1a2e' }}>
-            <Box marginBottom={1}>
-              <Text bold>Unified Chat</Text>
-            </Box>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '50%' }}>
+          <div
+            style={{
+              border: '1px solid #444',
+              borderRadius: '4px',
+              padding: '8px',
+              backgroundColor: '#1a1a2e',
+            }}
+          >
+            <div style={{ marginBottom: '8px' }}>
+              <span style={{ fontWeight: 'bold' }}>Unified Chat</span>
+            </div>
             <ChatDisplay messages={messages} showTimestamps={true} />
-          </Box>
+          </div>
 
           <MessageInput
             platforms={platforms}
@@ -240,9 +282,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
             onSendMessage={onSendMessage}
             placeholder="Type a message..."
           />
-        </Box>
-      </Box>
-    </Box>
+        </div>
+      </div>
+    </div>
   );
 };
 

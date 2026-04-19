@@ -149,6 +149,10 @@ export class TwitchProvider implements PlatformProvider {
     };
   }
 
+  getViewerCount(): number {
+    return 0;
+  }
+
   // Helper method to simulate receiving a message (for testing)
   _simulateMessage(message: string, username: string = 'TestUser') {
     const chatMessage: ChatMessage = {

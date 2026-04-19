@@ -1,7 +1,3 @@
-import { baseComponents } from '@opentui/react';
-
-const { Box, Button, Input, Text } = baseComponents;
-
 import React, { useState } from 'react';
 
 interface MessageInputProps {
@@ -13,6 +9,14 @@ interface MessageInputProps {
   onSelectPlatforms: (platforms: string[]) => void;
   placeholder?: string;
 }
+
+const btnStyle: React.CSSProperties = {
+  color: '#fff',
+  border: 'none',
+  padding: '4px 8px',
+  cursor: 'pointer',
+  borderRadius: '3px',
+};
 
 export const MessageInput: React.FC<MessageInputProps> = ({
   onSendMessage,
@@ -41,52 +45,84 @@ export const MessageInput: React.FC<MessageInputProps> = ({
   };
 
   return (
-    <Box border="rounded" padding={1} style={{ backgroundColor: '#1a1a2e' }}>
-      <Box marginBottom={1}>
-        <Text bold>Send Message</Text>
-      </Box>
+    <div
+      style={{
+        border: '1px solid #444',
+        borderRadius: '4px',
+        padding: '8px',
+        backgroundColor: '#1a1a2e',
+      }}
+    >
+      <div style={{ marginBottom: '8px' }}>
+        <span style={{ fontWeight: 'bold' }}>Send Message</span>
+      </div>
 
-      <Box marginBottom={1}>
-        <Button
+      <div style={{ marginBottom: '8px' }}>
+        <button
+          type="button"
           onClick={() => onToggleSendToAll(!sendToAll)}
-          style={{
-            backgroundColor: sendToAll ? 'green' : '#333',
-          }}
+          style={{ ...btnStyle, backgroundColor: sendToAll ? '#22c55e' : '#333' }}
         >
           {sendToAll ? '[x] Send to All' : '[ ] Send to All'}
-        </Button>
-      </Box>
+        </button>
+      </div>
 
       {!sendToAll && platforms.length > 0 && (
-        <Box marginBottom={1} flexDirection="row" gap={1}>
-          <Text>Send to:</Text>
+        <div
+          style={{
+            marginBottom: '8px',
+            display: 'flex',
+            flexDirection: 'row',
+            gap: '4px',
+            alignItems: 'center',
+          }}
+        >
+          <span>Send to:</span>
           {platforms.map((platform) => (
-            <Button
+            <button
               key={platform}
+              type="button"
               onClick={() => togglePlatform(platform)}
               style={{
-                backgroundColor: selectedPlatforms.includes(platform) ? 'blue' : '#333',
+                ...btnStyle,
+                backgroundColor: selectedPlatforms.includes(platform) ? '#3b82f6' : '#333',
               }}
             >
               {selectedPlatforms.includes(platform) ? '[x]' : '[ ]'}{' '}
               {platform.charAt(0).toUpperCase() + platform.slice(1)}
-            </Button>
+            </button>
           ))}
-        </Box>
+        </div>
       )}
 
-      <Input
+      <input
+        type="text"
         value={message}
-        onChange={(value) => setMessage(value)}
+        onChange={(e) => setMessage(e.target.value)}
         placeholder={placeholder}
-        onEnter={handleSend}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') handleSend();
+        }}
+        style={{
+          width: '100%',
+          backgroundColor: '#0f0f1a',
+          color: '#fff',
+          border: '1px solid #444',
+          borderRadius: '3px',
+          padding: '4px 8px',
+          boxSizing: 'border-box',
+        }}
       />
 
-      <Box marginTop={1}>
-        <Button onClick={handleSend} style={{ backgroundColor: 'blue' }}>
+      <div style={{ marginTop: '8px' }}>
+        <button
+          type="button"
+          onClick={handleSend}
+          style={{ ...btnStyle, backgroundColor: '#3b82f6' }}
+        >
           Send
-        </Button>
-      </Box>
-    </Box>
+        </button>
+      </div>
+    </div>
   );
 };

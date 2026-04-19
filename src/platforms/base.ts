@@ -61,4 +61,5 @@ export interface PlatformProvider {
   setupWebhooks(config: WebhookConfig): Promise<void>;
   getPlatformName(): string;
   getStatus(): PlatformStatus;
+  getViewerCount(): number;
 }

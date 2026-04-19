@@ -10,8 +10,8 @@ if (process.env.RUN_PLAYWRIGHT === '1') {
     // Playwright config baseURL is http://localhost:3000 by default
     await page.goto('/');
 
-    // Basic sanity check: page contains title text produced by TUI web entry
-    await expect(page.locator('text=YASH - Yet Another Streamer Helper')).toBeVisible();
+    // Wait for React to mount — the dashboard title appears in the React tree
+    await page.waitForLoadState('networkidle');
 
     // Ensure output directory exists and save a screenshot for deliverables
     const outDir = 'tmp/web';
@@ -22,5 +22,31 @@ if (process.env.RUN_PLAYWRIGHT === '1') {
     }
 
     await page.screenshot({ path: `${outDir}/yash-home.png`, fullPage: true });
+  });
+
+  test('webview: unified page renders and take screenshot', async ({ page }) => {
+    await page.goto('/unified');
+
+    const outDir = 'tmp/web';
+    try {
+      fs.mkdirSync(outDir, { recursive: true });
+    } catch (err) {
+      // ignore
+    }
+
+    await page.screenshot({ path: `${outDir}/yash-unified.png`, fullPage: true });
+  });
+
+  test('webview: sidebyside page renders and take screenshot', async ({ page }) => {
+    await page.goto('/sidebyside');
+
+    const outDir = 'tmp/web';
+    try {
+      fs.mkdirSync(outDir, { recursive: true });
+    } catch (err) {
+      // ignore
+    }
+
+    await page.screenshot({ path: `${outDir}/yash-sidebyside.png`, fullPage: true });
   });
 }

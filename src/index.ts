@@ -1,4 +1,6 @@
 import index from '../index.html';
+import sidebyside from '../sidebyside.html';
+import unified from '../unified.html';
 import { KickProvider } from './platforms/kick';
 import { TwitchProvider } from './platforms/twitch';
 import { YouTubeProvider } from './platforms/youtube';
@@ -62,6 +64,8 @@ initializeServices().catch((err) => defaultLogger.error('Failed to initialize se
 Bun.serve({
   routes: {
     '/': index,
+    '/unified': unified,
+    '/sidebyside': sidebyside,
     '/api/status': {
       GET: () => {
         const status = platforms.reduce(

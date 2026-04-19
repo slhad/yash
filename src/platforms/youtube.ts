@@ -164,6 +164,10 @@ export class YouTubeProvider implements PlatformProvider {
     };
   }
 
+  getViewerCount(): number {
+    return 0;
+  }
+
   _simulateMessage(message: string, username: string = 'TestUser') {
     const chatMessage: ChatMessage = {
       id: `youtube_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,

@@ -1,9 +1,13 @@
-import { baseComponents } from '@opentui/react';
-
-const { Box, Button, Input, Text } = baseComponents;
-
 import React, { useState } from 'react';
 import { defaultLogger } from '../utils/logger';
+
+const btnStyle: React.CSSProperties = {
+  color: '#fff',
+  border: 'none',
+  padding: '4px 8px',
+  cursor: 'pointer',
+  borderRadius: '3px',
+};
 
 interface StreamControlsProps {
   platforms: string[];
@@ -80,79 +84,134 @@ export const StreamControls: React.FC<StreamControlsProps> = ({
   };
 
   return (
-    <Box border="rounded" padding={1} style={{ backgroundColor: '#1a1a2e' }}>
-      <Box marginBottom={1}>
-        <Text bold>Stream Controls</Text>
-      </Box>
+    <div
+      style={{
+        border: '1px solid #444',
+        borderRadius: '4px',
+        padding: '8px',
+        backgroundColor: '#1a1a2e',
+      }}
+    >
+      <div style={{ marginBottom: '8px' }}>
+        <span style={{ fontWeight: 'bold' }}>Stream Controls</span>
+      </div>
 
-      <Box marginBottom={1}>
-        <Button
+      <div
+        style={{
+          marginBottom: '8px',
+          display: 'flex',
+          flexDirection: 'row',
+          gap: '4px',
+          flexWrap: 'wrap',
+        }}
+      >
+        <button
+          type="button"
           onClick={toggleAll}
           style={{
-            backgroundColor: selectedPlatforms.length === platforms.length ? 'blue' : '#333',
+            ...btnStyle,
+            backgroundColor: selectedPlatforms.length === platforms.length ? '#3b82f6' : '#333',
           }}
         >
           {selectedPlatforms.length === platforms.length ? '[x] All' : '[ ] All'}
-        </Button>
+        </button>
         {platforms.map((platform) => (
-          <Button
+          <button
             key={platform}
+            type="button"
             onClick={() => togglePlatform(platform)}
             style={{
-              backgroundColor: selectedPlatforms.includes(platform) ? 'blue' : '#333',
+              ...btnStyle,
+              backgroundColor: selectedPlatforms.includes(platform) ? '#3b82f6' : '#333',
             }}
           >
             {selectedPlatforms.includes(platform) ? '[x]' : '[ ]'}{' '}
             {platform.charAt(0).toUpperCase() + platform.slice(1)}
-          </Button>
+          </button>
         ))}
-      </Box>
+      </div>
 
-      <Box marginBottom={1}>
-        <Text>
-          {anyOnline ? <Text color="green">● LIVE</Text> : <Text color="gray">○ Offline</Text>}
-        </Text>
-        <Text color="gray">
+      <div style={{ marginBottom: '8px' }}>
+        <span>
+          {anyOnline ? (
+            <span style={{ color: '#22c55e' }}>● LIVE</span>
+          ) : (
+            <span style={{ color: '#6b7280' }}>○ Offline</span>
+          )}
+        </span>
+        <span style={{ color: '#6b7280' }}>
           {' '}
           {selectedPlatforms.length > 0 ? `${selectedPlatforms.length} selected` : 'None selected'}
-        </Text>
-      </Box>
+        </span>
+      </div>
 
       {!anyOnline && (
-        <Box marginBottom={1} flexDirection="column" gap={1}>
-          <Input
-            label="Title"
-            value={streamTitle}
-            onChange={setStreamTitle}
-            placeholder="Stream title"
-          />
-          <Input
-            label="Game"
-            value={streamGame}
-            onChange={setStreamGame}
-            placeholder="Game/category"
-          />
-        </Box>
+        <div style={{ marginBottom: '8px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+          <div>
+            <label style={{ display: 'block', marginBottom: '2px', color: '#aaa' }}>Title</label>
+            <input
+              type="text"
+              value={streamTitle}
+              onChange={(e) => setStreamTitle(e.target.value)}
+              placeholder="Stream title"
+              style={{
+                width: '100%',
+                backgroundColor: '#0f0f1a',
+                color: '#fff',
+                border: '1px solid #444',
+                borderRadius: '3px',
+                padding: '4px 8px',
+                boxSizing: 'border-box',
+              }}
+            />
+          </div>
+          <div>
+            <label style={{ display: 'block', marginBottom: '2px', color: '#aaa' }}>Game</label>
+            <input
+              type="text"
+              value={streamGame}
+              onChange={(e) => setStreamGame(e.target.value)}
+              placeholder="Game/category"
+              style={{
+                width: '100%',
+                backgroundColor: '#0f0f1a',
+                color: '#fff',
+                border: '1px solid #444',
+                borderRadius: '3px',
+                padding: '4px 8px',
+                boxSizing: 'border-box',
+              }}
+            />
+          </div>
+        </div>
       )}
 
-      <Box flexDirection="row" gap={1}>
-        <Button
+      <div style={{ display: 'flex', flexDirection: 'row', gap: '8px' }}>
+        <button
+          type="button"
           onClick={anyOnline ? handleStop : handleStart}
           disabled={selectedPlatforms.length === 0 || isProcessing}
           style={{
-            backgroundColor: anyOnline ? 'red' : 'green',
+            ...btnStyle,
+            backgroundColor: anyOnline ? '#ef4444' : '#22c55e',
+            opacity: selectedPlatforms.length === 0 || isProcessing ? 0.5 : 1,
           }}
         >
           {anyOnline ? 'Stop' : 'Start'}
-        </Button>
-        <Button
+        </button>
+        <button
+          type="button"
           onClick={handleUpdate}
           disabled={!anyOnline || isProcessing}
-          style={{ backgroundColor: 'yellow' }}
+          style={{
+            ...btnStyle,
+            backgroundColor: '#eab308',
+            opacity: !anyOnline || isProcessing ? 0.5 : 1,
+          }}
         >
           Update
-        </Button>
-      </Box>
-    </Box>
+        </button>
+      </div>
+    </div>
   );
 };

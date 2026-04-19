@@ -15,11 +15,27 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
         * Element : Platform connected as Status bar showing number of viewers between "()" if activated in "Number of viewers" element
         * Message box
             * position : top/bottom/hide
+        * Element : Title (YASH heading)
+            * visible: true/false (default: false, toggle with `/settings set title.visible true`)
     * Command /connect [youtube|twitch|kick] to launch connection to platform with auth+save secrets in config
+    * Command /exit - exits the application cleanly
+    * Command /help - lists all available commands
+    * Command /msg <all|youtube|twitch|kick> <text> - sends a message to the specified platform(s)
     * Message box to send message to [all|youtube|twitch|kick] platform and receive command "/" (without sending to platforms)
+    * TUI Layout
+        * Single-line status bar showing all platforms + OBS connection status + total viewer count on one horizontal row
+        * Chat panel occupies center/maximum space (flex-grow), horizontal layout with right sidebar
+        * Events and logs merged into a single "Events & Logs" right sidebar panel
+        * Message input box always visible with border/title, rendered before typing begins
 - Usable webviews
-    * Route to show unified view of all chats
-    * Route to show view of chats side by side with config options to enable any platform (saved in browser)
+    * Route / to show controls of the app and stream setup info
+        * Title (youtube,twitch,kick)
+        * Description (youtube)
+        * Notification (twitch)
+        * Tags (youtube,twicth,kick)
+        * Subject/Category/Game (youtube,twitch,kick)
+    * Route /unified to show unified view of all chats
+    * Route /sidebyside to show view of chats side by side with config options to enable any platform (saved in browser)
     * All chats view must have a message box to send messages like TUI, display top/bottom/hide (saved in browser individually)
 
 ## Out of scope (do not touch)
@@ -85,7 +101,8 @@ src/
 │   └── obs.service.ts
 ├── ui/                  # OpenTUI components
 ├── utils/
-└── index.ts             # Entry point
+├── index.ts             # Web server entry point
+└── index.tsx            # TUI entry point
 ```
 
 ## Integration tests
@@ -95,6 +112,8 @@ src/
 - Test websocket communication with obs-studio (ignore if connection refused, aka obs-studio is off)
 
 ## Development Commands
-- `bun run src/index.ts` - Launch the TUI application
+- `bun run src/index.tsx` - Launch the TUI application
+- `bun run src/index.ts` - Launch the web server only
+- `bun run start` - Launch both TUI and web server concurrently
 - `bun test` - Run all tests
 - `biome check --write` - Lint and format code

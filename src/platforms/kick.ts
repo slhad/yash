@@ -150,6 +150,10 @@ export class KickProvider implements PlatformProvider {
     };
   }
 
+  getViewerCount(): number {
+    return 0;
+  }
+
   // Helper method to simulate receiving a message (for testing)
   _simulateMessage(message: string, username: string = 'TestUser') {
     const chatMessage: ChatMessage = {

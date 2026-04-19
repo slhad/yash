@@ -1,7 +1,3 @@
-import { baseComponents } from '@opentui/react';
-
-const { Box, Text } = baseComponents;
-
 import React from 'react';
 
 interface StatusBarProps {
@@ -16,6 +12,16 @@ interface StatusBarProps {
   >;
   obsConnected: boolean;
 }
+
+const colorMap: Record<string, string> = {
+  green: '#22c55e',
+  red: '#ef4444',
+  gray: '#6b7280',
+  yellow: '#eab308',
+  cyan: '#06b6d4',
+  purple: '#a855f7',
+  white: '#ffffff',
+};
 
 export const StatusBar: React.FC<StatusBarProps> = ({ platformStatus, obsConnected }) => {
   const platforms = Object.keys(platformStatus);
@@ -51,34 +57,52 @@ export const StatusBar: React.FC<StatusBarProps> = ({ platformStatus, obsConnect
   };
 
   return (
-    <Box border="rounded" padding={1} style={{ backgroundColor: '#1a1a2e' }}>
-      <Box marginBottom={1}>
-        <Text bold>Status</Text>
-      </Box>
+    <div
+      style={{
+        border: '1px solid #444',
+        borderRadius: '4px',
+        padding: '8px',
+        backgroundColor: '#1a1a2e',
+      }}
+    >
+      <div style={{ marginBottom: '8px' }}>
+        <span style={{ fontWeight: 'bold' }}>Status</span>
+      </div>
 
-      <Box marginBottom={1}>
-        <Text>OBS: </Text>
-        <Text color={obsConnected ? 'green' : 'gray'}>
+      <div style={{ marginBottom: '8px' }}>
+        <span>OBS: </span>
+        <span style={{ color: obsConnected ? '#22c55e' : '#6b7280' }}>
           {obsConnected ? '● Connected' : '○ Disconnected'}
-        </Text>
-      </Box>
+        </span>
+      </div>
 
       {platforms.map((platform) => {
         const status = platformStatus[platform];
         const streamInd = getStreamIndicator(status.streamStatus);
 
         return (
-          <Box key={platform} marginY={0}>
-            <Text bold>{platform.toUpperCase()}: </Text>
-            <Text color={status.authenticated ? 'green' : 'red'}>
+          <div key={platform}>
+            <span style={{ fontWeight: 'bold' }}>{platform.toUpperCase()}: </span>
+            <span style={{ color: status.authenticated ? '#22c55e' : '#ef4444' }}>
               {status.authenticated ? '✓' : '✗'}
-            </Text>{' '}
-            <Text color={streamInd.color}>{streamInd.symbol}</Text>
-            <Text color={getConnColor(status.connectionStatus)}> {status.connectionStatus}</Text>
-            {status.lastError && <Text color="red"> ! {status.lastError}</Text>}
-          </Box>
+            </span>{' '}
+            <span style={{ color: colorMap[streamInd.color] ?? streamInd.color }}>
+              {streamInd.symbol}
+            </span>
+            <span
+              style={{
+                color:
+                  colorMap[getConnColor(status.connectionStatus)] ??
+                  getConnColor(status.connectionStatus),
+              }}
+            >
+              {' '}
+              {status.connectionStatus}
+            </span>
+            {status.lastError && <span style={{ color: '#ef4444' }}> ! {status.lastError}</span>}
+          </div>
         );
       })}
-    </Box>
+    </div>
   );
 };

@@ -1,8 +1,14 @@
-import * as readline from 'node:readline';
+// Suppress EventTarget MaxListeners warning from OpenTUI's CliRenderer
+process.setMaxListeners(0);
+
 import {
   BoxRenderable,
+  type CliRenderer,
   createCliRenderer,
+  InputRenderable,
+  InputRenderableEvents,
   ScrollBoxRenderable,
+  TextAttributes,
   TextRenderable,
 } from '@opentui/core';
 import { KickProvider } from './platforms/kick';
@@ -11,8 +17,8 @@ import { YouTubeProvider } from './platforms/youtube';
 import { ChatService } from './services/chat.service';
 import { ObsService } from './services/obs.service';
 import { StreamService } from './services/stream.service';
-import { defaultLogger } from './utils/logger';
 import logCollector from './utils/logCollector';
+import { defaultLogger } from './utils/logger';
 import SettingsStore from './utils/settings';
 
 const youtube = new YouTubeProvider();
@@ -32,161 +38,519 @@ streamService.registerProvider('twitch', twitch);
 streamService.registerProvider('kick', kick);
 
 const platforms = ['youtube', 'twitch', 'kick'];
-// Global settings instance used by the TUI. SettingsStore starts an async
-// initialization in the constructor but is safe to instantiate eagerly.
 const settings = new SettingsStore();
 
-async function renderUI(
-  renderer: Awaited<ReturnType<typeof createCliRenderer>>,
-  messages: string[],
-) {
-  renderer.clear();
+// In-memory event log for the sidebar
+const eventLog: Array<{ ts: number; platform: string; type: string; message: string }> = [];
+function pushEvent(platform: string, type: string, message: string): void {
+  eventLog.push({ ts: Date.now(), platform, type, message });
+}
 
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+function boolSetting(value: unknown, def: boolean): boolean {
+  if (value === null || value === undefined) return def;
+  if (typeof value === 'boolean') return value;
+  return String(value).toLowerCase() === 'true';
+}
+
+function numSetting(value: unknown, def: number): number {
+  if (value === null || value === undefined) return def;
+  if (typeof value === 'number') return value;
+  return parseInt(String(value), 10) || def;
+}
+
+function clearScrollBox(scroll: ScrollBoxRenderable): void {
+  for (const child of scroll.getChildren()) {
+    scroll.remove(child.id);
+  }
+}
+
+// ─── Autocomplete ──────────────────────────────────────────────────────────
+
+const COMMANDS = ['/connect', '/exit', '/help', '/logs', '/msg', '/settings'];
+
+function getAutocomplete(input: string): { completion: string | null; hints: string[] } {
+  if (!input.startsWith('/') || input.length === 0) return { completion: null, hints: [] };
+  const lower = input.toLowerCase();
+  const matches = COMMANDS.filter((c) => c.startsWith(lower));
+  if (matches.length === 0) return { completion: null, hints: [] };
+  if (matches.length === 1) return { completion: matches[0], hints: matches };
+  // Find longest common prefix among matches
+  let prefix = matches[0];
+  for (const m of matches) {
+    while (!m.startsWith(prefix)) prefix = prefix.slice(0, -1);
+    if (prefix === '/') break;
+  }
+  return { completion: prefix.length > lower.length ? prefix : null, hints: matches };
+}
+
+// ─── Persistent UI node references ──────────────────────────────────────────
+// Built once in initUI(); mutated in-place in updateUI() to avoid flicker.
+
+interface UINodes {
+  renderer: CliRenderer;
+  mainBox: BoxRenderable;
+  titleText: TextRenderable;
+  subtitleText: TextRenderable;
+  platformTexts: Map<string, TextRenderable>;
+  obsText: TextRenderable;
+  totalViewersText: TextRenderable;
+  chatScroll: ScrollBoxRenderable;
+  sidebarBox: BoxRenderable;
+  sidebarScroll: ScrollBoxRenderable;
+  inputEl: InputRenderable;
+  autocompleteHint: TextRenderable;
+}
+
+let uiNodes: UINodes | null = null;
+
+// ─── initUI ─────────────────────────────────────────────────────────────────
+// Builds the complete layout tree once and attaches it to renderer.root.
+// Called once at startup; called again only on structural settings changes.
+
+function initUI(renderer: CliRenderer, messages: string[]): UINodes {
+  // Tear down any previous tree
+  if (uiNodes) {
+    try {
+      renderer.root.remove(uiNodes.mainBox.id);
+    } catch {}
+  }
+
+  // ── Read settings ────────────────────────────────────────────────
+  const titleVisible = boolSetting(settings.get('title.visible', false), false);
+  const viewersVisible = boolSetting(settings.get('viewers.visible', true), true);
+  const viewersMode = (settings.get('viewers.mode', 'per-platform') ?? 'per-platform') as string;
+  const eventsVisible = boolSetting(settings.get('events.visible', true), true);
+  const logsVisible = boolSetting(settings.get('logs.visible', true), true);
+  const sidebarWidth = (settings.get('events.width', '30%') ?? '30%') as string;
+  const logsHeight = numSetting(settings.get('logs.height', 15), 15);
+  const logsTail = numSetting(settings.get('logs.tail', 20), 20);
+  const eventsTail = numSetting(settings.get('events.tail', 15), 15);
+  const messagesPosition = (settings.get('messages.position', 'bottom') ?? 'bottom') as string;
+
+  // ── Root container ───────────────────────────────────────────────
   const mainBox = new BoxRenderable(renderer, {
-    border: { style: 'rounded' },
-    padding: { top: 1, right: 2, bottom: 1, left: 2 },
+    id: 'yash-root',
+    borderStyle: 'rounded',
+    border: true,
+    paddingTop: 1,
+    paddingRight: 2,
+    paddingBottom: 1,
+    paddingLeft: 2,
     width: '100%',
+    flexDirection: 'column',
   });
 
-  const title = new TextRenderable(renderer, {
+  // ── Optional title (hidden by default) ──────────────────────────
+  const titleText = new TextRenderable(renderer, {
     content: 'YASH - Yet Another Streamer Helper',
-    style: { bold: true, foreground: 'cyan' },
+    attributes: TextAttributes.BOLD,
+    fg: 'cyan',
   });
-  mainBox.add(title);
+  titleText.visible = titleVisible;
 
-  const subtitle = new TextRenderable(renderer, {
+  const subtitleText = new TextRenderable(renderer, {
     content: 'Unified platform management for YouTube, Twitch, and Kick',
-    style: { foreground: 'gray' },
+    fg: 'gray',
   });
-  mainBox.add(subtitle);
+  subtitleText.visible = titleVisible;
 
+  mainBox.add(titleText);
+  mainBox.add(subtitleText);
+
+  // ── Status bar ───────────────────────────────────────────────────
   const statusBox = new BoxRenderable(renderer, {
     marginTop: 1,
-    border: { style: 'rounded' },
+    borderStyle: 'rounded',
+    border: true,
     padding: 1,
+    title: ' Status ',
   });
-  statusBox.add(
-    new TextRenderable(renderer, {
-      content: 'Platform Status',
-      style: { bold: true },
-    }),
-  );
 
+  // All platforms on a single horizontal row
+  const platformRow = new BoxRenderable(renderer, { flexDirection: 'row' });
+  const platformTexts = new Map<string, TextRenderable>();
+  let totalViewers = 0;
   for (const platform of platforms) {
-    const status =
-      platform === 'youtube'
-        ? youtube.getStatus()
-        : platform === 'twitch'
-          ? twitch.getStatus()
-          : kick.getStatus();
-
-    statusBox.add(
-      new TextRenderable(renderer, {
-        content: `  ${platform}: ${status.authenticated ? '[Authenticated]' : '[Not Authenticated]'} ${status.streamStatus}`,
-        style: { foreground: status.authenticated ? 'green' : 'red' },
-      }),
-    );
+    const provider = platform === 'youtube' ? youtube : platform === 'twitch' ? twitch : kick;
+    const status = provider.getStatus();
+    const viewerCount = provider.getViewerCount();
+    totalViewers += viewerCount;
+    let content = ` ${platform}: ${status.authenticated ? '[OK]' : '[--]'} ${status.streamStatus} `;
+    if (viewersVisible && (viewersMode === 'per-platform' || viewersMode === 'both')) {
+      content += `(${viewerCount}) `;
+    }
+    const t = new TextRenderable(renderer, {
+      content,
+      fg: status.authenticated ? 'green' : 'red',
+    });
+    platformTexts.set(platform, t);
+    platformRow.add(t);
   }
+  statusBox.add(platformRow);
 
-  statusBox.add(
-    new TextRenderable(renderer, {
-      content: `  OBS: ${obsService.isConnected() ? '[Connected]' : '[Disconnected]'}`,
-      style: { foreground: obsService.isConnected() ? 'green' : 'gray' },
-    }),
-  );
+  const totalViewersText = new TextRenderable(renderer, {
+    content: `  Total viewers: ${totalViewers}`,
+    fg: 'cyan',
+  });
+  totalViewersText.visible =
+    viewersVisible && (viewersMode === 'cumulative' || viewersMode === 'both');
+  platformRow.add(totalViewersText);
 
-  mainBox.add(statusBox);
+  const obsText = new TextRenderable(renderer, {
+    content: `  OBS: ${obsService.isConnected() ? '[Connected]' : '[Disconnected]'}`,
+    fg: obsService.isConnected() ? 'green' : 'gray',
+  });
+  platformRow.add(obsText);
+
+  // ── Content row: chat (center, grows) + sidebar (right) ─────────
+  const contentRow = new BoxRenderable(renderer, {
+    flexDirection: 'row',
+    width: '100%',
+    marginTop: 1,
+  });
+
+  const chatScroll = new ScrollBoxRenderable(renderer, {
+    height: 15,
+    stickyScroll: true,
+    stickyStart: 'bottom',
+  });
+  for (const msg of messages.slice(-15)) {
+    chatScroll.add(new TextRenderable(renderer, { content: msg, fg: 'white' }));
+  }
 
   const chatBox = new BoxRenderable(renderer, {
-    marginTop: 1,
-    border: { style: 'rounded' },
+    borderStyle: 'rounded',
+    border: true,
     padding: 1,
-    width: '50%',
+    flexGrow: 1,
+    title: ' Chat ',
   });
+  chatBox.add(chatScroll);
+  contentRow.add(chatBox);
 
-  chatBox.add(
-    new TextRenderable(renderer, {
-      content: 'Chat Messages',
-      style: { bold: true },
-    }),
-  );
-
-  const scrollBox = new ScrollBoxRenderable(renderer, {
-    height: 10,
+  // Sidebar: events + logs merged into one panel
+  const sidebarScroll = new ScrollBoxRenderable(renderer, {
+    height: Math.max(logsHeight, 15),
+    stickyScroll: true,
+    stickyStart: 'bottom',
   });
+  _fillSidebar(renderer, sidebarScroll, eventsVisible, logsVisible, eventsTail, logsTail);
 
-  for (const msg of messages.slice(-10)) {
-    scrollBox.add(
-      new TextRenderable(renderer, {
-        content: msg,
-        style: { foreground: 'white' },
-      }),
-    );
-  }
+  const sidebarBox = new BoxRenderable(renderer, {
+    borderStyle: 'rounded',
+    border: true,
+    padding: 1,
+    width: sidebarWidth as `${number}%`,
+    flexDirection: 'column',
+    marginLeft: 1,
+    title: ' Events & Logs ',
+  });
+  sidebarBox.add(sidebarScroll);
+  sidebarBox.visible = eventsVisible || logsVisible;
+  contentRow.add(sidebarBox);
 
-  chatBox.add(scrollBox);
-  mainBox.add(chatBox);
-
-  // Logs window (shows recent application logs collected by the logger).
-  // Configurable via settings keys: logs.visible, logs.height, logs.width, logs.tail
-  const logsVisibleSetting = settings.get('logs.visible', true) ?? true;
-  const logsVisible =
-    typeof logsVisibleSetting === 'boolean'
-      ? logsVisibleSetting
-      : String(logsVisibleSetting).toLowerCase() === 'true';
-
-  if (logsVisible) {
-    const logsWidth = settings.get('logs.width', '50%') || '50%';
-    const logsHeightSetting = settings.get('logs.height', 10) ?? 10;
-    const logsHeight =
-      typeof logsHeightSetting === 'number'
-        ? logsHeightSetting
-        : parseInt(String(logsHeightSetting), 10) || 10;
-    const logsTailSetting = settings.get('logs.tail', 20) ?? 20;
-    const logsTail =
-      typeof logsTailSetting === 'number'
-        ? logsTailSetting
-        : parseInt(String(logsTailSetting), 10) || 20;
-
-    const logsBox = new BoxRenderable(renderer, {
-      marginTop: 1,
-      border: { style: 'rounded' },
-      padding: 1,
-      width: logsWidth,
+  // ── Input box ───────────────────────────────────────────────────
+  // Re-use the singleton inputEl so it retains state across initUI calls.
+  const inputEl =
+    uiNodes?.inputEl ??
+    new InputRenderable(renderer, {
+      placeholder: '> type a command or message…',
+      width: '100%',
     });
 
-    logsBox.add(
-      new TextRenderable(renderer, {
-        content: `Logs (tail ${logsTail})`,
-        style: { bold: true },
-      }),
-    );
+  const inputBox = new BoxRenderable(renderer, {
+    marginTop: 1,
+    borderStyle: 'rounded',
+    border: true,
+    padding: 1,
+    width: '100%',
+    title: ' Message ',
+  });
+  inputBox.add(inputEl);
 
-    const logsScroll = new ScrollBoxRenderable(renderer, { height: logsHeight });
-    try {
-      const entries = logCollector.tail(logsTail);
-      for (const e of entries) {
-        const time = new Date(e.ts).toLocaleTimeString();
-        const prefix = `[${time}] [${e.level}]`;
-        const fg = e.level === 'ERROR' ? 'red' : e.level === 'WARN' ? 'yellow' : 'gray';
-        logsScroll.add(
-          new TextRenderable(renderer, {
-            content: `${prefix} ${e.text}`,
-            style: { foreground: fg },
-          }),
-        );
-      }
-    } catch (err) {
-      // best-effort: don't fail the UI if logs can't be rendered
-    }
+  // Autocomplete hint — hidden until user types a '/'
+  // Re-use singleton so it survives initUI rebuilds
+  const autocompleteHint =
+    uiNodes?.autocompleteHint ?? new TextRenderable(renderer, { content: '', fg: 'gray' });
+  autocompleteHint.visible = false;
+  inputBox.add(autocompleteHint);
 
-    logsBox.add(logsScroll);
-    mainBox.add(logsBox);
+  // ── Assemble ─────────────────────────────────────────────────────
+  if (messagesPosition === 'top') {
+    mainBox.add(contentRow);
+    mainBox.add(statusBox);
+  } else {
+    mainBox.add(statusBox);
+    mainBox.add(contentRow);
+  }
+  if (messagesPosition !== 'hide') {
+    mainBox.add(inputBox);
   }
 
   renderer.root.add(mainBox);
-  await renderer.flush();
+
+  return {
+    renderer,
+    mainBox,
+    titleText,
+    subtitleText,
+    platformTexts,
+    obsText,
+    totalViewersText,
+    chatScroll,
+    sidebarBox,
+    sidebarScroll,
+    inputEl,
+    autocompleteHint,
+  };
 }
+
+// ─── _fillSidebar ────────────────────────────────────────────────────────────
+// Populates sidebarScroll with events then logs. Called from initUI & updateUI.
+
+function _fillSidebar(
+  renderer: CliRenderer,
+  scroll: ScrollBoxRenderable,
+  eventsVisible: boolean,
+  logsVisible: boolean,
+  eventsTail: number,
+  logsTail: number,
+): void {
+  if (eventsVisible) {
+    for (const ev of eventLog.slice(-eventsTail)) {
+      const fg =
+        ev.platform === 'youtube'
+          ? 'red'
+          : ev.platform === 'twitch'
+            ? '#9146FF'
+            : ev.platform === 'kick'
+              ? 'green'
+              : 'gray';
+      scroll.add(
+        new TextRenderable(renderer, {
+          content: `[${ev.platform}] ${ev.type}: ${ev.message}`,
+          fg,
+        }),
+      );
+    }
+  }
+  if (logsVisible) {
+    if (eventsVisible) {
+      scroll.add(new TextRenderable(renderer, { content: '─── Logs ───', fg: 'gray' }));
+    }
+    try {
+      for (const e of logCollector.tail(logsTail)) {
+        const time = new Date(e.ts).toLocaleTimeString();
+        const color = e.level === 'ERROR' ? 'red' : e.level === 'WARN' ? 'yellow' : 'gray';
+        scroll.add(
+          new TextRenderable(renderer, {
+            content: `[${time}] [${e.level}] ${e.text}`,
+            fg: color,
+          }),
+        );
+      }
+    } catch {}
+  }
+}
+
+// ─── updateUI ────────────────────────────────────────────────────────────────
+// Mutates existing nodes in-place — never removes/re-adds root, so no flicker.
+
+function updateUI(messages: string[]): void {
+  if (!uiNodes) return;
+  const {
+    renderer,
+    titleText,
+    subtitleText,
+    platformTexts,
+    obsText,
+    totalViewersText,
+    chatScroll,
+    sidebarBox,
+    sidebarScroll,
+  } = uiNodes;
+
+  // Title visibility
+  const titleVisible = boolSetting(settings.get('title.visible', false), false);
+  titleText.visible = titleVisible;
+  subtitleText.visible = titleVisible;
+
+  // Platform statuses
+  const viewersVisible = boolSetting(settings.get('viewers.visible', true), true);
+  const viewersMode = (settings.get('viewers.mode', 'per-platform') ?? 'per-platform') as string;
+  let totalViewers = 0;
+  for (const platform of platforms) {
+    const provider = platform === 'youtube' ? youtube : platform === 'twitch' ? twitch : kick;
+    const status = provider.getStatus();
+    const viewerCount = provider.getViewerCount();
+    totalViewers += viewerCount;
+    const node = platformTexts.get(platform);
+    if (node) {
+      let content = ` ${platform}: ${status.authenticated ? '[OK]' : '[--]'} ${status.streamStatus} `;
+      if (viewersVisible && (viewersMode === 'per-platform' || viewersMode === 'both')) {
+        content += `(${viewerCount}) `;
+      }
+      node.content = content;
+      node.fg = status.authenticated ? 'green' : 'red';
+    }
+  }
+
+  obsText.content = `  OBS: ${obsService.isConnected() ? '[Connected]' : '[Disconnected]'}`;
+  obsText.fg = obsService.isConnected() ? 'green' : 'gray';
+  totalViewersText.content = `  Total viewers: ${totalViewers}`;
+  totalViewersText.visible =
+    viewersVisible && (viewersMode === 'cumulative' || viewersMode === 'both');
+
+  // Chat: clear and refill
+  clearScrollBox(chatScroll);
+  for (const msg of messages.slice(-15)) {
+    chatScroll.add(new TextRenderable(renderer, { content: msg, fg: 'white' }));
+  }
+
+  // Sidebar: clear and refill
+  const eventsVisible = boolSetting(settings.get('events.visible', true), true);
+  const logsVisible = boolSetting(settings.get('logs.visible', true), true);
+  const eventsTail = numSetting(settings.get('events.tail', 15), 15);
+  const logsTail = numSetting(settings.get('logs.tail', 20), 20);
+  sidebarBox.visible = eventsVisible || logsVisible;
+  clearScrollBox(sidebarScroll);
+  _fillSidebar(renderer, sidebarScroll, eventsVisible, logsVisible, eventsTail, logsTail);
+}
+
+// ─── Command dispatch ────────────────────────────────────────────────────────
+
+async function handleCommand(trimmed: string): Promise<void> {
+  if (!trimmed.startsWith('/')) {
+    try {
+      await chatService.sendMessage(trimmed, []);
+      lastMessages.push(`[you] ${trimmed}`);
+    } catch (err) {
+      lastMessages.push(`[system] Failed to send message: ${String(err)}`);
+    }
+    return;
+  }
+
+  const parts = trimmed.split(/\s+/);
+  const cmd = parts[0].toLowerCase();
+
+  if (cmd === '/connect' && parts[1]) {
+    const platform = parts[1].toLowerCase();
+    const provider =
+      platform === 'youtube'
+        ? youtube
+        : platform === 'twitch'
+          ? twitch
+          : platform === 'kick'
+            ? kick
+            : null;
+    if (provider) {
+      lastMessages.push(`[system] Authenticating ${platform}...`);
+      try {
+        const res = await provider.authenticate();
+        lastMessages.push(
+          `[system] ${platform} authentication ${res?.success ? 'succeeded' : 'failed'}`,
+        );
+      } catch (err) {
+        lastMessages.push(`[system] ${platform} authentication error: ${String(err)}`);
+      }
+    } else {
+      lastMessages.push(`[system] Unknown platform: ${platform}`);
+    }
+  } else if (cmd === '/msg') {
+    // /msg all <text>     → sends to all platforms
+    // /msg youtube <text> → sends only to youtube
+    const target = parts[1]?.toLowerCase();
+    const text = parts.slice(2).join(' ');
+    const validTargets = ['all', 'youtube', 'twitch', 'kick'];
+    if (target && validTargets.includes(target) && text) {
+      const targetPlatforms = target === 'all' ? [] : [target];
+      try {
+        await chatService.sendMessage(text, targetPlatforms);
+        lastMessages.push(`[you → ${target}] ${text}`);
+      } catch (err) {
+        lastMessages.push(`[system] Failed to send message: ${String(err)}`);
+      }
+    } else {
+      lastMessages.push('[system] Usage: /msg <all|youtube|twitch|kick> <text>');
+    }
+  } else if (cmd === '/settings') {
+    const op = parts[1];
+    if (op === 'get' && parts[2]) {
+      const key = parts[2];
+      const val = settings.get(key, null);
+      lastMessages.push(`[settings] ${key} = ${JSON.stringify(val)}`);
+    } else if (op === 'set' && parts[2] && parts[3]) {
+      const key = parts[2];
+      const value = parts.slice(3).join(' ');
+      try {
+        await settings.set(key, JSON.parse(value));
+        lastMessages.push(`[settings] set ${key} = ${value}`);
+      } catch {
+        await settings.set(key, value);
+        lastMessages.push(`[settings] set ${key} = "${value}"`);
+      }
+      // Structural changes require a full layout rebuild
+      const structuralKeys = ['messages.position', 'events.width', 'logs.height'];
+      if (structuralKeys.some((k) => key === k) && cliRenderer && uiNodes) {
+        uiNodes = initUI(cliRenderer, lastMessages);
+        uiNodes.inputEl.focus();
+      }
+    } else {
+      lastMessages.push('[system] Usage: /settings get <key> | /settings set <key> <json-value>');
+      lastMessages.push(
+        '[system] Keys: title.visible, logs.visible, logs.height, logs.tail, viewers.visible, viewers.mode, messages.position (top|bottom|hide), events.visible, events.tail, events.width',
+      );
+    }
+  } else if (cmd === '/logs') {
+    const op = parts[1];
+    if (op === 'clear') {
+      try {
+        logCollector.clear();
+        lastMessages.push('[logs] cleared');
+      } catch {
+        lastMessages.push('[logs] failed to clear');
+      }
+    } else if (op === 'tail' && parts[2]) {
+      const n = parseInt(parts[2], 10) || 0;
+      if (n > 0) {
+        await settings.set('logs.tail', n);
+        lastMessages.push(`[logs] tail set to ${n}`);
+      } else {
+        lastMessages.push('[logs] Usage: /logs tail <n>');
+      }
+    } else if (op === 'visible' && parts[2]) {
+      const v = String(parts[2]).toLowerCase();
+      if (v === 'true' || v === 'false') {
+        await settings.set('logs.visible', v === 'true');
+        lastMessages.push(`[logs] visible set to ${v}`);
+      } else {
+        lastMessages.push('[logs] Usage: /logs visible <true|false>');
+      }
+    } else {
+      lastMessages.push('[logs] Usage: /logs clear | /logs tail <n>');
+    }
+  } else if (cmd === '/exit') {
+    isRunning = false;
+    await obsService.disconnect();
+    cliRenderer?.destroy();
+    process.exit(0);
+  } else if (cmd === '/help') {
+    lastMessages.push('[help] Available commands:');
+    lastMessages.push('[help]   /connect <youtube|twitch|kick>  — authenticate a platform');
+    lastMessages.push('[help]   /msg <all|youtube|twitch|kick> <text>  — send a message');
+    lastMessages.push('[help]   /settings get <key>  — get a setting value');
+    lastMessages.push('[help]   /settings set <key> <value>  — set a setting value');
+    lastMessages.push('[help]   /logs clear | tail <n> | visible <true|false>  — manage logs');
+    lastMessages.push('[help]   /exit  — exit the app');
+    lastMessages.push('[help]   /help  — show this help');
+  } else {
+    lastMessages.push(`[system] Unknown command: ${trimmed}`);
+  }
+}
+
+// ─── Main ────────────────────────────────────────────────────────────────────
 
 let isRunning = true;
 const lastMessages: string[] = [];
@@ -197,148 +561,88 @@ function transformMessage(msg: { platform: string; username: string; message: st
 }
 
 async function main() {
-  await Promise.all([youtube.authenticate(), twitch.authenticate(), kick.authenticate()]);
-
-  defaultLogger.info('Platforms authenticated');
-
-  await obsService.connect();
-  defaultLogger.info('OBS connected');
+  const renderer = await createCliRenderer({
+    screenMode:
+      (process.env.YASH_SCREEN_MODE as 'main-screen' | 'alternate-screen') ?? 'main-screen',
+    consoleMode: 'disabled',
+    useKittyKeyboard: null,
+    useMouse: false,
+  });
+  cliRenderer = renderer;
 
   chatService.subscribeToMessages((msg) => {
     lastMessages.push(transformMessage(msg));
+    pushEvent(msg.platform, 'chat', `${msg.username} sent a message`);
   });
 
-  const renderer = await createCliRenderer();
-  cliRenderer = renderer;
-  await renderUI(renderer, lastMessages);
+  await Promise.all([youtube.authenticate(), twitch.authenticate(), kick.authenticate()]);
+  defaultLogger.info('Platforms authenticated');
+  pushEvent('youtube', 'auth', 'Authenticated');
+  pushEvent('twitch', 'auth', 'Authenticated');
+  pushEvent('kick', 'auth', 'Authenticated');
 
-  // Simple stdin command handler for TUI -- supports /connect and /settings
-  try {
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  await obsService.connect();
+  defaultLogger.info('OBS connected');
+  pushEvent('system', 'obs.connect', 'OBS connected');
 
-    rl.on('line', async (line: string) => {
-      const trimmed = line.trim();
-      if (!trimmed) return;
+  // Build UI tree once — no flicker on periodic updates
+  uiNodes = initUI(renderer, lastMessages);
 
-      if (trimmed.startsWith('/')) {
-        const parts = trimmed.split(/\s+/);
-        const cmd = parts[0].toLowerCase();
-        if (cmd === '/connect' && parts[1]) {
-          const platform = parts[1].toLowerCase();
-          const provider =
-            platform === 'youtube'
-              ? youtube
-              : platform === 'twitch'
-                ? twitch
-                : platform === 'kick'
-                  ? kick
-                  : null;
-          if (provider) {
-            lastMessages.push(`[system] Authenticating ${platform}...`);
-            try {
-              const res = await provider.authenticate();
-              lastMessages.push(
-                `[system] ${platform} authentication ${res?.success ? 'succeeded' : 'failed'}`,
-              );
-            } catch (err) {
-              lastMessages.push(`[system] ${platform} authentication error: ${String(err)}`);
-            }
-          } else {
-            lastMessages.push(`[system] Unknown platform: ${platform}`);
-          }
-        } else if (cmd === '/settings') {
-          // /settings get <key>
-          // /settings set <key> <value>
-          const op = parts[1];
-          if (op === 'get' && parts[2]) {
-            const key = parts[2];
-            const val = settings.get(key, null);
-            lastMessages.push(`[settings] ${key} = ${JSON.stringify(val)}`);
-          } else if (op === 'set' && parts[2] && parts[3]) {
-            const key = parts[2];
-            const value = parts.slice(3).join(' ');
-            try {
-              await settings.set(key, JSON.parse(value));
-              lastMessages.push(`[settings] set ${key} = ${value}`);
-            } catch {
-              // if JSON parse fails, store as string
-              await settings.set(key, value);
-              lastMessages.push(`[settings] set ${key} = "${value}"`);
-            }
-          } else {
-            lastMessages.push(
-              '[system] Usage: /settings get <key> | /settings set <key> <json-value>',
-            );
-          }
-        } else if (cmd === '/logs') {
-          // /logs clear
-          // /logs tail <n>
-          const op = parts[1];
-          if (op === 'clear') {
-            try {
-              logCollector.clear();
-              lastMessages.push('[logs] cleared');
-            } catch (e) {
-              lastMessages.push('[logs] failed to clear');
-            }
-          } else if (op === 'tail' && parts[2]) {
-            const n = parseInt(parts[2], 10) || 0;
-            if (n > 0) {
-              // save default tail in settings so UI respects it
-              await settings.set('logs.tail', n);
-              lastMessages.push(`[logs] tail set to ${n}`);
-            } else {
-              lastMessages.push('[logs] Usage: /logs tail <n>');
-            }
-          } else if (op === 'visible' && parts[2]) {
-            const v = String(parts[2]).toLowerCase();
-            if (v === 'true' || v === 'false') {
-              await settings.set('logs.visible', v === 'true');
-              lastMessages.push(`[logs] visible set to ${v}`);
-            } else {
-              lastMessages.push('[logs] Usage: /logs visible <true|false>');
-            }
-          } else {
-            lastMessages.push('[logs] Usage: /logs clear | /logs tail <n>');
-          }
-        } else {
-          lastMessages.push(`[system] Unknown command: ${trimmed}`);
-        }
+  // Focus input and wire ENTER + INPUT handlers once
+  uiNodes.inputEl.focus();
+
+  uiNodes.inputEl.on(InputRenderableEvents.INPUT, () => {
+    const val = uiNodes!.inputEl.value;
+    const hint = uiNodes!.autocompleteHint;
+
+    // Tab intercept: complete and remove \t
+    if (val.includes('\t')) {
+      const before = val.replace(/\t/g, '');
+      const { completion, hints } = getAutocomplete(before);
+      uiNodes!.inputEl.value = completion ?? before;
+      if (hints.length > 1) {
+        hint.content = `  ${hints.join('  ')}`;
+        hint.visible = true;
       } else {
-        // Regular chat message: broadcast to all providers
-        try {
-          await chatService.sendMessage(trimmed, []);
-          lastMessages.push(`[you] ${trimmed}`);
-        } catch (err) {
-          lastMessages.push(`[system] Failed to send message: ${String(err)}`);
-        }
+        hint.visible = false;
       }
-
-      // Re-render immediately after processing input
-      try {
-        if (cliRenderer) await renderUI(cliRenderer, lastMessages);
-      } catch {
-        // ignore render errors
-      }
-    });
-  } catch (err) {
-    // If readline isn't available, TUI will still refresh periodically
-  }
-
-  const updateLoop = setInterval(async () => {
-    if (!isRunning) return;
-
-    try {
-      await renderUI(renderer, lastMessages);
-    } catch {
-      // ignore
+      return;
     }
+
+    // Live hint while typing a command
+    if (val.startsWith('/') && val.length > 0) {
+      const { hints } = getAutocomplete(val);
+      if (hints.length > 0) {
+        hint.content = `  ${hints.join('  ')}`;
+        hint.visible = true;
+      } else {
+        hint.visible = false;
+      }
+    } else {
+      hint.visible = false;
+    }
+  });
+
+  uiNodes.inputEl.on(InputRenderableEvents.ENTER, async () => {
+    const trimmed = uiNodes!.inputEl.value.trim();
+    uiNodes!.inputEl.value = '';
+    uiNodes!.autocompleteHint.visible = false;
+    if (!trimmed) return;
+    await handleCommand(trimmed);
+    updateUI(lastMessages);
+  });
+
+  // Periodic refresh — in-place mutations only, no flicker
+  const updateLoop = setInterval(() => {
+    if (!isRunning) return;
+    updateUI(lastMessages);
   }, 2000);
 
   process.on('SIGINT', async () => {
     isRunning = false;
     clearInterval(updateLoop);
     await obsService.disconnect();
+    renderer.destroy();
     process.exit(0);
   });
 }
