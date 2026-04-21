@@ -22,8 +22,7 @@ describe('AuthService.rotateEncryptionKey (removed)', () => {
   });
 
   test('rotateEncryptionKey is removed and throws', async () => {
-    const mockKeytar = new MockKeytar();
-    const authA = new AuthService(mockKeytar as any);
+    const authA = new AuthService();
     await authA.waitForReady(5000);
 
     try {
