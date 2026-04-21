@@ -57,9 +57,16 @@ export async function reloadConfig(): Promise<any> {
   return loadConfig();
 }
 
+export function isDemoMode(): boolean {
+  if (process.env.YASH_DEMO === 'true' || process.env.YASH_DEMO === '1') return true;
+  return !!getConfig()?.demo;
+}
+
 function applyEnvOverrides(cfg: any): any {
   // Clone to avoid mutating the original
   const config = JSON.parse(JSON.stringify(cfg || {}));
+
+  if (process.env.YASH_DEMO === 'true' || process.env.YASH_DEMO === '1') config.demo = true;
 
   // OBS websocket overrides
   config.obs = config.obs || {};
@@ -95,4 +102,4 @@ function applyEnvOverrides(cfg: any): any {
   return config;
 }
 
-export default { getConfig, loadConfig, reloadConfig };
+export default { getConfig, loadConfig, reloadConfig, isDemoMode };

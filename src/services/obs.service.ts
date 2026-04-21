@@ -2,7 +2,7 @@
 // Note: This is a TypeScript service that would use the obs-websocket-js library
 // For now, we'll create a mock implementation that demonstrates the interface
 
-import { getConfig } from '../utils/config';
+import { getConfig, isDemoMode } from '../utils/config';
 import { defaultLogger } from '../utils/logger';
 import { metrics } from '../utils/metrics';
 
@@ -129,6 +129,14 @@ export class ObsService {
 
     if (this.connectionPromise) return this.connectionPromise;
 
+    if (isDemoMode()) {
+      this.connected = true;
+      this.notifyStatusChange(true);
+      this.setupReconnection();
+      defaultLogger.info('Connected to OBS (demo mode)');
+      return;
+    }
+
     // If WebSocket transport is requested and available, use a real WS client
     if (this.useWebSocketTransport && typeof WebSocket !== 'undefined') {
       this.connectionPromise = new Promise((resolve, reject) => {
@@ -251,7 +259,7 @@ export class ObsService {
     defaultLogger.info('Disconnected from OBS');
 
     // Start reconnection attempts (tests expect reconnection behavior after disconnect)
-    this.scheduleReconnectAttempt();
+    if (!isDemoMode()) this.scheduleReconnectAttempt();
   }
 
   /**

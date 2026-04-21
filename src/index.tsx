@@ -17,6 +17,7 @@ import { YouTubeProvider } from './platforms/youtube';
 import { ChatService } from './services/chat.service';
 import { ObsService } from './services/obs.service';
 import { StreamService } from './services/stream.service';
+import { isDemoMode } from './utils/config';
 import logCollector from './utils/logCollector';
 import { defaultLogger } from './utils/logger';
 import SettingsStore from './utils/settings';
@@ -95,6 +96,7 @@ interface UINodes {
   subtitleText: TextRenderable;
   platformTexts: Map<string, TextRenderable>;
   obsText: TextRenderable;
+  demoText: TextRenderable;
   totalViewersText: TextRenderable;
   chatScroll: ScrollBoxRenderable;
   sidebarBox: BoxRenderable;
@@ -204,6 +206,14 @@ function initUI(renderer: CliRenderer, messages: string[]): UINodes {
   });
   platformRow.add(obsText);
 
+  const demoText = new TextRenderable(renderer, {
+    content: '  [DEMO MODE]',
+    fg: 'yellow',
+    attributes: TextAttributes.BOLD,
+  });
+  demoText.visible = isDemoMode();
+  platformRow.add(demoText);
+
   // ── Content row: chat (center, grows) + sidebar (right) ─────────
   const contentRow = new BoxRenderable(renderer, {
     flexDirection: 'row',
@@ -298,6 +308,7 @@ function initUI(renderer: CliRenderer, messages: string[]): UINodes {
     subtitleText,
     platformTexts,
     obsText,
+    demoText,
     totalViewersText,
     chatScroll,
     sidebarBox,
@@ -366,6 +377,7 @@ function updateUI(messages: string[]): void {
     subtitleText,
     platformTexts,
     obsText,
+    demoText,
     totalViewersText,
     chatScroll,
     sidebarBox,
@@ -399,6 +411,7 @@ function updateUI(messages: string[]): void {
 
   obsText.content = `  OBS: ${obsService.isConnected() ? '[Connected]' : '[Disconnected]'}`;
   obsText.fg = obsService.isConnected() ? 'green' : 'gray';
+  demoText.visible = isDemoMode();
   totalViewersText.content = `  Total viewers: ${totalViewers}`;
   totalViewersText.visible =
     viewersVisible && (viewersMode === 'cumulative' || viewersMode === 'both');

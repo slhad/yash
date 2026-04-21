@@ -10,6 +10,7 @@ import { ChatService } from './services/chat.service';
 import { ObsService } from './services/obs.service';
 import { StreamService } from './services/stream.service';
 import { authorizeAdmin } from './utils/adminAuth';
+import { isDemoMode } from './utils/config';
 import { defaultLogger } from './utils/logger';
 import { apiMetricsHandler, prometheusMetricsHandler } from './utils/metricsHandlers';
 
@@ -129,6 +130,7 @@ Bun.serve({
         return new Response(
           JSON.stringify({
             connected: obsService.isConnected(),
+            demo: isDemoMode(),
             // expose a few lightweight metrics for CI debugging
             metrics: require('./utils/metrics').metrics.getAll
               ? require('./utils/metrics').metrics.getAll()
