@@ -99,6 +99,14 @@ function applyEnvOverrides(cfg: any): any {
     }
   });
 
+  // Twitch OAuth overrides
+  config.platforms.twitch = config.platforms.twitch || {};
+  if (process.env.TWITCH_CLIENT_ID) config.platforms.twitch.clientId = process.env.TWITCH_CLIENT_ID;
+  if (process.env.TWITCH_CLIENT_SECRET)
+    config.platforms.twitch.clientSecret = process.env.TWITCH_CLIENT_SECRET;
+  if (process.env.TWITCH_REDIRECT_URI)
+    config.platforms.twitch.redirectUri = process.env.TWITCH_REDIRECT_URI;
+
   return config;
 }
 

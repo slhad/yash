@@ -14,7 +14,10 @@
     },
     "twitch": {
       "enabled": true,
-      "streamKey": ""
+      "streamKey": "",
+      "clientId": "",
+      "clientSecret": "",
+      "redirectUri": "http://localhost:3000/api/twitch/callback"
     },
     "kick": {
       "enabled": true,

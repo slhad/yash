@@ -16,8 +16,9 @@ When beginning work in this repository:
 1. Review SPECS.md for current requirements
 2. Follow the specifications for any implementation work
 3. All implementation should adhere to the requirements in SPECS.md
-4. **When testing TUI components**: Must use OpenCode pty_spawn/pty_write tools for proper terminal interaction
-5. **ALWAYS Write** ongoing work/parts in `[tmp]/ONGOING.md` to keep track of everything and clean it up when parts are done
+4. **When adding new functionality**, update SPECS.md to document it (under the relevant section, e.g. Features, Goals, or Development Commands)
+5. **When testing TUI components**: Must use OpenCode pty_spawn/pty_write tools for proper terminal interaction
+6. **ALWAYS Write** ongoing work/parts in `[tmp]/ONGOING.md` to keep track of everything and clean it up when parts are done
 
 ## Working with Bun
 Default to using Bun instead of Node.js.

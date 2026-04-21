@@ -2,8 +2,10 @@ import { defaultLogger } from '../utils/logger';
 import {
   AuthResult,
   ChatMessage,
+  GetMarkersOptions,
   PlatformProvider,
   PlatformStatus,
+  StreamMarker,
   StreamMetadata,
   StreamStatus,
   WebhookConfig,
@@ -152,6 +154,20 @@ export class KickProvider implements PlatformProvider {
 
   getViewerCount(): number {
     return 0;
+  }
+
+  /** Kick does not expose a stream marker API. Returns null gracefully. */
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  async createMarker(_description?: string, _timestamp?: number): Promise<StreamMarker | null> {
+    defaultLogger.info('[Kick] createMarker — not supported by Kick API');
+    return null;
+  }
+
+  /** Kick does not expose a marker read API. Returns []. */
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  async getMarkers(_options?: GetMarkersOptions): Promise<StreamMarker[]> {
+    defaultLogger.info('[Kick] getMarkers — not supported by Kick API');
+    return [];
   }
 
   // Helper method to simulate receiving a message (for testing)

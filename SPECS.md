@@ -21,6 +21,10 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
     * Command /exit - exits the application cleanly
     * Command /help - lists all available commands
     * Command /msg <all|youtube|twitch|kick> <text> - sends a message to the specified platform(s)
+    * Command /marker [description] [| timestamp_s] - places a stream marker on all platforms
+        * Optional description (chapter label, max 140 chars on Twitch)
+        * Optional pipe-delimited timestamp in seconds from stream start (used by YouTube for chapter generation; ignored by Twitch which sets position server-side; Kick does not support markers)
+        * Examples: `/marker Intro | 0`, `/marker Q&A | 3723`, `/marker` (unnamed, no timestamp)
     * Message box to send message to [all|youtube|twitch|kick] platform and receive command "/" (without sending to platforms)
     * TUI Layout
         * Single-line status bar showing all platforms + OBS connection status + total viewer count on one horizontal row
@@ -32,9 +36,10 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
         * Title (youtube,twitch,kick)
         * Description (youtube)
         * Notification (twitch)
-        * Tags (youtube,twicth,kick)
+        * Tags (youtube,twitch,kick)
         * Subject/Category/Game (youtube,twitch,kick)
     * Route /unified to show unified view of all chats
+        * Message box supports `/marker [description] [| timestamp_s]` command (same syntax as TUI)
     * Route /sidebyside to show view of chats side by side with config options to enable any platform (saved in browser)
     * All chats view must have a message box to send messages like TUI, display top/bottom/hide (saved in browser individually)
 
@@ -69,41 +74,197 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
 - Individual implementations for YouTube, Twitch, and Kick platforms
 - Modular service layer (AuthService, ChatService, StreamService, ObsService)
 - Event-driven architecture for real-time communication
- - Token storage for authentication credentials (file-backed). Encryption/keyring-based storage is considered out of scope for this build.
+- Token storage for authentication credentials (file-backed). Encryption/keyring-based storage is considered out of scope for this build.
 - OBS-studio integration via obs-websocket library
 - Configuration is stored in [root]/config.json
 
 ### Platform Support
 - YouTube: Handles multiple concurrent streams per key via schedule IDs
+    * In-memory chapter/marker store: `createMarker(description?, timestamp?)` stores `StreamMarker` objects with optional position in seconds
+    * `getChapterDescriptionBlock()` serialises stored chapters to YouTube description timestamp format (`0:00 Intro\n1:23 Q&A\n...`), ready to be written into the video description via the YouTube Data API v3 when wired up
+    * `clearMarkers()` resets the chapter store (e.g. at stream end)
 - Twitch: Single stream key implementation
-- Kick: Single stream key implementation
+    * Real OAuth2 Authorization Code flow; tokens auto-refreshed and persisted to `~/.yash/twitch_tokens.json`
+    * Helix API: update channel title, game/category (resolved by name → ID), tags
+    * Stream markers via Helix `POST /helix/streams/markers` (requires channel live); returns position in seconds and marker ID
+    * Read markers via Helix `GET /helix/streams/markers` — filterable by videoId
+    * Chat via `@twurple/chat` (IRC-over-WebSocket): send and receive messages with badge/color metadata
+    * EventSub WebSocket: `stream.online`, `stream.offline`, `channel.update`, `channel.chat.message`
+    * Viewer count polled from Helix every 60 seconds
+- Kick: Single stream key implementation (API integration pending)
+
+### Configuration
+Configuration is stored in `[root]/config.json`. Environment variables take precedence over file values.
+
+```json
+{
+  "demo": false,
+  "obs": {
+    "websocket": {
+      "server": "127.0.0.1",
+      "port": "4455",
+      "password": ""
+    }
+  },
+  "platforms": {
+    "youtube": { "enabled": true, "streamKey": "" },
+    "twitch": {
+      "enabled": true,
+      "streamKey": "",
+      "clientId": "",
+      "clientSecret": "",
+      "redirectUri": "http://localhost:3000/api/twitch/callback"
+    },
+    "kick": { "enabled": true, "streamKey": "" }
+  }
+}
+```
+
+**Environment variable overrides:**
+
+| Variable | Config key |
+|---|---|
+| `YASH_DEMO` | `demo` |
+| `YASH_OBS_SERVER` | `obs.websocket.server` |
+| `YASH_OBS_PORT` | `obs.websocket.port` |
+| `YASH_OBS_PASSWORD` | `obs.websocket.password` |
+| `YASH_OBS_RECONNECT_BASE_MS` | `obs.websocket.reconnectBaseMs` |
+| `YASH_OBS_RECONNECT_MAX_MS` | `obs.websocket.reconnectMaxMs` |
+| `YASH_OBS_RECONNECT_MULTIPLIER` | `obs.websocket.reconnectMultiplier` |
+| `YASH_OBS_RECONNECT_MAX_ATTEMPTS` | `obs.websocket.reconnectMaxAttempts` |
+| `YASH_OBS_CONNECT_DELAY_MS` | `obs.websocket.connectDelayMs` |
+| `YASH_PLATFORM_YOUTUBE_STREAMKEY` | `platforms.youtube.streamKey` |
+| `YASH_PLATFORM_TWITCH_STREAMKEY` | `platforms.twitch.streamKey` |
+| `YASH_PLATFORM_KICK_STREAMKEY` | `platforms.kick.streamKey` |
+| `TWITCH_CLIENT_ID` | `platforms.twitch.clientId` |
+| `TWITCH_CLIENT_SECRET` | `platforms.twitch.clientSecret` |
+| `TWITCH_REDIRECT_URI` | `platforms.twitch.redirectUri` |
 
 ### Features
 - OAuth authentication flows for all platforms
+    * Twitch: real OAuth2 Authorization Code flow — visit `GET /api/twitch/auth` to initiate, callback handled at `GET /api/twitch/callback`
+    * YouTube, Kick: mock auth (pending real implementation)
 - Unified chat interface with platform-specific message normalization
 - Stream control (start/stop/update metadata)
-- Webhook/event handling for real-time updates
+- Stream markers / chapter points
+    * `PlatformProvider.createMarker(description?, timestamp?)` — creates a marker on the platform
+    * `PlatformProvider.getMarkers(options?)` — retrieves past markers (filterable by videoId)
+    * `StreamMarker` type: `{ id, createdAt, description, positionInSeconds, platform, videoId?, url? }`
+    * YouTube: in-memory store with chapter description serialisation helper
+    * Twitch: real Helix API (stream must be live); includes position and VOD URL
+    * Kick: returns `null` / `[]` gracefully (not supported by Kick API)
+- Webhook/event handling for real-time updates (Twitch EventSub WebSocket)
 - OBS-studio WebSocket integration
 - Platform selector for targeted messaging
+- Demo mode: all services report as connected/authenticated without real network connections. Enabled via `"demo": true` in `config.json` or `YASH_DEMO=true` env var. Disabled by default. TUI shows a `[DEMO MODE]` label in the status bar; `/api/obs/status` includes `"demo": true`.
+
+### API Routes
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/` | React webview (stream controls + chat) |
+| GET | `/unified` | Unified chat view (all platforms) |
+| GET | `/sidebyside` | Side-by-side chat view |
+| GET | `/api/status` | Platform + stream status for all platforms |
+| GET | `/api/chat/history` | Full chat message history |
+| POST | `/api/chat/send` | Send message: `{ message, platforms? }` |
+| POST | `/api/stream/start` | Start stream: `{ platforms?, metadata? }` |
+| POST | `/api/stream/stop` | Stop stream: `{ platforms? }` |
+| POST | `/api/stream/update` | Update metadata: `{ platforms?, metadata? }` |
+| POST | `/api/stream/marker` | Cross-platform marker: `{ platforms?, description?, timestamp? }` |
+| GET | `/api/twitch/auth` | Redirect to Twitch OAuth consent screen |
+| GET | `/api/twitch/callback` | OAuth callback (exchanges code for tokens) |
+| GET | `/api/twitch/channel` | Read channel title, game, tags from Helix |
+| PATCH | `/api/twitch/channel` | Update channel: `{ title?, game?, tags? }` |
+| POST | `/api/twitch/marker` | Create Twitch stream marker: `{ description? }` |
+| GET | `/api/twitch/markers` | Read Twitch markers: `?videoId=<id>&limit=<n>` |
+| GET | `/api/youtube/markers` | Read YouTube chapters: `{ markers, descriptionBlock }` |
+| GET | `/api/obs/status` | OBS connection status + metrics |
+| GET | `/api/metrics` | JSON metrics snapshot |
+| GET | `/metrics` | Prometheus text format metrics |
+| POST | `/api/admin/keys` | Create admin key |
+| GET | `/api/admin/keys` | List admin keys |
+| POST | `/api/admin/keys/revoke` | Revoke admin key: `{ id }` |
+| POST | `/api/admin/keys/update-roles` | Update key roles |
+| GET | `/api/admin/audit/tail` | Tail audit log: `?lines=<n>` |
+| GET | `/api/admin/audit/verify` | Verify audit log integrity |
 
 ## Project Structure
 ```
 src/
 ├── platforms/
-│   ├── base.ts          # PlatformProvider interface
-│   ├── youtube.ts
-│   ├── twitch.ts
-│   └── kick.ts
+│   ├── base.ts          # PlatformProvider interface + shared types
+│   ├── youtube.ts       # Mock auth; in-memory chapter/marker store
+│   ├── twitch.ts        # Real OAuth2 + Helix + EventSub + Chat (Twurple)
+│   └── kick.ts          # Mock stubs
 ├── services/
 │   ├── auth.service.ts
 │   ├── chat.service.ts
 │   ├── stream.service.ts
 │   └── obs.service.ts
-├── ui/                  # OpenTUI components
+├── ui/                  # React components (Dashboard, StreamControls, ChatDisplay, MessageInput, StatusBar)
 ├── utils/
 ├── index.ts             # Web server entry point
 └── index.tsx            # TUI entry point
 ```
+
+### Key types (`src/platforms/base.ts`)
+
+```typescript
+interface StreamMetadata {
+  title?: string;
+  game?: string;
+  description?: string;
+  scheduleId?: string;
+  tags?: string[];
+}
+
+interface StreamMarker {
+  id: string;
+  createdAt: Date;
+  description: string;
+  positionInSeconds: number;
+  platform: string;
+  videoId?: string;  // VOD ID (Twitch)
+  url?: string;      // Deep-link to marker position in VOD (Twitch)
+}
+
+interface GetMarkersOptions {
+  videoId?: string;
+  limit?: number;
+}
+
+interface PlatformProvider {
+  authenticate(): Promise<AuthResult>;
+  isAuthenticated(): boolean;
+  logout(): Promise<void>;
+  startStream(metadata: StreamMetadata): Promise<void>;
+  stopStream(): Promise<void>;
+  updateStreamMetadata(metadata: StreamMetadata): Promise<void>;
+  getStreamKey(): string;
+  setStreamKey(key: string): void;
+  getStreamStatus(): StreamStatus;
+  sendMessage(message: string): Promise<void>;
+  onMessage(callback: (msg: ChatMessage) => void): () => void;
+  setupWebhooks(config: WebhookConfig): Promise<void>;
+  getPlatformName(): string;
+  getStatus(): PlatformStatus;
+  getViewerCount(): number;
+  createMarker(description?: string, timestamp?: number): Promise<StreamMarker | null>;
+  getMarkers(options?: GetMarkersOptions): Promise<StreamMarker[]>;
+}
+```
+
+### Runtime dependencies
+
+| Package | Purpose |
+|---------|---------|
+| `@opentui/core`, `@opentui/react` | Terminal UI framework |
+| `react`, `react-dom` | React for the web dashboard |
+| `@twurple/auth` | Twitch OAuth2 + token refresh |
+| `@twurple/api` | Twitch Helix API client |
+| `@twurple/chat` | Twitch IRC-over-WebSocket chat |
+| `@twurple/eventsub-ws` | Twitch EventSub WebSocket listener |
 
 ## Integration tests
 - Chats webview with `playwright-cli` skill, record screenshots in [tmp]/web/

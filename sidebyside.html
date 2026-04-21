@@ -6,100 +6,100 @@
   <title>YASH - Side by Side Chat</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      background: #0f0f1a;
-      color: #e0e0e0;
-      font-family: 'Courier New', Courier, monospace;
-      font-size: 14px;
-      height: 100vh;
-      display: flex;
-      flex-direction: column;
-    }
-    header {
-      background: #1a1a2e;
-      border-bottom: 1px solid #2a2a4a;
-      padding: 8px 12px;
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      flex-shrink: 0;
-      flex-wrap: wrap;
-    }
-    header h1 {
-      color: #00c8ff;
-      font-size: 15px;
-      font-weight: bold;
-      margin-right: 4px;
-    }
-    .toggle-btn {
-      background: #2a2a4a;
-      border: 1px solid #3a3a6a;
-      color: #a0a0c0;
-      padding: 4px 10px;
-      border-radius: 4px;
-      cursor: pointer;
-      font-family: inherit;
-      font-size: 13px;
-      transition: background 0.15s, color 0.15s;
-    }
-    .toggle-btn:hover { background: #3a3a5a; color: #e0e0e0; }
-    .toggle-btn.active-youtube { background: #cc0000; border-color: #ff2222; color: #fff; }
-    .toggle-btn.active-twitch  { background: #6441a5; border-color: #8855cc; color: #fff; }
-    .toggle-btn.active-kick    { background: #1a7a00; border-color: #53fc18; color: #53fc18; }
-    #columns {
-      flex: 1;
-      display: flex;
-      overflow: hidden;
-    }
-    .column {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      border-right: 1px solid #2a2a4a;
-      min-width: 0;
-      transition: flex 0.2s;
-    }
-    .column:last-child { border-right: none; }
-    .column.hidden {
-      flex: 0;
-      overflow: hidden;
-      border-right: none;
-    }
-    .col-header {
-      background: #1a1a2e;
-      border-bottom: 1px solid #2a2a4a;
-      padding: 6px 10px;
-      font-weight: bold;
-      font-size: 13px;
-      text-align: center;
-      flex-shrink: 0;
-    }
-    .col-header.youtube { color: #ff4444; }
-    .col-header.twitch  { color: #a970ff; }
-    .col-header.kick    { color: #53fc18; }
-    .col-messages {
-      flex: 1;
-      overflow-y: auto;
-      padding: 6px 8px;
-      display: flex;
-      flex-direction: column;
-      gap: 3px;
-    }
-    .col-messages::-webkit-scrollbar { width: 6px; }
-    .col-messages::-webkit-scrollbar-track { background: #1a1a2e; }
-    .col-messages::-webkit-scrollbar-thumb { background: #3a3a6a; border-radius: 3px; }
-    .msg {
-      line-height: 1.4;
-      word-break: break-word;
-    }
-    .msg .username { color: #00c8ff; margin-right: 4px; }
-    .msg .text { color: #e0e0e0; }
-    .no-msgs {
-      color: #444;
-      font-size: 12px;
-      text-align: center;
-      margin-top: 12px;
-    }
+            body {
+              background: #0f0f1a;
+              color: #e0e0e0;
+              font-family: 'Courier New', Courier, monospace;
+              font-size: 14px;
+              height: 100vh;
+              display: flex;
+              flex-direction: column;
+            }
+            header {
+              background: #1a1a2e;
+              border-bottom: 1px solid #2a2a4a;
+              padding: 8px 12px;
+              display: flex;
+              align-items: center;
+              gap: 12px;
+              flex-shrink: 0;
+              flex-wrap: wrap;
+            }
+            header h1 {
+              color: #00c8ff;
+              font-size: 15px;
+              font-weight: bold;
+              margin-right: 4px;
+            }
+            .toggle-btn {
+              background: #2a2a4a;
+              border: 1px solid #3a3a6a;
+              color: #a0a0c0;
+              padding: 4px 10px;
+              border-radius: 4px;
+              cursor: pointer;
+              font-family: inherit;
+              font-size: 13px;
+              transition: background 0.15s, color 0.15s;
+            }
+            .toggle-btn:hover { background: #3a3a5a; color: #e0e0e0; }
+            .toggle-btn.active-youtube { background: #cc0000; border-color: #ff2222; color: #fff; }
+            .toggle-btn.active-twitch  { background: #6441a5; border-color: #8855cc; color: #fff; }
+            .toggle-btn.active-kick    { background: #1a7a00; border-color: #53fc18; color: #53fc18; }
+            #columns {
+              flex: 1;
+              display: flex;
+              overflow: hidden;
+            }
+            .column {
+              flex: 1;
+              display: flex;
+              flex-direction: column;
+              border-right: 1px solid #2a2a4a;
+              min-width: 0;
+              transition: flex 0.2s;
+            }
+            .column:last-child { border-right: none; }
+            .column.hidden {
+              flex: 0;
+              overflow: hidden;
+              border-right: none;
+            }
+            .col-header {
+              background: #1a1a2e;
+              border-bottom: 1px solid #2a2a4a;
+              padding: 6px 10px;
+              font-weight: bold;
+              font-size: 13px;
+              text-align: center;
+              flex-shrink: 0;
+            }
+            .col-header.youtube { color: #ff4444; }
+            .col-header.twitch  { color: #a970ff; }
+            .col-header.kick    { color: #53fc18; }
+            .col-messages {
+              flex: 1;
+              overflow-y: auto;
+              padding: 6px 8px;
+              display: flex;
+              flex-direction: column;
+              gap: 3px;
+            }
+            .col-messages::-webkit-scrollbar { width: 6px; }
+            .col-messages::-webkit-scrollbar-track { background: #1a1a2e; }
+            .col-messages::-webkit-scrollbar-thumb { background: #3a3a6a; border-radius: 3px; }
+            .msg {
+              line-height: 1.4;
+              word-break: break-word;
+            }
+            .msg .username { color: #00c8ff; margin-right: 4px; }
+            .msg .text { color: #e0e0e0; }
+            .no-msgs {
+              color: #444;
+              font-size: 12px;
+              text-align: center;
+              margin-top: 12px;
+            }
   </style>
 </head>
 <body>
@@ -127,94 +127,94 @@
 
   <script>
     const PLATFORMS = ['youtube', 'twitch', 'kick'];
-    const STORAGE_KEYS = {
-      youtube: 'yash_sbs_youtube',
-      twitch:  'yash_sbs_twitch',
-      kick:    'yash_sbs_kick',
-    };
+            const STORAGE_KEYS = {
+              youtube: 'yash_sbs_youtube',
+              twitch:  'yash_sbs_twitch',
+              kick:    'yash_sbs_kick',
+            };
 
-    // Per-platform state
-    const enabled = {};
-    const knownIds = { youtube: new Set(), twitch: new Set(), kick: new Set() };
-    const atBottom = { youtube: true, twitch: true, kick: true };
+            // Per-platform state
+            const enabled = {};
+            const knownIds = { youtube: new Set(), twitch: new Set(), kick: new Set() };
+            const atBottom = { youtube: true, twitch: true, kick: true };
 
-    function loadEnabled(platform) {
-      const stored = localStorage.getItem(STORAGE_KEYS[platform]);
-      return stored === null ? true : stored === 'true';
-    }
+            function loadEnabled(platform) {
+              const stored = localStorage.getItem(STORAGE_KEYS[platform]);
+              return stored === null ? true : stored === 'true';
+            }
 
-    function applyToggle(platform) {
-      const col = document.getElementById('col-' + platform);
-      const btn = document.getElementById('toggle-' + platform);
-      if (enabled[platform]) {
-        col.classList.remove('hidden');
-        btn.textContent = { youtube: 'YouTube', twitch: 'Twitch', kick: 'Kick' }[platform] + ' ✓';
-        btn.className = 'toggle-btn active-' + platform;
-      } else {
-        col.classList.add('hidden');
-        btn.textContent = { youtube: 'YouTube', twitch: 'Twitch', kick: 'Kick' }[platform] + ' ✗';
-        btn.className = 'toggle-btn';
-      }
-    }
+            function applyToggle(platform) {
+              const col = document.getElementById('col-' + platform);
+              const btn = document.getElementById('toggle-' + platform);
+              if (enabled[platform]) {
+                col.classList.remove('hidden');
+                btn.textContent = { youtube: 'YouTube', twitch: 'Twitch', kick: 'Kick' }[platform] + ' ✓';
+                btn.className = 'toggle-btn active-' + platform;
+              } else {
+                col.classList.add('hidden');
+                btn.textContent = { youtube: 'YouTube', twitch: 'Twitch', kick: 'Kick' }[platform] + ' ✗';
+                btn.className = 'toggle-btn';
+              }
+            }
 
-    // Init toggles
-    for (const p of PLATFORMS) {
-      enabled[p] = loadEnabled(p);
-      applyToggle(p);
+            // Init toggles
+            for (const p of PLATFORMS) {
+              enabled[p] = loadEnabled(p);
+              applyToggle(p);
 
-      document.getElementById('toggle-' + p).addEventListener('click', () => {
-        enabled[p] = !enabled[p];
-        localStorage.setItem(STORAGE_KEYS[p], String(enabled[p]));
-        applyToggle(p);
-      });
+              document.getElementById('toggle-' + p).addEventListener('click', () => {
+                enabled[p] = !enabled[p];
+                localStorage.setItem(STORAGE_KEYS[p], String(enabled[p]));
+                applyToggle(p);
+              });
 
-      document.getElementById('msgs-' + p).addEventListener('scroll', () => {
-        const el = document.getElementById('msgs-' + p);
-        atBottom[p] = el.scrollHeight - el.scrollTop - el.clientHeight < 32;
-      });
-    }
+              document.getElementById('msgs-' + p).addEventListener('scroll', () => {
+                const el = document.getElementById('msgs-' + p);
+                atBottom[p] = el.scrollHeight - el.scrollTop - el.clientHeight < 32;
+              });
+            }
 
-    function escapeHtml(str) {
-      return String(str)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;');
-    }
+            function escapeHtml(str) {
+              return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
+            }
 
-    function appendMessages(msgs) {
-      for (const p of PLATFORMS) {
-        const el = document.getElementById('msgs-' + p);
-        let added = false;
-        for (const msg of msgs) {
-          if (msg.platform !== p) continue;
-          if (knownIds[p].has(msg.id)) continue;
-          knownIds[p].add(msg.id);
-          const div = document.createElement('div');
-          div.className = 'msg';
-          div.innerHTML =
-            `<span class="username">${escapeHtml(msg.username)}:</span>` +
-            `<span class="text">${escapeHtml(msg.message)}</span>`;
-          el.appendChild(div);
-          added = true;
-        }
-        if (added && atBottom[p]) {
-          el.scrollTop = el.scrollHeight;
-        }
-      }
-    }
+            function appendMessages(msgs) {
+              for (const p of PLATFORMS) {
+                const el = document.getElementById('msgs-' + p);
+                let added = false;
+                for (const msg of msgs) {
+                  if (msg.platform !== p) continue;
+                  if (knownIds[p].has(msg.id)) continue;
+                  knownIds[p].add(msg.id);
+                  const div = document.createElement('div');
+                  div.className = 'msg';
+                  div.innerHTML =
+                    `<span class="username">${escapeHtml(msg.username)}:</span>` +
+                    `<span class="text">${escapeHtml(msg.message)}</span>`;
+                  el.appendChild(div);
+                  added = true;
+                }
+                if (added && atBottom[p]) {
+                  el.scrollTop = el.scrollHeight;
+                }
+              }
+            }
 
-    async function fetchHistory() {
-      try {
-        const res = await fetch('/api/chat/history');
-        if (!res.ok) return;
-        const msgs = await res.json();
-        appendMessages(msgs);
-      } catch (_) {}
-    }
+            async function fetchHistory() {
+              try {
+                const res = await fetch('/api/chat/history');
+                if (!res.ok) return;
+                const msgs = await res.json();
+                appendMessages(msgs);
+              } catch (_) {}
+            }
 
-    fetchHistory();
-    setInterval(fetchHistory, 2000);
+            fetchHistory();
+            setInterval(fetchHistory, 2000);
   </script>
 </body>
 </html>

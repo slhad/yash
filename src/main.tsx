@@ -60,6 +60,33 @@ function App() {
   };
 
   const handleSendMessage = async (message: string, targetPlatforms: string[]) => {
+    // Handle /marker command inline instead of sending as a chat message.
+    // Syntax: /marker [description] [| timestamp_seconds]
+    if (message.trim().toLowerCase().startsWith('/marker')) {
+      const rawArgs = message.trim().slice('/marker'.length).trimStart();
+      const pipeIdx = rawArgs.indexOf('|');
+      let description: string | undefined;
+      let timestamp: number | undefined;
+      if (pipeIdx === -1) {
+        description = rawArgs.trim() || undefined;
+      } else {
+        description = rawArgs.slice(0, pipeIdx).trim() || undefined;
+        const tsRaw = rawArgs.slice(pipeIdx + 1).trim();
+        const parsed = parseFloat(tsRaw);
+        if (!Number.isNaN(parsed) && parsed >= 0) timestamp = Math.round(parsed);
+      }
+      await fetch('/api/stream/marker', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          platforms: targetPlatforms.length > 0 ? targetPlatforms : ['youtube', 'twitch', 'kick'],
+          description,
+          timestamp,
+        }),
+      });
+      return;
+    }
+
     await fetch('/api/chat/send', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

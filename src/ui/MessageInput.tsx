@@ -25,7 +25,7 @@ export const MessageInput: React.FC<MessageInputProps> = ({
   sendToAll,
   onToggleSendToAll,
   onSelectPlatforms,
-  placeholder = 'Type a message...',
+  placeholder = 'Type a message… or /marker [description] [| timestamp_s]',
 }) => {
   const [message, setMessage] = useState('');
 

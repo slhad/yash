@@ -125,6 +125,234 @@ Bun.serve({
         });
       },
     },
+    // ------------------------------------------------------------------
+    // Twitch OAuth — GET /api/twitch/auth  →  redirect to Twitch
+    // ------------------------------------------------------------------
+    '/api/twitch/auth': {
+      GET: () => {
+        const url = twitch.getAuthUrl();
+        return new Response(null, {
+          status: 302,
+          headers: { Location: url },
+        });
+      },
+    },
+
+    // ------------------------------------------------------------------
+    // Twitch OAuth — GET /api/twitch/callback?code=...
+    // Twitch redirects here after the user approves the app.
+    // ------------------------------------------------------------------
+    '/api/twitch/callback': {
+      GET: async (req) => {
+        const url = new URL(req.url);
+        const code = url.searchParams.get('code');
+        const error = url.searchParams.get('error');
+
+        if (error) {
+          return new Response(`<html><body><h2>Twitch auth error: ${error}</h2></body></html>`, {
+            status: 400,
+            headers: { 'Content-Type': 'text/html' },
+          });
+        }
+
+        if (!code) {
+          return new Response(JSON.stringify({ error: 'missing code parameter' }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+
+        const result = await twitch.handleOAuthCallback(code);
+        if (result.success) {
+          return new Response(
+            `<html><body><h2>✅ Twitch connected successfully!</h2><p>You can close this tab.</p></body></html>`,
+            { status: 200, headers: { 'Content-Type': 'text/html' } },
+          );
+        }
+
+        return new Response(
+          `<html><body><h2>❌ Twitch auth failed</h2><pre>${result.error}</pre></body></html>`,
+          { status: 400, headers: { 'Content-Type': 'text/html' } },
+        );
+      },
+    },
+
+    // ------------------------------------------------------------------
+    // Twitch stream marker — POST /api/twitch/marker
+    // Body: { description?: string }   (max 140 chars; timestamp ignored)
+    // Returns the created StreamMarker or { marker: null } if not live.
+    // ------------------------------------------------------------------
+    '/api/twitch/marker': {
+      POST: async (req) => {
+        if (!twitch.isAuthenticated()) {
+          return new Response(JSON.stringify({ error: 'not authenticated' }), {
+            status: 401,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        const body = await req.json().catch(() => ({}));
+        const description: string | undefined = body?.description;
+        try {
+          const marker = await twitch.createMarker(description);
+          return new Response(JSON.stringify({ marker }), {
+            headers: { 'Content-Type': 'application/json' },
+          });
+        } catch (err) {
+          return new Response(JSON.stringify({ error: String(err) }), {
+            status: 500,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+      },
+    },
+
+    // ------------------------------------------------------------------
+    // YouTube chapter markers — GET /api/youtube/markers
+    // Returns in-memory chapter list + the formatted description block.
+    // ------------------------------------------------------------------
+    '/api/youtube/markers': {
+      GET: () => {
+        const markers = (youtube as any).chapterMarkers ?? [];
+        const block = typeof (youtube as any).getChapterDescriptionBlock === 'function'
+          ? (youtube as any).getChapterDescriptionBlock()
+          : '';
+        return new Response(JSON.stringify({ markers, descriptionBlock: block }), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      },
+    },
+
+    // ------------------------------------------------------------------
+    // Cross-platform marker — POST /api/stream/marker
+    // Body: { platforms?: string[], description?: string, timestamp?: number }
+    //   timestamp — seconds from stream start (used by YouTube for chapters;
+    //               ignored by Twitch which sets position server-side)
+    // Fires createMarker() on each requested platform concurrently.
+    // ------------------------------------------------------------------
+    '/api/stream/marker': {
+      POST: async (req) => {
+        const body = await req.json().catch(() => ({}));
+        const targetPlatforms: string[] = body?.platforms ?? ['youtube', 'twitch', 'kick'];
+        const description: string | undefined = body?.description;
+        const timestamp: number | undefined =
+          typeof body?.timestamp === 'number' ? body.timestamp : undefined;
+
+        const providerMap: Record<string, typeof twitch> = { youtube, twitch, kick };
+        const results = await Promise.allSettled(
+          targetPlatforms.map(async (p) => {
+            const provider = providerMap[p];
+            if (!provider) return { platform: p, marker: null, error: 'unknown platform' };
+            if (!provider.isAuthenticated()) return { platform: p, marker: null, error: 'not authenticated' };
+            const marker = await provider.createMarker(description, timestamp);
+            return { platform: p, marker };
+          }),
+        );
+
+        const payload = results.map((r, i) => {
+          if (r.status === 'fulfilled') return r.value;
+          return { platform: targetPlatforms[i], marker: null, error: String(r.reason) };
+        });
+
+        return new Response(JSON.stringify({ markers: payload }), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      },
+    },
+
+    // ------------------------------------------------------------------
+    // Twitch stream markers — GET /api/twitch/markers
+    // Query params: ?videoId=<id>&limit=<n>
+    // Requires user:read:broadcast scope on the token.
+    // ------------------------------------------------------------------
+    '/api/twitch/markers': {
+      GET: async (req) => {
+        if (!twitch.isAuthenticated()) {
+          return new Response(JSON.stringify({ error: 'not authenticated' }), {
+            status: 401,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        const url = new URL(req.url);
+        const videoId = url.searchParams.get('videoId') ?? undefined;
+        const limitRaw = url.searchParams.get('limit');
+        const limit = limitRaw ? Math.min(Math.max(1, Number.parseInt(limitRaw, 10)), 100) : 20;
+        try {
+          const markers = await twitch.getMarkers({ videoId, limit });
+          return new Response(JSON.stringify({ markers }), {
+            headers: { 'Content-Type': 'application/json' },
+          });
+        } catch (err) {
+          return new Response(JSON.stringify({ error: String(err) }), {
+            status: 500,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+      },
+    },
+
+    // ------------------------------------------------------------------
+    // Twitch channel info — GET /api/twitch/channel
+    // Returns current title, game, tags from Helix
+    // ------------------------------------------------------------------
+    '/api/twitch/channel': {
+      GET: async () => {
+        if (!twitch.isAuthenticated()) {
+          return new Response(JSON.stringify({ error: 'not authenticated' }), {
+            status: 401,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        // Access internal apiClient via cast (provider exposes it for read ops)
+        const provider = twitch as any;
+        if (!provider.apiClient || !provider.userId) {
+          return new Response(JSON.stringify({ error: 'api client not ready' }), {
+            status: 503,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        try {
+          const channel = await provider.apiClient.channels.getChannelInfoById(provider.userId);
+          return new Response(
+            JSON.stringify({
+              title: channel?.title,
+              game: channel?.gameName,
+              gameId: channel?.gameId,
+              tags: channel?.tags ?? [],
+              language: channel?.language,
+              delay: channel?.delay,
+            }),
+            { headers: { 'Content-Type': 'application/json' } },
+          );
+        } catch (err) {
+          return new Response(JSON.stringify({ error: String(err) }), {
+            status: 500,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+      },
+      // PATCH /api/twitch/channel  { title?, game?, tags? }
+      PATCH: async (req) => {
+        if (!twitch.isAuthenticated()) {
+          return new Response(JSON.stringify({ error: 'not authenticated' }), {
+            status: 401,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        try {
+          const body = await req.json();
+          await twitch.updateStreamMetadata(body);
+          return new Response(JSON.stringify({ success: true }), {
+            headers: { 'Content-Type': 'application/json' },
+          });
+        } catch (err) {
+          return new Response(JSON.stringify({ error: String(err) }), {
+            status: 500,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+      },
+    },
+
     '/api/obs/status': {
       GET: () => {
         return new Response(
