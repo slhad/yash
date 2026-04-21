@@ -100,6 +100,86 @@
               text-align: center;
               margin-top: 12px;
             }
+            #msgbox {
+              background: #1a1a2e;
+              border-top: 1px solid #2a2a4a;
+              padding: 8px 12px;
+              display: flex;
+              gap: 6px;
+              align-items: flex-end;
+              flex-shrink: 0;
+            }
+            #msgbox.position-top {
+              order: -1;
+              border-top: none;
+              border-bottom: 1px solid #2a2a4a;
+            }
+            #platform-select {
+              background: #2a2a4a;
+              border: 1px solid #3a3a6a;
+              color: #e0e0e0;
+              padding: 6px 8px;
+              border-radius: 4px;
+              font-family: inherit;
+              font-size: 13px;
+              flex-shrink: 0;
+            }
+            #message-input {
+              flex: 1;
+              background: #2a2a4a;
+              border: 1px solid #3a3a6a;
+              color: #e0e0e0;
+              padding: 6px 8px;
+              border-radius: 4px;
+              font-family: inherit;
+              font-size: 13px;
+              resize: none;
+              min-height: 34px;
+              max-height: 80px;
+            }
+            #message-input:focus, #platform-select:focus {
+              outline: none;
+              border-color: #00c8ff;
+            }
+            #send-btn {
+              background: #00c8ff;
+              border: none;
+              color: #0f0f1a;
+              padding: 6px 14px;
+              border-radius: 4px;
+              font-family: inherit;
+              font-size: 13px;
+              font-weight: bold;
+              cursor: pointer;
+              flex-shrink: 0;
+              height: 34px;
+            }
+            #send-btn:hover { background: #00a8df; }
+            #send-btn:disabled { background: #3a3a5a; color: #666; cursor: not-allowed; }
+            #position-btn {
+              background: #2a2a4a;
+              border: 1px solid #3a3a6a;
+              color: #a0a0c0;
+              padding: 4px 10px;
+              border-radius: 4px;
+              cursor: pointer;
+              font-family: inherit;
+              font-size: 13px;
+            }
+            #position-btn:hover { background: #3a3a5a; color: #e0e0e0; }
+            #system-feed {
+              background: #0f0f1a;
+              border-top: 1px solid #2a2a4a;
+              padding: 4px 12px;
+              font-size: 12px;
+              color: #888;
+              max-height: 80px;
+              overflow-y: auto;
+              flex-shrink: 0;
+              display: none;
+            }
+            #system-feed.visible { display: block; }
+            #system-feed .sys-line { padding: 1px 0; }
   </style>
 </head>
 <body>
@@ -108,7 +188,10 @@
     <button class="toggle-btn" id="toggle-youtube" data-platform="youtube">YouTube ✓</button>
     <button class="toggle-btn" id="toggle-twitch"  data-platform="twitch">Twitch ✓</button>
     <button class="toggle-btn" id="toggle-kick"    data-platform="kick">Kick ✓</button>
+    <button id="position-btn" title="Toggle message box position" style="margin-left:auto">msgbox: bottom ▼</button>
   </header>
+
+  <div id="system-feed"></div>
 
   <div id="columns">
     <div class="column" id="col-youtube">
@@ -125,7 +208,20 @@
     </div>
   </div>
 
-  <script>
+  <div id="msgbox">
+    <select id="platform-select" title="Target platform">
+      <option value="all">all</option>
+      <option value="youtube">youtube</option>
+      <option value="twitch">twitch</option>
+      <option value="kick">kick</option>
+    </select>
+    <textarea id="message-input" rows="1" placeholder="Type a message or /help for commands…"></textarea>
+    <button id="send-btn">Send</button>
+  </div>
+
+  <script type="module">
+    import { handleWebCommand } from '/api/js/commands.js';
+
     const PLATFORMS = ['youtube', 'twitch', 'kick'];
             const STORAGE_KEYS = {
               youtube: 'yash_sbs_youtube',
@@ -215,6 +311,101 @@
 
             fetchHistory();
             setInterval(fetchHistory, 2000);
+
+            // ── Message box ──────────────────────────────────────────────
+            const STORAGE_KEY_POS = 'yash_sbs_msgbox_position';
+            const POSITIONS = ['bottom', 'top', 'hide'];
+
+            const msgboxEl = document.getElementById('msgbox');
+            const positionBtn = document.getElementById('position-btn');
+            const platformSelect = document.getElementById('platform-select');
+            const messageInput = document.getElementById('message-input');
+            const sendBtn = document.getElementById('send-btn');
+            const systemFeedEl = document.getElementById('system-feed');
+
+            let currentPosition = localStorage.getItem(STORAGE_KEY_POS) || 'bottom';
+
+            function applyPosition(pos) {
+              currentPosition = pos;
+              localStorage.setItem(STORAGE_KEY_POS, pos);
+              msgboxEl.classList.remove('position-top');
+              if (pos === 'hide') {
+                msgboxEl.style.display = 'none';
+                positionBtn.textContent = 'msgbox: hide ●';
+              } else if (pos === 'top') {
+                msgboxEl.style.display = 'flex';
+                msgboxEl.classList.add('position-top');
+                positionBtn.textContent = 'msgbox: top ▲';
+              } else {
+                msgboxEl.style.display = 'flex';
+                positionBtn.textContent = 'msgbox: bottom ▼';
+              }
+            }
+
+            positionBtn.addEventListener('click', () => {
+              const idx = POSITIONS.indexOf(currentPosition);
+              applyPosition(POSITIONS[(idx + 1) % POSITIONS.length]);
+            });
+
+            applyPosition(currentPosition);
+
+            // Auto-resize textarea
+            messageInput.addEventListener('input', () => {
+              messageInput.style.height = 'auto';
+              messageInput.style.height = Math.min(messageInput.scrollHeight, 80) + 'px';
+            });
+
+            // System feedback strip (UI-only, stays local)
+            function appendSys(label, text) {
+              systemFeedEl.classList.add('visible');
+              const line = document.createElement('div');
+              line.className = 'sys-line';
+              line.textContent = `[${label}] ${text}`;
+              systemFeedEl.appendChild(line);
+              systemFeedEl.scrollTop = systemFeedEl.scrollHeight;
+            }
+
+            async function sendMessage() {
+              const text = messageInput.value.trim();
+              if (!text) return;
+
+              const platform = platformSelect.value;
+              const platforms = platform === 'all' ? [] : [platform];
+
+              sendBtn.disabled = true;
+
+              // Delegate / commands to the shared handler from /api/js/commands.js
+              const handled = await handleWebCommand(text, { platforms, feedback: appendSys });
+              if (handled) {
+                messageInput.value = '';
+                messageInput.style.height = 'auto';
+                sendBtn.disabled = false;
+                messageInput.focus();
+                return;
+              }
+
+              try {
+                const res = await fetch('/api/chat/send', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ message: text, platforms }),
+                });
+                if (res.ok) {
+                  messageInput.value = '';
+                  messageInput.style.height = 'auto';
+                }
+              } catch (_) {}
+              sendBtn.disabled = false;
+              messageInput.focus();
+            }
+
+            sendBtn.addEventListener('click', sendMessage);
+            messageInput.addEventListener('keydown', (e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+              }
+            });
   </script>
 </body>
 </html>

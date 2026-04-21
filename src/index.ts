@@ -13,6 +13,28 @@ import { authorizeAdmin } from './utils/adminAuth';
 import { isDemoMode } from './utils/config';
 import { defaultLogger } from './utils/logger';
 import { apiMetricsHandler, prometheusMetricsHandler } from './utils/metricsHandlers';
+import SettingsStore from './utils/settings';
+
+const settingsStore = new SettingsStore();
+
+// Lazy-built bundle of the shared WebUI command module, cached in memory.
+// Built once on first browser request via Bun.build(), then served from cache.
+let commandsJsCache: string | null = null;
+async function getCommandsJs(): Promise<string> {
+  if (!commandsJsCache) {
+    const result = await Bun.build({
+      entrypoints: ['./src/utils/webCommands.ts'],
+      format: 'esm',
+      target: 'browser',
+      minify: false,
+    });
+    if (!result.success || result.outputs.length === 0) {
+      throw new Error(`Bun.build failed: ${result.logs.map((l) => l.message).join(', ')}`);
+    }
+    commandsJsCache = await result.outputs[0].text();
+  }
+  return commandsJsCache;
+}
 
 export const youtube = new YouTubeProvider();
 export const twitch = new TwitchProvider();
@@ -213,9 +235,10 @@ Bun.serve({
     '/api/youtube/markers': {
       GET: () => {
         const markers = (youtube as any).chapterMarkers ?? [];
-        const block = typeof (youtube as any).getChapterDescriptionBlock === 'function'
-          ? (youtube as any).getChapterDescriptionBlock()
-          : '';
+        const block =
+          typeof (youtube as any).getChapterDescriptionBlock === 'function'
+            ? (youtube as any).getChapterDescriptionBlock()
+            : '';
         return new Response(JSON.stringify({ markers, descriptionBlock: block }), {
           headers: { 'Content-Type': 'application/json' },
         });
@@ -242,7 +265,8 @@ Bun.serve({
           targetPlatforms.map(async (p) => {
             const provider = providerMap[p];
             if (!provider) return { platform: p, marker: null, error: 'unknown platform' };
-            if (!provider.isAuthenticated()) return { platform: p, marker: null, error: 'not authenticated' };
+            if (!provider.isAuthenticated())
+              return { platform: p, marker: null, error: 'not authenticated' };
             const marker = await provider.createMarker(description, timestamp);
             return { platform: p, marker };
           }),
@@ -348,6 +372,171 @@ Bun.serve({
           return new Response(JSON.stringify({ error: String(err) }), {
             status: 500,
             headers: { 'Content-Type': 'application/json' },
+          });
+        }
+      },
+    },
+
+    // ------------------------------------------------------------------
+    // Settings — GET /api/settings?key=<k>  or  GET /api/settings (all)
+    //            POST /api/settings  { key, value }
+    // Allows WebUI to read/write persistent settings (same store as TUI).
+    // ------------------------------------------------------------------
+    '/api/settings': {
+      GET: async (req) => {
+        const url = new URL(req.url);
+        const key = url.searchParams.get('key');
+        if (key) {
+          const val = settingsStore.get(key, null);
+          return new Response(JSON.stringify({ key, value: val }), {
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        // Return all known setting keys
+        const knownKeys = [
+          'title.visible',
+          'logs.visible',
+          'logs.height',
+          'logs.tail',
+          'viewers.visible',
+          'viewers.mode',
+          'messages.position',
+          'events.visible',
+          'events.tail',
+          'events.width',
+        ];
+        const all: Record<string, unknown> = {};
+        for (const k of knownKeys) {
+          all[k] = settingsStore.get(k, null);
+        }
+        return new Response(JSON.stringify(all), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      },
+      POST: async (req) => {
+        const body = await req.json().catch(() => ({}));
+        const { key, value } = body as { key?: string; value?: unknown };
+        if (!key) {
+          return new Response(JSON.stringify({ error: 'key required' }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        await settingsStore.set(key, value);
+        return new Response(JSON.stringify({ success: true, key, value }), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      },
+    },
+
+    // ------------------------------------------------------------------
+    // Connect — POST /api/connect/:platform
+    // Triggers platform authentication from the WebUI.
+    // For Twitch, redirects the caller to the OAuth consent screen.
+    // For YouTube/Kick, calls authenticate() and returns the result.
+    // ------------------------------------------------------------------
+    '/api/connect/twitch': {
+      POST: () => {
+        const url = twitch.getAuthUrl();
+        return new Response(JSON.stringify({ redirect: url }), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      },
+    },
+    '/api/connect/youtube': {
+      POST: async () => {
+        try {
+          const res = await youtube.authenticate();
+          return new Response(JSON.stringify({ success: res?.success ?? false }), {
+            headers: { 'Content-Type': 'application/json' },
+          });
+        } catch (err) {
+          return new Response(JSON.stringify({ success: false, error: String(err) }), {
+            status: 500,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+      },
+    },
+    '/api/connect/kick': {
+      POST: async () => {
+        try {
+          const res = await kick.authenticate();
+          return new Response(JSON.stringify({ success: res?.success ?? false }), {
+            headers: { 'Content-Type': 'application/json' },
+          });
+        } catch (err) {
+          return new Response(JSON.stringify({ success: false, error: String(err) }), {
+            status: 500,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+      },
+    },
+
+    // ------------------------------------------------------------------
+    // Help — GET /api/help
+    // Returns the list of all available / commands for WebUI consumption.
+    // ------------------------------------------------------------------
+    '/api/help': {
+      GET: () => {
+        return new Response(
+          JSON.stringify({
+            commands: [
+              {
+                command: '/help',
+                description: 'Show available commands',
+                example: '/help',
+              },
+              {
+                command: '/msg',
+                description: 'Send a message to a specific platform or all',
+                example: '/msg all Hello world',
+                usage: '/msg <all|youtube|twitch|kick> <text>',
+              },
+              {
+                command: '/marker',
+                description: 'Place a stream marker on all platforms',
+                example: '/marker Intro | 0',
+                usage: '/marker [description] [| timestamp_s]',
+              },
+              {
+                command: '/connect',
+                description: 'Authenticate a platform',
+                example: '/connect twitch',
+                usage: '/connect <youtube|twitch|kick>',
+              },
+              {
+                command: '/settings',
+                description: 'Get or set a UI setting',
+                example: '/settings set title.visible true',
+                usage: '/settings get <key> | /settings set <key> <value>',
+              },
+            ],
+          }),
+          { headers: { 'Content-Type': 'application/json' } },
+        );
+      },
+    },
+
+    // ------------------------------------------------------------------
+    // Shared WebUI command bundle — GET /api/js/commands.js
+    // Lazy-builds src/utils/webCommands.ts to an ESM bundle on first request
+    // and caches the result in memory. Consumed by unified.html and
+    // sidebyside.html as `<script type="module">` imports.
+    // ------------------------------------------------------------------
+    '/api/js/commands.js': {
+      GET: async () => {
+        try {
+          const js = await getCommandsJs();
+          return new Response(js, {
+            headers: { 'Content-Type': 'application/javascript' },
+          });
+        } catch (err) {
+          defaultLogger.error('Failed to build commands.js', err);
+          return new Response(`console.error("commands.js build failed: ${String(err)}");`, {
+            status: 500,
+            headers: { 'Content-Type': 'application/javascript' },
           });
         }
       },

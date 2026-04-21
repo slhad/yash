@@ -1,6 +1,7 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Dashboard } from './ui/Dashboard';
+import { handleWebCommand } from './utils/webCommands';
 
 const platforms = ['youtube', 'twitch', 'kick'];
 
@@ -59,39 +60,17 @@ function App() {
     });
   };
 
-  const handleSendMessage = async (message: string, targetPlatforms: string[]) => {
-    // Handle /marker command inline instead of sending as a chat message.
-    // Syntax: /marker [description] [| timestamp_seconds]
-    if (message.trim().toLowerCase().startsWith('/marker')) {
-      const rawArgs = message.trim().slice('/marker'.length).trimStart();
-      const pipeIdx = rawArgs.indexOf('|');
-      let description: string | undefined;
-      let timestamp: number | undefined;
-      if (pipeIdx === -1) {
-        description = rawArgs.trim() || undefined;
-      } else {
-        description = rawArgs.slice(0, pipeIdx).trim() || undefined;
-        const tsRaw = rawArgs.slice(pipeIdx + 1).trim();
-        const parsed = parseFloat(tsRaw);
-        if (!Number.isNaN(parsed) && parsed >= 0) timestamp = Math.round(parsed);
-      }
-      await fetch('/api/stream/marker', {
+  const handleSendMessage = async (message: string, targetPlatforms: string[]): Promise<void> => {
+    const trimmed = message.trim();
+    // Delegate / commands to the shared handler; send plain messages as chat.
+    const handled = await handleWebCommand(trimmed, { platforms: targetPlatforms });
+    if (!handled) {
+      await fetch('/api/chat/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          platforms: targetPlatforms.length > 0 ? targetPlatforms : ['youtube', 'twitch', 'kick'],
-          description,
-          timestamp,
-        }),
+        body: JSON.stringify({ message: trimmed, platforms: targetPlatforms }),
       });
-      return;
     }
-
-    await fetch('/api/chat/send', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message, platforms: targetPlatforms }),
-    });
   };
 
   const getPlatformStatus = useCallback(

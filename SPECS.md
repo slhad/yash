@@ -18,13 +18,15 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
         * Element : Title (YASH heading)
             * visible: true/false (default: false, toggle with `/settings set title.visible true`)
     * Command /connect [youtube|twitch|kick] to launch connection to platform with auth+save secrets in config
-    * Command /exit - exits the application cleanly
+    * Command /exit - exits the application cleanly (TUI only)
     * Command /help - lists all available commands
+    * Command /logs [clear|tail <n>|visible <true|false>] - manage log display (TUI only)
     * Command /msg <all|youtube|twitch|kick> <text> - sends a message to the specified platform(s)
     * Command /marker [description] [| timestamp_s] - places a stream marker on all platforms
         * Optional description (chapter label, max 140 chars on Twitch)
         * Optional pipe-delimited timestamp in seconds from stream start (used by YouTube for chapter generation; ignored by Twitch which sets position server-side; Kick does not support markers)
         * Examples: `/marker Intro | 0`, `/marker Q&A | 3723`, `/marker` (unnamed, no timestamp)
+    * Command /settings [get <key>|set <key> <value>] - get or set UI settings
     * Message box to send message to [all|youtube|twitch|kick] platform and receive command "/" (without sending to platforms)
     * TUI Layout
         * Single-line status bar showing all platforms + OBS connection status + total viewer count on one horizontal row
@@ -39,9 +41,18 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
         * Tags (youtube,twitch,kick)
         * Subject/Category/Game (youtube,twitch,kick)
     * Route /unified to show unified view of all chats
-        * Message box supports `/marker [description] [| timestamp_s]` command (same syntax as TUI)
+        * Message box supports all applicable / commands: `/help`, `/msg`, `/marker`, `/connect`, `/settings`
     * Route /sidebyside to show view of chats side by side with config options to enable any platform (saved in browser)
+        * Message box supports all applicable / commands: `/help`, `/msg`, `/marker`, `/connect`, `/settings`
     * All chats view must have a message box to send messages like TUI, display top/bottom/hide (saved in browser individually)
+    * WebUI commands available in all chat message boxes (`/`, `/unified`, `/sidebyside`):
+        * `/help` — list available commands (fetched from `/api/help`)
+        * `/msg <all|youtube|twitch|kick> <text>` — send targeted platform message
+        * `/marker [description] [| timestamp_s]` — create stream marker on all (or selected) platforms
+        * `/connect <youtube|twitch|kick>` — authenticate a platform (Twitch redirects to OAuth; YouTube/Kick use mock auth)
+        * `/settings get <key>` — read a persistent setting via `/api/settings`
+        * `/settings set <key> <value>` — write a persistent setting via `/api/settings`
+    * TUI-only commands (not available in WebUI): `/exit`, `/logs`
 
 ## Out of scope (do not touch)
 - Contributing
@@ -172,6 +183,13 @@ Configuration is stored in `[root]/config.json`. Environment variables take prec
 | POST | `/api/stream/stop` | Stop stream: `{ platforms? }` |
 | POST | `/api/stream/update` | Update metadata: `{ platforms?, metadata? }` |
 | POST | `/api/stream/marker` | Cross-platform marker: `{ platforms?, description?, timestamp? }` |
+| GET | `/api/help` | List all available / commands (for WebUI consumption) |
+| GET | `/api/settings` | Read all settings or `?key=<k>` for a single key |
+| POST | `/api/settings` | Write a setting: `{ key, value }` |
+| POST | `/api/connect/youtube` | Trigger YouTube authentication |
+| POST | `/api/connect/twitch` | Returns Twitch OAuth redirect URL: `{ redirect }` |
+| POST | `/api/connect/kick` | Trigger Kick authentication |
+| GET | `/api/js/commands.js` | Shared WebUI command module (ESM bundle of `src/utils/webCommands.ts`) |
 | GET | `/api/twitch/auth` | Redirect to Twitch OAuth consent screen |
 | GET | `/api/twitch/callback` | OAuth callback (exchanges code for tokens) |
 | GET | `/api/twitch/channel` | Read channel title, game, tags from Helix |
@@ -204,6 +222,8 @@ src/
 │   └── obs.service.ts
 ├── ui/                  # React components (Dashboard, StreamControls, ChatDisplay, MessageInput, StatusBar)
 ├── utils/
+│   ├── webCommands.ts   # Shared WebUI command module (consumed by main.tsx + served as /api/js/commands.js)
+│   └── settings.ts      # Persistent settings store
 ├── index.ts             # Web server entry point
 └── index.tsx            # TUI entry point
 ```

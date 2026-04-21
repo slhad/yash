@@ -67,7 +67,7 @@ const REQUIRED_SCOPES = [
   'channel:manage:broadcast', // update title / game / tags; create stream markers
   'channel:read:stream_key',
   'moderator:read:followers',
-  'user:read:broadcast',      // read stream markers
+  'user:read:broadcast', // read stream markers
   'user:read:email',
 ];
 
@@ -509,22 +509,21 @@ export class TwitchProvider implements PlatformProvider {
         );
         rawMarkers = result.data;
       } else {
-        const result = await this.apiClient.streams.getStreamMarkersForUser(
-          this.userId,
-          { limit },
-        );
+        const result = await this.apiClient.streams.getStreamMarkersForUser(this.userId, { limit });
         rawMarkers = result.data;
       }
 
-      return rawMarkers.map((m): StreamMarker => ({
-        id: m.id,
-        createdAt: m.creationDate,
-        description: m.description,
-        positionInSeconds: m.positionInSeconds,
-        platform: 'twitch',
-        videoId: m.videoId,
-        url: m.url,
-      }));
+      return rawMarkers.map(
+        (m): StreamMarker => ({
+          id: m.id,
+          createdAt: m.creationDate,
+          description: m.description,
+          positionInSeconds: m.positionInSeconds,
+          platform: 'twitch',
+          videoId: m.videoId,
+          url: m.url,
+        }),
+      );
     } catch (err) {
       this.lastError = err instanceof Error ? err.message : String(err);
       defaultLogger.error('[Twitch] getMarkers error:', err);

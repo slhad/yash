@@ -141,11 +141,13 @@
       <option value="twitch">twitch</option>
       <option value="kick">kick</option>
     </select>
-    <textarea id="message-input" rows="1" placeholder="Type a message… or /marker [desc] [| secs]"></textarea>
+    <textarea id="message-input" rows="1" placeholder="Type a message or /help for commands…"></textarea>
     <button id="send-btn">Send</button>
   </div>
 
-  <script>
+  <script type="module">
+    import { handleWebCommand } from '/api/js/commands.js';
+
     const STORAGE_KEY = 'yash_msgbox_position';
             const POSITIONS = ['bottom', 'top', 'hide'];
 
@@ -241,21 +243,13 @@
             fetchHistory();
             setInterval(fetchHistory, 2000);
 
-            // Parse /marker command: /marker [description] [| timestamp_s]
-            function parseMarkerCommand(text) {
-              const rawArgs = text.slice('/marker'.length).trimStart();
-              const pipeIdx = rawArgs.indexOf('|');
-              let description;
-              let timestamp;
-              if (pipeIdx === -1) {
-                description = rawArgs.trim() || undefined;
-              } else {
-                description = rawArgs.slice(0, pipeIdx).trim() || undefined;
-                const tsRaw = rawArgs.slice(pipeIdx + 1).trim();
-                const parsed = parseFloat(tsRaw);
-                if (!isNaN(parsed) && parsed >= 0) timestamp = Math.round(parsed);
-              }
-              return { description, timestamp };
+            // Append a system feedback line to the message feed (UI-only, stays local)
+            function appendSystem(label, text) {
+              const div = document.createElement('div');
+              div.className = 'msg';
+              div.innerHTML = `<span class="platform-tag tag-unknown">${escapeHtml(label)}</span><span class="text">${escapeHtml(text)}</span>`;
+              messagesEl.appendChild(div);
+              if (isAtBottom) messagesEl.scrollTop = messagesEl.scrollHeight;
             }
 
             async function sendMessage() {
@@ -265,41 +259,18 @@
               const platform = platformSelect.value;
               const platforms = platform === 'all' ? [] : [platform];
 
-              // Handle /marker command — route to the marker API instead of chat
-              if (text.toLowerCase().startsWith('/marker')) {
-                sendBtn.disabled = true;
-                try {
-                  const { description, timestamp } = parseMarkerCommand(text);
-                  const res = await fetch('/api/stream/marker', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      platforms: platforms.length > 0 ? platforms : ['youtube', 'twitch', 'kick'],
-                      description,
-                      timestamp,
-                    }),
-                  });
-                  if (res.ok) {
-                    const data = await res.json();
-                    // Show a brief system message in the feed
-                    const summary = data.markers
-                      .map(m => `${m.platform}: ${m.marker ? `✓ pos=${m.marker.positionInSeconds}s` : (m.error || 'no marker')}`)
-                      .join(' | ');
-                    const div = document.createElement('div');
-                    div.className = 'msg';
-                    div.innerHTML = `<span class="platform-tag tag-unknown">marker</span><span class="text">${escapeHtml(summary)}</span>`;
-                    messagesEl.appendChild(div);
-                    if (isAtBottom) messagesEl.scrollTop = messagesEl.scrollHeight;
-                    messageInput.value = '';
-                    messageInput.style.height = 'auto';
-                  }
-                } catch (_) {}
+              sendBtn.disabled = true;
+
+              // Delegate / commands to the shared handler from /api/js/commands.js
+              const handled = await handleWebCommand(text, { platforms, feedback: appendSystem });
+              if (handled) {
+                messageInput.value = '';
+                messageInput.style.height = 'auto';
                 sendBtn.disabled = false;
                 messageInput.focus();
                 return;
               }
 
-              sendBtn.disabled = true;
               try {
                 const res = await fetch('/api/chat/send', {
                   method: 'POST',

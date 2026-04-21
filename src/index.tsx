@@ -21,6 +21,8 @@ import { isDemoMode } from './utils/config';
 import logCollector from './utils/logCollector';
 import { defaultLogger } from './utils/logger';
 import SettingsStore from './utils/settings';
+import { getAutocomplete } from './utils/tuiCommands';
+import { parseMarkerArgs, parseSettingsValue } from './utils/webCommands';
 
 const youtube = new YouTubeProvider();
 const twitch = new TwitchProvider();
@@ -65,25 +67,6 @@ function clearScrollBox(scroll: ScrollBoxRenderable): void {
   for (const child of scroll.getChildren()) {
     scroll.remove(child.id);
   }
-}
-
-// ─── Autocomplete ──────────────────────────────────────────────────────────
-
-const COMMANDS = ['/connect', '/exit', '/help', '/logs', '/marker', '/msg', '/settings'];
-
-function getAutocomplete(input: string): { completion: string | null; hints: string[] } {
-  if (!input.startsWith('/') || input.length === 0) return { completion: null, hints: [] };
-  const lower = input.toLowerCase();
-  const matches = COMMANDS.filter((c) => c.startsWith(lower));
-  if (matches.length === 0) return { completion: null, hints: [] };
-  if (matches.length === 1) return { completion: matches[0], hints: matches };
-  // Find longest common prefix among matches
-  let prefix = matches[0];
-  for (const m of matches) {
-    while (!m.startsWith(prefix)) prefix = prefix.slice(0, -1);
-    if (prefix === '/') break;
-  }
-  return { completion: prefix.length > lower.length ? prefix : null, hints: matches };
 }
 
 // ─── Persistent UI node references ──────────────────────────────────────────
@@ -490,36 +473,20 @@ async function handleCommand(trimmed: string): Promise<void> {
     }
   } else if (cmd === '/marker') {
     // Syntax:  /marker [description] [| timestamp_seconds]
-    //
-    // The optional pipe-delimited second segment carries a numeric timestamp
-    // (seconds from stream start) used by YouTube for chapter generation.
-    // Twitch ignores the timestamp — position is set server-side.
-    //
-    // Examples:
-    //   /marker                       → unnamed marker, no timestamp
-    //   /marker Intro                 → description "Intro", no timestamp
-    //   /marker Q&A | 3723            → description "Q&A", timestamp 3723 s
-    //   /marker | 120                 → no description, timestamp 120 s
-    const rawArgs = parts.slice(1).join(' ');
+    // Parsing delegated to the shared parseMarkerArgs util (src/utils/webCommands.ts).
+    const rawParts = parts.slice(1);
+    // TUI adds extra validation: reject a non-numeric pipe segment with a clear error.
+    const rawArgs = rawParts.join(' ');
     const pipeIdx = rawArgs.indexOf('|');
-
-    let description: string | undefined;
-    let timestamp: number | undefined;
-
-    if (pipeIdx === -1) {
-      description = rawArgs.trim() || undefined;
-    } else {
-      description = rawArgs.slice(0, pipeIdx).trim() || undefined;
+    if (pipeIdx !== -1) {
       const tsRaw = rawArgs.slice(pipeIdx + 1).trim();
-      const parsed = parseFloat(tsRaw);
-      if (!Number.isNaN(parsed) && parsed >= 0) {
-        timestamp = Math.round(parsed);
-      } else if (tsRaw) {
+      if (tsRaw && Number.isNaN(Number.parseFloat(tsRaw))) {
         lastMessages.push(`[marker] Invalid timestamp "${tsRaw}" — must be a non-negative number`);
         updateUI(lastMessages);
         return;
       }
     }
+    const { description, timestamp } = parseMarkerArgs(rawParts);
 
     lastMessages.push(
       `[marker] Creating on all platforms${description ? ` — "${description}"` : ''}${timestamp !== undefined ? ` @ ${timestamp}s` : ''}…`,
@@ -538,7 +505,9 @@ async function handleCommand(trimmed: string): Promise<void> {
         const label = labels[i];
         if (r.status === 'fulfilled') {
           if (r.value) {
-            lastMessages.push(`[marker] ${label} ✓ pos=${r.value.positionInSeconds}s id=${r.value.id}`);
+            lastMessages.push(
+              `[marker] ${label} ✓ pos=${r.value.positionInSeconds}s id=${r.value.id}`,
+            );
           } else {
             lastMessages.push(`[marker] ${label} — not live / not supported`);
           }
@@ -557,14 +526,10 @@ async function handleCommand(trimmed: string): Promise<void> {
       lastMessages.push(`[settings] ${key} = ${JSON.stringify(val)}`);
     } else if (op === 'set' && parts[2] && parts[3]) {
       const key = parts[2];
-      const value = parts.slice(3).join(' ');
-      try {
-        await settings.set(key, JSON.parse(value));
-        lastMessages.push(`[settings] set ${key} = ${value}`);
-      } catch {
-        await settings.set(key, value);
-        lastMessages.push(`[settings] set ${key} = "${value}"`);
-      }
+      const rawValue = parts.slice(3).join(' ');
+      const value = parseSettingsValue(rawValue);
+      await settings.set(key, value);
+      lastMessages.push(`[settings] set ${key} = ${JSON.stringify(value)}`);
       // Structural changes require a full layout rebuild
       const structuralKeys = ['messages.position', 'events.width', 'logs.height'];
       if (structuralKeys.some((k) => key === k) && cliRenderer && uiNodes) {
@@ -615,9 +580,13 @@ async function handleCommand(trimmed: string): Promise<void> {
     lastMessages.push('[help] Available commands:');
     lastMessages.push('[help]   /connect <youtube|twitch|kick>  — authenticate a platform');
     lastMessages.push('[help]   /msg <all|youtube|twitch|kick> <text>  — send a message');
-    lastMessages.push('[help]   /marker [description] [| timestamp_s]  — place a stream marker on all platforms');
+    lastMessages.push(
+      '[help]   /marker [description] [| timestamp_s]  — place a stream marker on all platforms',
+    );
     lastMessages.push('[help]       e.g.  /marker Intro | 0');
-    lastMessages.push('[help]       e.g.  /marker Q&A | 3723    (timestamp in seconds, YouTube only)');
+    lastMessages.push(
+      '[help]       e.g.  /marker Q&A | 3723    (timestamp in seconds, YouTube only)',
+    );
     lastMessages.push('[help]   /settings get <key>  — get a setting value');
     lastMessages.push('[help]   /settings set <key> <value>  — set a setting value');
     lastMessages.push('[help]   /logs clear | tail <n> | visible <true|false>  — manage logs');
