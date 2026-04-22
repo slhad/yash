@@ -12,7 +12,7 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
         * Window (as sidebar) showing events/triggers/stuff with platform prefix (if more than one)
         * Window showing messages with platform as header (if more than one)
         * Window showing all messages with platform as prefix (if more than one)
-        * Element : Platform connected as Status bar showing number of viewers between "()" if activated in "Number of viewers" element
+        * Element : Platform connected as Status bar — single borderless line starting with "Status" label, each platform shown as `platform: STATUS (viewers)` in green (authenticated) or red (not authenticated); viewer count `(x)` only shown when platform is ONLINE, `viewers.visible` setting is true (default), and per-platform `showViewers` is not false in `config.json`
         * Message box
             * position : top/bottom/hide
         * Element : Title (YASH heading)
@@ -34,8 +34,9 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
             * `/msg ` → `all | youtube | twitch | kick`
             * `/settings ` → `get | set`; `/settings get/set ` → setting key list
             * `/logs ` → `clear | tail | visible`
+        * Single-match autocomplete on Enter: if only one command or argument matches the current input, pressing Enter executes that completion directly without needing Tab first
     * TUI Layout
-        * Single-line status bar showing all platforms + OBS connection status + total viewer count on one horizontal row
+        * Single-line borderless status bar showing all platforms + OBS connection status on one horizontal row; stream status color-coded per platform
         * Chat panel occupies center/maximum space (flex-grow), horizontal layout with right sidebar
         * Events and logs merged into a single "Events & Logs" right sidebar panel
         * Message input box always visible with border/title, rendered before typing begins
@@ -109,6 +110,7 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
     * Read markers via Helix `GET /helix/streams/markers` — filterable by videoId
     * Chat via `@twurple/chat` (IRC-over-WebSocket): send and receive messages with badge/color metadata
     * EventSub WebSocket: `stream.online`, `stream.offline`, `channel.update`, `channel.chat.message`
+    * Stream status seeded from Helix on EventSub connect (handles case where stream was already live when app started)
     * Viewer count polled from Helix every 60 seconds
 - Kick: Single stream key implementation (API integration pending)
 
@@ -126,15 +128,16 @@ Configuration is stored in `[root]/config.json`. Environment variables take prec
     }
   },
   "platforms": {
-    "youtube": { "enabled": true, "streamKey": "" },
+    "youtube": { "enabled": true, "streamKey": "", "showViewers": true },
     "twitch": {
       "enabled": true,
       "streamKey": "",
       "clientId": "",
       "clientSecret": "",
-      "redirectUri": "http://localhost:3000/api/twitch/callback"
+      "redirectUri": "http://localhost:3000/api/twitch/callback",
+      "showViewers": true
     },
-    "kick": { "enabled": true, "streamKey": "" }
+    "kick": { "enabled": true, "streamKey": "", "showViewers": true }
   }
 }
 ```

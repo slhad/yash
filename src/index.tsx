@@ -21,7 +21,7 @@ import {
   twitch,
   youtube,
 } from './services';
-import { isDemoMode, saveConfig } from './utils/config';
+import { getConfig, isDemoMode, saveConfig } from './utils/config';
 import logCollector from './utils/logCollector';
 import { defaultLogger } from './utils/logger';
 import SettingsStore from './utils/settings';
@@ -142,16 +142,10 @@ function initUI(renderer: CliRenderer, messages: string[]): UINodes {
   mainBox.add(subtitleText);
 
   // ── Status bar ───────────────────────────────────────────────────
-  const statusBox = new BoxRenderable(renderer, {
-    marginTop: 1,
-    borderStyle: 'rounded',
-    border: true,
-    padding: 1,
-    title: ' Status ',
-  });
-
-  // All platforms on a single horizontal row
   const platformRow = new BoxRenderable(renderer, { flexDirection: 'row' });
+
+  platformRow.add(new TextRenderable(renderer, { content: 'Status  ', fg: 'gray' }));
+
   const platformTexts = new Map<string, TextRenderable>();
   let totalViewers = 0;
   for (const platform of platforms) {
@@ -159,21 +153,19 @@ function initUI(renderer: CliRenderer, messages: string[]): UINodes {
     const status = provider.getStatus();
     const viewerCount = provider.getViewerCount();
     totalViewers += viewerCount;
-    let content = ` ${platform}: ${status.authenticated ? '[OK]' : '[--]'} ${status.streamStatus} `;
-    if (viewersVisible && (viewersMode === 'per-platform' || viewersMode === 'both')) {
-      content += `(${viewerCount}) `;
-    }
+    const showViewers = getConfig()?.platforms?.[platform]?.showViewers !== false;
+    const isOnline = status.streamStatus === 'ONLINE';
+    const viewers = isOnline && showViewers && viewersVisible ? ` (${viewerCount})` : '';
     const t = new TextRenderable(renderer, {
-      content,
+      content: `${platform}: ${status.streamStatus}${viewers}  `,
       fg: status.authenticated ? 'green' : 'red',
     });
     platformTexts.set(platform, t);
     platformRow.add(t);
   }
-  statusBox.add(platformRow);
 
   const totalViewersText = new TextRenderable(renderer, {
-    content: `  Total viewers: ${totalViewers}`,
+    content: `Total viewers: ${totalViewers}  `,
     fg: 'cyan',
   });
   totalViewersText.visible =
@@ -181,13 +173,13 @@ function initUI(renderer: CliRenderer, messages: string[]): UINodes {
   platformRow.add(totalViewersText);
 
   const obsText = new TextRenderable(renderer, {
-    content: `  OBS: ${obsService.isConnected() ? '[Connected]' : '[Disconnected]'}`,
+    content: `OBS: ${obsService.isConnected() ? 'Connected' : 'Disconnected'}  `,
     fg: obsService.isConnected() ? 'green' : 'gray',
   });
   platformRow.add(obsText);
 
   const demoText = new TextRenderable(renderer, {
-    content: '  [DEMO MODE]',
+    content: '[DEMO MODE]',
     fg: 'yellow',
     attributes: TextAttributes.BOLD,
   });
@@ -270,9 +262,9 @@ function initUI(renderer: CliRenderer, messages: string[]): UINodes {
   // ── Assemble ─────────────────────────────────────────────────────
   if (messagesPosition === 'top') {
     mainBox.add(contentRow);
-    mainBox.add(statusBox);
+    mainBox.add(platformRow);
   } else {
-    mainBox.add(statusBox);
+    mainBox.add(platformRow);
     mainBox.add(contentRow);
   }
   if (messagesPosition !== 'hide') {
@@ -380,11 +372,10 @@ function updateUI(messages: string[]): void {
     totalViewers += viewerCount;
     const node = platformTexts.get(platform);
     if (node) {
-      let content = ` ${platform}: ${status.authenticated ? '[OK]' : '[--]'} ${status.streamStatus} `;
-      if (viewersVisible && (viewersMode === 'per-platform' || viewersMode === 'both')) {
-        content += `(${viewerCount}) `;
-      }
-      node.content = content;
+      const showViewers = getConfig()?.platforms?.[platform]?.showViewers !== false;
+      const isOnline = status.streamStatus === 'ONLINE';
+      const viewers = isOnline && showViewers && viewersVisible ? ` (${viewerCount})` : '';
+      node.content = `${platform}: ${status.streamStatus}${viewers}  `;
       node.fg = status.authenticated ? 'green' : 'red';
     }
   }
@@ -841,7 +832,11 @@ async function main() {
   });
 
   uiNodes.inputEl.on(InputRenderableEvents.ENTER, async () => {
-    const trimmed = uiNodes!.inputEl.value.trim();
+    let trimmed = uiNodes!.inputEl.value.trim();
+    if (trimmed.startsWith('/')) {
+      const { completion, hints } = getAutocomplete(trimmed);
+      if (hints.length === 1 && completion) trimmed = completion;
+    }
     uiNodes!.inputEl.value = '';
     uiNodes!.autocompleteHint.visible = false;
     if (!trimmed) return;

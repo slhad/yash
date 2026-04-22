@@ -669,6 +669,14 @@ export class TwitchProvider implements PlatformProvider {
 
     this.eventSubListener.start();
     defaultLogger.info('[Twitch] EventSub WebSocket listener started');
+
+    // Seed initial stream status in case we connected while already live
+    try {
+      const stream = await this.apiClient.streams.getStreamByUserId(this.userId);
+      this.streamStatus = stream ? StreamStatus.ONLINE : StreamStatus.OFFLINE;
+    } catch {
+      /* ignore — events will correct state when they arrive */
+    }
   }
 
   // ---------------------------------------------------------------------------
