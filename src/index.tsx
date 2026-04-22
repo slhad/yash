@@ -11,36 +11,24 @@ import {
   TextAttributes,
   TextRenderable,
 } from '@opentui/core';
-import { KickProvider } from './platforms/kick';
-import { TwitchProvider } from './platforms/twitch';
-import { YouTubeProvider } from './platforms/youtube';
-import { ChatService } from './services/chat.service';
-import { ObsService } from './services/obs.service';
-import { StreamService } from './services/stream.service';
-import { isDemoMode } from './utils/config';
+import {
+  authService,
+  chatService,
+  initializeServices,
+  kick,
+  obsService,
+  platforms,
+  twitch,
+  youtube,
+} from './services';
+import { isDemoMode, saveConfig } from './utils/config';
 import logCollector from './utils/logCollector';
 import { defaultLogger } from './utils/logger';
 import SettingsStore from './utils/settings';
 import { getAutocomplete } from './utils/tuiCommands';
 import { parseMarkerArgs, parseSettingsValue } from './utils/webCommands';
+import './index.ts'; // start Bun.serve web server in the same process
 
-const youtube = new YouTubeProvider();
-const twitch = new TwitchProvider();
-const kick = new KickProvider();
-
-const chatService = new ChatService();
-const streamService = new StreamService();
-const obsService = new ObsService('localhost', 4455, null);
-
-chatService.registerProvider('youtube', youtube);
-chatService.registerProvider('twitch', twitch);
-chatService.registerProvider('kick', kick);
-
-streamService.registerProvider('youtube', youtube);
-streamService.registerProvider('twitch', twitch);
-streamService.registerProvider('kick', kick);
-
-const platforms = ['youtube', 'twitch', 'kick'];
 const settings = new SettingsStore();
 
 // In-memory event log for the sidebar
@@ -89,6 +77,15 @@ interface UINodes {
 }
 
 let uiNodes: UINodes | null = null;
+
+interface TwitchSetupModal {
+  box: BoxRenderable;
+  clientIdInput: InputRenderable;
+  clientSecretInput: InputRenderable;
+  focusIndex: number;
+}
+
+let activeModal: TwitchSetupModal | null = null;
 
 // ─── initUI ─────────────────────────────────────────────────────────────────
 // Builds the complete layout tree once and attaches it to renderer.root.
@@ -417,6 +414,137 @@ function updateUI(messages: string[]): void {
 
 // ─── Command dispatch ────────────────────────────────────────────────────────
 
+function openTwitchSetupModal(): void {
+  if (!uiNodes || activeModal) return;
+  const { renderer } = uiNodes;
+
+  const instructions = new TextRenderable(renderer, {
+    content:
+      ' To connect Twitch, create an app at dev.twitch.tv/console,\n' +
+      ' set redirect URL to http://localhost:3000/api/twitch/callback,\n' +
+      ' then fill in the fields below. Press Tab to move between fields,\n' +
+      ' Enter to save, Escape to cancel.\n',
+    fg: 'white',
+  });
+
+  const clientIdLabel = new TextRenderable(renderer, { content: ' Client ID:', fg: 'cyan' });
+  const clientIdInput = new InputRenderable(renderer, {
+    placeholder: 'paste your Twitch Client ID…',
+    width: '100%',
+  });
+
+  const clientSecretLabel = new TextRenderable(renderer, {
+    content: ' Client Secret:',
+    fg: 'cyan',
+  });
+  const clientSecretInput = new InputRenderable(renderer, {
+    placeholder: 'paste your Twitch Client Secret…',
+    width: '100%',
+  });
+
+  const hint = new TextRenderable(renderer, {
+    content: ' [Tab] switch field   [Enter] save   [Esc] cancel',
+    fg: 'gray',
+  });
+
+  const box = new BoxRenderable(renderer, {
+    position: 'absolute',
+    top: '10%',
+    left: '10%',
+    width: '80%',
+    zIndex: 100,
+    border: true,
+    borderStyle: 'rounded',
+    borderColor: 'cyan',
+    backgroundColor: 'black',
+    shouldFill: true,
+    padding: 1,
+    flexDirection: 'column',
+    gap: 1,
+    title: ' Twitch Setup ',
+  });
+
+  box.add(instructions);
+  box.add(clientIdLabel);
+  box.add(clientIdInput);
+  box.add(clientSecretLabel);
+  box.add(clientSecretInput);
+  box.add(hint);
+
+  renderer.root.add(box);
+
+  const modal: TwitchSetupModal = {
+    box,
+    clientIdInput,
+    clientSecretInput,
+    focusIndex: 0,
+  };
+  activeModal = modal;
+
+  const inputs = [clientIdInput, clientSecretInput];
+  inputs[0].focus();
+
+  function closeModal(save: boolean): void {
+    if (!activeModal) return;
+    if (save) {
+      const clientId = clientIdInput.value.trim();
+      const clientSecret = clientSecretInput.value.trim();
+      saveConfig({
+        platforms: {
+          twitch: {
+            ...(clientId ? { clientId } : {}),
+            ...(clientSecret ? { clientSecret } : {}),
+          },
+        },
+      }).then(() => {
+        lastMessages.push(
+          '[system] Twitch credentials saved. Run /connect twitch to authenticate.',
+        );
+        updateUI(lastMessages);
+      });
+    } else {
+      lastMessages.push('[system] Twitch setup cancelled.');
+      updateUI(lastMessages);
+    }
+    renderer.removeInputHandler(modalKeyHandler);
+    renderer.root.remove(box.id);
+    activeModal = null;
+    uiNodes?.inputEl.focus();
+  }
+
+  // Tab cycles fields, Enter saves, Escape cancels
+  const modalKeyHandler = (sequence: string): boolean => {
+    if (!activeModal) return false;
+    if (sequence === '\t') {
+      inputs[activeModal.focusIndex].blur();
+      activeModal.focusIndex = (activeModal.focusIndex + 1) % inputs.length;
+      inputs[activeModal.focusIndex].focus();
+      return true;
+    }
+    if (sequence === '\r' || sequence === '\n') {
+      closeModal(true);
+      return true;
+    }
+    // \x1b = bare escape; \x1b\x1b = double-escape some terminals send
+    if (sequence === '\x1b' || sequence === '\x1b\x1b') {
+      closeModal(false);
+      return true;
+    }
+    return false;
+  };
+
+  renderer.prependInputHandler(modalKeyHandler);
+
+  // Belt-and-suspenders: also catch escape via the keypress event path
+  // in case the terminal sends it after the sequence handler has already run.
+  const escapeViaKeyDown = (key: { name: string }) => {
+    if (key.name === 'escape' && activeModal) closeModal(false);
+  };
+  for (const input of inputs) {
+    input.onKeyDown = escapeViaKeyDown as any;
+  }
+}
+
 async function handleCommand(trimmed: string): Promise<void> {
   if (!trimmed.startsWith('/')) {
     try {
@@ -445,9 +573,19 @@ async function handleCommand(trimmed: string): Promise<void> {
       lastMessages.push(`[system] Authenticating ${platform}...`);
       try {
         const res = await provider.authenticate();
-        lastMessages.push(
-          `[system] ${platform} authentication ${res?.success ? 'succeeded' : 'failed'}`,
-        );
+        if (res?.success) {
+          lastMessages.push(`[system] ${platform} authentication succeeded`);
+        } else if (res?.error?.startsWith('oauth_required:')) {
+          const authUrl = res.error.slice('oauth_required:'.length);
+          lastMessages.push(`[system] Opening browser for ${platform} OAuth...`);
+          Bun.spawn(['xdg-open', authUrl]);
+        } else if (platform === 'twitch' && res?.error === 'Twitch credentials not configured') {
+          openTwitchSetupModal();
+        } else {
+          lastMessages.push(
+            `[system] ${platform} authentication failed: ${res?.error ?? 'unknown error'}`,
+          );
+        }
       } catch (err) {
         lastMessages.push(`[system] ${platform} authentication error: ${String(err)}`);
       }
@@ -572,8 +710,8 @@ async function handleCommand(trimmed: string): Promise<void> {
     }
   } else if (cmd === '/exit') {
     isRunning = false;
+    authService.stopAutoRefresh();
     await obsService.disconnect();
-    killWebServer();
     cliRenderer?.destroy();
     process.exit(0);
   } else if (cmd === '/help') {
@@ -602,18 +740,8 @@ async function handleCommand(trimmed: string): Promise<void> {
 let isRunning = true;
 const lastMessages: string[] = [];
 let cliRenderer: Awaited<ReturnType<typeof createCliRenderer>> | null = null;
-
-// Kill the web server process started by `bun run start` (passed via YASH_WEB_PID)
-function killWebServer(): void {
-  const pid = process.env.YASH_WEB_PID ? parseInt(process.env.YASH_WEB_PID, 10) : null;
-  if (pid) {
-    try {
-      process.kill(pid);
-    } catch {
-      // process may have already exited
-    }
-  }
-}
+const inputHistory: string[] = [];
+let historyIndex = -1;
 
 function transformMessage(msg: { platform: string; username: string; message: string }) {
   return `[${msg.platform}] ${msg.username}: ${msg.message}`;
@@ -626,23 +754,52 @@ async function main() {
     consoleMode: 'disabled',
     useKittyKeyboard: null,
     useMouse: false,
-    // Intercept Tab at raw sequence level so it triggers autocomplete
-    // instead of cycling focus or inserting a literal \t.
+    // Intercept Tab/Up/Down at raw sequence level.
+    // Tab → autocomplete; Up/Down → history navigation.
     prependInputHandlers: [
       (sequence: string): boolean => {
-        if (sequence !== '\t' || !uiNodes) return false;
-        const val = uiNodes.inputEl.value;
-        const { completion, hints } = getAutocomplete(val);
-        if (completion) {
-          uiNodes.inputEl.value = completion;
+        if (!uiNodes) return false;
+
+        if (sequence === '\t') {
+          const val = uiNodes.inputEl.value;
+          const { completion, hints } = getAutocomplete(val);
+          if (completion) {
+            uiNodes.inputEl.value = completion;
+          }
+          if (hints.length > 1) {
+            uiNodes.autocompleteHint.content = `  ${hints.join('  ')}`;
+            uiNodes.autocompleteHint.visible = true;
+          } else {
+            uiNodes.autocompleteHint.visible = false;
+          }
+          return true;
         }
-        if (hints.length > 1) {
-          uiNodes.autocompleteHint.content = `  ${hints.join('  ')}`;
-          uiNodes.autocompleteHint.visible = true;
-        } else {
+
+        if (sequence === '\x1b[A') {
+          // Up arrow — go back in history
+          if (inputHistory.length === 0) return true;
+          if (historyIndex === -1) historyIndex = inputHistory.length - 1;
+          else if (historyIndex > 0) historyIndex--;
+          uiNodes.inputEl.value = inputHistory[historyIndex];
           uiNodes.autocompleteHint.visible = false;
+          return true;
         }
-        return true; // consumed — do not pass Tab to InputRenderable
+
+        if (sequence === '\x1b[B') {
+          // Down arrow — go forward in history
+          if (historyIndex === -1) return true;
+          historyIndex++;
+          if (historyIndex >= inputHistory.length) {
+            historyIndex = -1;
+            uiNodes.inputEl.value = '';
+          } else {
+            uiNodes.inputEl.value = inputHistory[historyIndex];
+          }
+          uiNodes.autocompleteHint.visible = false;
+          return true;
+        }
+
+        return false;
       },
     ],
   });
@@ -653,14 +810,10 @@ async function main() {
     pushEvent(msg.platform, 'chat', `${msg.username} sent a message`);
   });
 
-  await Promise.all([youtube.authenticate(), twitch.authenticate(), kick.authenticate()]);
-  defaultLogger.info('Platforms authenticated');
+  await initializeServices();
   pushEvent('youtube', 'auth', 'Authenticated');
   pushEvent('twitch', 'auth', 'Authenticated');
   pushEvent('kick', 'auth', 'Authenticated');
-
-  await obsService.connect();
-  defaultLogger.info('OBS connected');
   pushEvent('system', 'obs.connect', 'OBS connected');
 
   // Build UI tree once — no flicker on periodic updates
@@ -692,21 +845,37 @@ async function main() {
     uiNodes!.inputEl.value = '';
     uiNodes!.autocompleteHint.visible = false;
     if (!trimmed) return;
+    inputHistory.push(trimmed);
+    historyIndex = -1;
     await handleCommand(trimmed);
     updateUI(lastMessages);
   });
 
   // Periodic refresh — in-place mutations only, no flicker
-  const updateLoop = setInterval(() => {
+  const updateLoop = setInterval(async () => {
     if (!isRunning) return;
+    // If a platform isn't authenticated, retry silently — it may have been
+    // authorized via the web OAuth flow while the TUI was running.
+    for (const [name, provider] of [
+      ['twitch', twitch],
+      ['youtube', youtube],
+      ['kick', kick],
+    ] as const) {
+      if (!provider.isAuthenticated()) {
+        const res = await provider.authenticate();
+        if (res?.success) {
+          lastMessages.push(`[system] ${name} connected`);
+        }
+      }
+    }
     updateUI(lastMessages);
   }, 2000);
 
   process.on('SIGINT', async () => {
     isRunning = false;
     clearInterval(updateLoop);
+    authService.stopAutoRefresh();
     await obsService.disconnect();
-    killWebServer();
     renderer.destroy();
     process.exit(0);
   });

@@ -1,21 +1,41 @@
 import index from '../index.html';
 import sidebyside from '../sidebyside.html';
 import unified from '../unified.html';
-import { KickProvider } from './platforms/kick';
-import { TwitchProvider } from './platforms/twitch';
-import { YouTubeProvider } from './platforms/youtube';
-import AdminService from './services/admin.service';
-import { AuthService } from './services/auth.service';
-import { ChatService } from './services/chat.service';
-import { ObsService } from './services/obs.service';
-import { StreamService } from './services/stream.service';
+
+// When launched as TUI companion (YASH_TUI_ONLY=1), skip HTML page routes —
+// only OAuth callbacks and connect/API endpoints are needed.
+const isTuiOnly = process.env.YASH_TUI_ONLY === '1';
+
+import {
+  adminService,
+  authService,
+  chatService,
+  initializeServices,
+  kick,
+  obsService,
+  platforms,
+  settingsStore,
+  streamService,
+  twitch,
+  youtube,
+} from './services';
 import { authorizeAdmin } from './utils/adminAuth';
 import { isDemoMode } from './utils/config';
 import { defaultLogger } from './utils/logger';
 import { apiMetricsHandler, prometheusMetricsHandler } from './utils/metricsHandlers';
-import SettingsStore from './utils/settings';
 
-const settingsStore = new SettingsStore();
+export {
+  adminService,
+  authService,
+  chatService,
+  initializeServices,
+  kick,
+  obsService,
+  platforms,
+  streamService,
+  twitch,
+  youtube,
+};
 
 // Lazy-built bundle of the shared WebUI command module, cached in memory.
 // Built once on first browser request via Bun.build(), then served from cache.
@@ -36,59 +56,9 @@ async function getCommandsJs(): Promise<string> {
   return commandsJsCache;
 }
 
-export const youtube = new YouTubeProvider();
-export const twitch = new TwitchProvider();
-export const kick = new KickProvider();
-
-export const chatService = new ChatService();
-export const streamService = new StreamService();
-export const obsService = new ObsService('localhost', 4455, null);
-export const authService = new AuthService();
-export const adminService = new AdminService();
-
-chatService.registerProvider('youtube', youtube);
-chatService.registerProvider('twitch', twitch);
-chatService.registerProvider('kick', kick);
-
-streamService.registerProvider('youtube', youtube);
-streamService.registerProvider('twitch', twitch);
-streamService.registerProvider('kick', kick);
-
-export const platforms = ['youtube', 'twitch', 'kick'];
-
-async function authenticateAll() {
-  await Promise.all([youtube.authenticate(), twitch.authenticate(), kick.authenticate()]);
-}
-
-async function connectObs() {
-  try {
-    await obsService.connect();
-    defaultLogger.info('OBS connected');
-  } catch {
-    defaultLogger.info('OBS not available');
-  }
-}
-
-export async function initializeServices() {
-  await authenticateAll();
-  // Start background token auto-refresh after initial authentication
-  try {
-    authService.startAutoRefresh({ youtube, twitch, kick }, 60_000);
-    defaultLogger.info('AuthService auto-refresh started');
-  } catch (err) {
-    defaultLogger.warn('Failed to start AuthService auto-refresh', err);
-  }
-  await connectObs();
-  defaultLogger.info('All services initialized');
-}
-
-initializeServices().catch((err) => defaultLogger.error('Failed to initialize services', err));
-
 Bun.serve({
   routes: {
-    '/': index,
-    '/unified': unified,
-    '/sidebyside': sidebyside,
+    ...(isTuiOnly ? {} : { '/': index, '/unified': unified, '/sidebyside': sidebyside }),
     '/api/status': {
       GET: () => {
         const status = platforms.reduce(

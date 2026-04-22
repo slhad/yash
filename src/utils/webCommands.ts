@@ -73,6 +73,85 @@ export function parseSettingsValue(raw: string): unknown {
   }
 }
 
+// ─── Autocomplete ─────────────────────────────────────────────────────────────
+
+const VALID_COMMANDS = ['/connect', '/help', '/marker', '/msg', '/settings'];
+
+/**
+ * Returns a hint string for the current input value, or `null` if no hint
+ * applies. Consumed by WebUI inputs to show inline parameter suggestions.
+ *
+ * Examples:
+ *   "/connect "         → "youtube | twitch | kick"
+ *   "/msg "             → "all | youtube | twitch | kick"
+ *   "/settings "        → "get | set"
+ *   "/settings get "    → "<key>  e.g. title.visible"
+ *   "/marker"           → "[description] [| timestamp_s]"
+ */
+export function getWebAutocomplete(input: string): string | null {
+  const trimmed = input.trimStart();
+  if (!trimmed.startsWith('/')) return null;
+
+  const lower = trimmed.toLowerCase();
+
+  // Command-level: still typing the command itself
+  if (!lower.includes(' ')) {
+    const matches = VALID_COMMANDS.filter((c) => c.startsWith(lower));
+    if (matches.length === 0) return null;
+    return matches.join('  ');
+  }
+
+  const spaceIdx = lower.indexOf(' ');
+  const cmd = lower.slice(0, spaceIdx);
+  const rest = lower.slice(spaceIdx + 1);
+  const parts = rest.split(' ').filter(Boolean);
+
+  if (cmd === '/connect') {
+    if (parts.length === 0 || (parts.length === 1 && !rest.endsWith(' '))) {
+      const matches = (VALID_PLATFORMS as readonly string[]).filter((p) =>
+        p.startsWith(parts[0] ?? ''),
+      );
+      return matches.length > 0 ? matches.join(' | ') : null;
+    }
+    return null;
+  }
+
+  if (cmd === '/msg') {
+    if (parts.length === 0 || (parts.length === 1 && !rest.endsWith(' '))) {
+      const targets = ['all', ...(VALID_PLATFORMS as readonly string[])];
+      const matches = targets.filter((t) => t.startsWith(parts[0] ?? ''));
+      return matches.length > 0 ? matches.join(' | ') : null;
+    }
+    if (parts.length === 1 && rest.endsWith(' ')) return '<message text>';
+    return null;
+  }
+
+  if (cmd === '/marker') {
+    return '[description] [| timestamp_s]';
+  }
+
+  if (cmd === '/settings') {
+    if (parts.length === 0 || (parts.length === 1 && !rest.endsWith(' '))) {
+      return 'get | set';
+    }
+    const op = parts[0];
+    if (
+      (op === 'get' || op === 'set') &&
+      (parts.length === 1 || (parts.length === 2 && !rest.endsWith(' ')))
+    ) {
+      const partial = parts[1] ?? '';
+      const matches = SETTINGS_KEYS.filter((k) => k.startsWith(partial));
+      return matches.length > 0 ? matches.join('  ') : null;
+    }
+    if (op === 'set' && parts.length === 2 && rest.endsWith(' ')) return '<value>';
+    return null;
+  }
+
+  if (cmd === '/help') return null;
+
+  return null;
+}
+
 // ─── Dispatcher ───────────────────────────────────────────────────────────────
 
 const SETTINGS_KEYS = [

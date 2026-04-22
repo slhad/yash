@@ -52,7 +52,7 @@ describe('YouTubeProvider — createMarker (chapter store)', () => {
     await p.createMarker('X', 10);
     const copy = await p.getMarkers();
     copy.pop();
-    expect((await p.getMarkers())).toHaveLength(1);
+    expect(await p.getMarkers()).toHaveLength(1);
   });
 
   test('clearMarkers empties the store', async () => {
@@ -82,7 +82,7 @@ describe('YouTubeProvider — getChapterDescriptionBlock', () => {
   test('formats minutes and seconds', async () => {
     const p = new YouTubeProvider();
     await p.createMarker('Start', 0);
-    await p.createMarker('Main', 123);  // 2:03
+    await p.createMarker('Main', 123); // 2:03
     const block = (p as any).getChapterDescriptionBlock();
     expect(block).toBe('0:00 Start\n2:03 Main');
   });
@@ -90,7 +90,7 @@ describe('YouTubeProvider — getChapterDescriptionBlock', () => {
   test('formats hours when positionInSeconds >= 3600', async () => {
     const p = new YouTubeProvider();
     await p.createMarker('Start', 0);
-    await p.createMarker('Late', 3723);  // 1:02:03
+    await p.createMarker('Late', 3723); // 1:02:03
     const block = (p as any).getChapterDescriptionBlock();
     expect(block).toContain('1:02:03 Late');
   });

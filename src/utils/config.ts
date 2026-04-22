@@ -40,21 +40,19 @@ export async function loadConfig(): Promise<any> {
 }
 
 export async function reloadConfig(): Promise<any> {
-  // Remove from require cache to force re-read, then load again.
+  const fs = await import('fs/promises');
   try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const path = `${process.cwd()}/config.json`;
-    // Some runtimes may not expose require.cache; guard accordingly.
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const req = require;
-    if (req?.cache && req.resolve) {
-      const resolved = req.resolve(path);
-      if (req.cache[resolved]) delete req.cache[resolved];
-    }
-  } catch (e) {
-    // ignore
+    const raw = await fs.readFile(`${process.cwd()}/config.json`, 'utf8');
+    const cfg = JSON.parse(raw);
+    const merged = applyEnvOverrides(cfg);
+    cachedConfig = merged;
+    return merged;
+  } catch (err) {
+    defaultLogger.warn('Failed to reload config.json, returning empty config', err);
+    const merged = applyEnvOverrides({});
+    cachedConfig = merged;
+    return merged;
   }
-  return loadConfig();
 }
 
 export function isDemoMode(): boolean {
@@ -110,4 +108,41 @@ function applyEnvOverrides(cfg: any): any {
   return config;
 }
 
-export default { getConfig, loadConfig, reloadConfig, isDemoMode };
+export async function saveConfig(patch: any): Promise<void> {
+  const fs = await import('fs/promises');
+  const configPath = `${process.cwd()}/config.json`;
+  let current: any = {};
+  try {
+    const raw = await fs.readFile(configPath, 'utf8');
+    current = JSON.parse(raw);
+  } catch {
+    // file missing or unparseable — start fresh
+  }
+  const merged = deepMerge(current, patch);
+  await fs.writeFile(configPath, JSON.stringify(merged, null, 2) + '\n', 'utf8');
+  // Bust require cache so next getConfig() reads the new file
+  try {
+    const req = require;
+    if (req?.cache && req.resolve) {
+      const resolved = req.resolve(configPath);
+      if (req.cache[resolved]) delete req.cache[resolved];
+    }
+  } catch {
+    // ignore
+  }
+  cachedConfig = undefined;
+}
+
+function deepMerge(target: any, source: any): any {
+  const out = { ...target };
+  for (const key of Object.keys(source)) {
+    if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key])) {
+      out[key] = deepMerge(target[key] ?? {}, source[key]);
+    } else {
+      out[key] = source[key];
+    }
+  }
+  return out;
+}
+
+export default { getConfig, loadConfig, reloadConfig, isDemoMode, saveConfig };

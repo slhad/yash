@@ -4,9 +4,9 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "start": "bun run src/index.ts > /tmp/yash-web.log 2>&1 & YASH_WEB_PID=$! bun run src/index.tsx; kill $YASH_WEB_PID 2>/dev/null",
-    "start:tui": "bun run src/index.tsx",
-    "start:web": "bun run src/index.ts",
+    "start": "bun run src/index.tsx",
+    "start:tui": "YASH_TUI_ONLY=1 bun run src/index.tsx",
+    "start:webui": "bun run src/index.ts",
     "pretest": "bun lint",
     "test": "bun test",
     "test:e2e": "bun run src/index.ts &",

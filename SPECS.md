@@ -28,6 +28,12 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
         * Examples: `/marker Intro | 0`, `/marker Q&A | 3723`, `/marker` (unnamed, no timestamp)
     * Command /settings [get <key>|set <key> <value>] - get or set UI settings
     * Message box to send message to [all|youtube|twitch|kick] platform and receive command "/" (without sending to platforms)
+        * Input history: Up/Down arrow keys navigate previously-sent messages (like a shell history)
+        * Command parameter autocomplete: after typing a command + space, Tab completes available parameters
+            * `/connect ` → `youtube | twitch | kick`
+            * `/msg ` → `all | youtube | twitch | kick`
+            * `/settings ` → `get | set`; `/settings get/set ` → setting key list
+            * `/logs ` → `clear | tail | visible`
     * TUI Layout
         * Single-line status bar showing all platforms + OBS connection status + total viewer count on one horizontal row
         * Chat panel occupies center/maximum space (flex-grow), horizontal layout with right sidebar
@@ -45,6 +51,8 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
     * Route /sidebyside to show view of chats side by side with config options to enable any platform (saved in browser)
         * Message box supports all applicable / commands: `/help`, `/msg`, `/marker`, `/connect`, `/settings`
     * All chats view must have a message box to send messages like TUI, display top/bottom/hide (saved in browser individually)
+        * Input history: Up/Down arrow keys navigate previously-sent messages
+        * Inline parameter hints while typing a `/` command (shows valid next tokens below input)
     * WebUI commands available in all chat message boxes (`/`, `/unified`, `/sidebyside`):
         * `/help` — list available commands (fetched from `/api/help`)
         * `/msg <all|youtube|twitch|kick> <text>` — send targeted platform message

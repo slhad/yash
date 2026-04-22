@@ -117,13 +117,7 @@ export class Logger {
       // Fail-safe: if redaction fails, leave the output as-is
     }
 
-    if (level === 'ERROR') {
-      console.error(output);
-    } else if (level === 'WARN') {
-      console.warn(output);
-    } else {
-      console.log(output);
-    }
+    process.stderr.write(output + '\n');
   }
 }
 

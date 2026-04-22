@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
+import { getWebAutocomplete } from '../utils/webCommands';
 
 interface MessageInputProps {
   onSendMessage: (message: string, targetPlatforms: string[]) => void;
@@ -28,11 +29,45 @@ export const MessageInput: React.FC<MessageInputProps> = ({
   placeholder = 'Type a message or /help for commands…',
 }) => {
   const [message, setMessage] = useState('');
+  const historyRef = useRef<string[]>([]);
+  const historyIdxRef = useRef(-1);
+
+  const hint = getWebAutocomplete(message);
 
   const handleSend = async () => {
     if (message.trim()) {
+      historyRef.current.push(message.trim());
+      historyIdxRef.current = -1;
       await onSendMessage(message, sendToAll ? [] : selectedPlatforms);
       setMessage('');
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      handleSend();
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      const history = historyRef.current;
+      if (history.length === 0) return;
+      if (historyIdxRef.current === -1) historyIdxRef.current = history.length - 1;
+      else if (historyIdxRef.current > 0) historyIdxRef.current--;
+      setMessage(history[historyIdxRef.current]);
+      return;
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      const history = historyRef.current;
+      if (historyIdxRef.current === -1) return;
+      historyIdxRef.current++;
+      if (historyIdxRef.current >= history.length) {
+        historyIdxRef.current = -1;
+        setMessage('');
+      } else {
+        setMessage(history[historyIdxRef.current]);
+      }
     }
   };
 
@@ -98,11 +133,12 @@ export const MessageInput: React.FC<MessageInputProps> = ({
       <input
         type="text"
         value={message}
-        onChange={(e) => setMessage(e.target.value)}
-        placeholder={placeholder}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') handleSend();
+        onChange={(e) => {
+          historyIdxRef.current = -1;
+          setMessage(e.target.value);
         }}
+        placeholder={placeholder}
+        onKeyDown={handleKeyDown}
         style={{
           width: '100%',
           backgroundColor: '#0f0f1a',
@@ -113,6 +149,19 @@ export const MessageInput: React.FC<MessageInputProps> = ({
           boxSizing: 'border-box',
         }}
       />
+
+      {hint && (
+        <div
+          style={{
+            marginTop: '2px',
+            fontSize: '11px',
+            color: '#6a8aaa',
+            fontFamily: 'monospace',
+          }}
+        >
+          {hint}
+        </div>
+      )}
 
       <div style={{ marginTop: '8px' }}>
         <button

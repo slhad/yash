@@ -460,7 +460,9 @@ describe('TwitchProvider — getMarkers', () => {
     await p.authenticate();
     p.apiClient = {
       streams: {
-        getStreamMarkersForUser: async () => { throw new Error('401 Unauthorized'); },
+        getStreamMarkersForUser: async () => {
+          throw new Error('401 Unauthorized');
+        },
       },
     };
     p.userId = 'fake_user_id';

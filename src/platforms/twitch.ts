@@ -32,7 +32,7 @@ import { ApiClient } from '@twurple/api';
 import { RefreshingAuthProvider } from '@twurple/auth';
 import { ChatClient } from '@twurple/chat';
 import { EventSubWsListener } from '@twurple/eventsub-ws';
-import { getConfig } from '../utils/config';
+import { getConfig, reloadConfig } from '../utils/config';
 import { defaultLogger } from '../utils/logger';
 import type {
   AuthResult,
@@ -152,9 +152,9 @@ export class TwitchProvider implements PlatformProvider {
         expiresIn: newToken.expiresIn ?? 3600,
         obtainmentTimestamp: newToken.obtainmentTimestamp,
         userId: token.userId,
-        scopes: newToken.scopes ?? token.scopes,
+        scopes: newToken.scope ?? token.scopes,
       });
-      defaultLogger.info('[Twitch] tokens refreshed and persisted');
+      defaultLogger.debug('[Twitch] tokens refreshed and persisted');
     });
 
     provider.addUser(
@@ -164,7 +164,7 @@ export class TwitchProvider implements PlatformProvider {
         refreshToken: token.refreshToken,
         expiresIn: token.expiresIn,
         obtainmentTimestamp: token.obtainmentTimestamp,
-        scopes: token.scopes,
+        scope: token.scopes,
       },
       ['chat'],
     );
@@ -178,6 +178,7 @@ export class TwitchProvider implements PlatformProvider {
   // Called externally by the HTTP callback handler.
   // ---------------------------------------------------------------------------
   async handleOAuthCallback(code: string): Promise<AuthResult> {
+    await reloadConfig();
     this.loadCfg();
     if (!this.clientId || !this.clientSecret) {
       return { success: false, error: 'Twitch clientId/clientSecret not configured' };
@@ -275,14 +276,16 @@ export class TwitchProvider implements PlatformProvider {
     this.loadCfg();
 
     if (!this.clientId || !this.clientSecret) {
-      // No credentials configured → keep mock behaviour so unit tests pass
-      this.isAuthenticatedFlag = true;
-      return {
-        success: true,
-        accessToken: 'mock_twitch_access_token',
-        refreshToken: 'mock_twitch_refresh_token',
-        expiresIn: 3600,
-      };
+      if (process.env.NODE_ENV === 'test') {
+        this.isAuthenticatedFlag = true;
+        return {
+          success: true,
+          accessToken: 'mock_twitch_access_token',
+          refreshToken: 'mock_twitch_refresh_token',
+          expiresIn: 3600,
+        };
+      }
+      return { success: false, error: 'Twitch credentials not configured' };
     }
 
     // Try to restore from persisted tokens first
@@ -311,7 +314,7 @@ export class TwitchProvider implements PlatformProvider {
     });
     const authUrl = `https://id.twitch.tv/oauth2/authorize?${params}`;
 
-    defaultLogger.info(`[Twitch] OAuth required — open: ${authUrl}`);
+    defaultLogger.debug(`[Twitch] OAuth required — open: ${authUrl}`);
     return {
       success: false,
       error: `oauth_required:${authUrl}`,
