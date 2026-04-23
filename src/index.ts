@@ -20,7 +20,7 @@ import {
   youtube,
 } from './services';
 import { authorizeAdmin } from './utils/adminAuth';
-import { isDemoMode } from './utils/config';
+import { getConfig, isDemoMode, saveConfig } from './utils/config';
 import { defaultLogger } from './utils/logger';
 import { apiMetricsHandler, prometheusMetricsHandler } from './utils/metricsHandlers';
 
@@ -90,28 +90,32 @@ Bun.serve({
         });
       },
     },
-    '/api/stream/start': {
-      POST: async (req) => {
-        const { platforms: targetPlatforms, metadata } = await req.json();
-        await streamService.startStream(targetPlatforms, metadata || {});
-        return new Response(JSON.stringify({ success: true }), {
+    '/api/stream': {
+      GET: () => {
+        const cfg = getConfig();
+        const meta = cfg.stream ?? {};
+        return new Response(JSON.stringify(meta), {
           headers: { 'Content-Type': 'application/json' },
         });
       },
-    },
-    '/api/stream/stop': {
-      POST: async (req) => {
-        const { platforms: targetPlatforms } = await req.json();
-        await streamService.stopStream(targetPlatforms || []);
-        return new Response(JSON.stringify({ success: true }), {
-          headers: { 'Content-Type': 'application/json' },
-        });
-      },
-    },
-    '/api/stream/update': {
       POST: async (req) => {
         const { platforms: targetPlatforms, metadata } = await req.json();
-        await streamService.updateStreamMetadata(targetPlatforms || [], metadata || {});
+        // Normalize tags to string[] regardless of whether the client sent a string
+        if (metadata?.tags != null && typeof metadata.tags === 'string') {
+          metadata.tags = metadata.tags.split(',').map((t: string) => t.trim().replace(/\s+/g, '')).filter(Boolean);
+        }
+        const cfg = getConfig();
+        const current = cfg.stream ?? {};
+        const changed: Record<string, any> = {};
+        for (const key of Object.keys(metadata ?? {})) {
+          if (JSON.stringify(metadata[key]) !== JSON.stringify(current[key])) {
+            changed[key] = metadata[key];
+          }
+        }
+        if (Object.keys(changed).length > 0) {
+          await saveConfig({ stream: { ...current, ...changed } });
+          await streamService.setStreamMetadata(targetPlatforms ?? platforms, metadata);
+        }
         return new Response(JSON.stringify({ success: true }), {
           headers: { 'Content-Type': 'application/json' },
         });

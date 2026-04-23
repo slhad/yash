@@ -36,24 +36,8 @@ function App() {
     // Authentication is managed server-side; no-op in browser
   };
 
-  const handleStartStream = async (targets: string[], metadata: any) => {
-    await fetch('/api/stream/start', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ platforms: targets, metadata }),
-    });
-  };
-
-  const handleStopStream = async (targets: string[]) => {
-    await fetch('/api/stream/stop', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ platforms: targets }),
-    });
-  };
-
   const handleUpdateMetadata = async (targets: string[], metadata: any) => {
-    await fetch('/api/stream/update', {
+    await fetch('/api/stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ platforms: targets, metadata }),
@@ -98,8 +82,6 @@ function App() {
     <Dashboard
       platforms={platforms}
       onAuthenticate={handleAuthenticate}
-      onStartStream={handleStartStream}
-      onStopStream={handleStopStream}
       onUpdateMetadata={handleUpdateMetadata}
       onSendMessage={handleSendMessage}
       getPlatformStatus={getPlatformStatus}

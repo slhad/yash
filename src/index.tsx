@@ -1,6 +1,10 @@
 // Suppress EventTarget MaxListeners warning from OpenTUI's CliRenderer
 process.setMaxListeners(0);
 
+// Silence stderr so logger output doesn't bleed into the TUI.
+// Log entries are still captured by logCollector for the sidebar.
+process.stderr.write = () => true;
+
 import {
   BoxRenderable,
   type CliRenderer,
@@ -18,6 +22,7 @@ import {
   kick,
   obsService,
   platforms,
+  streamService,
   twitch,
   youtube,
 } from './services';
@@ -85,7 +90,16 @@ interface TwitchSetupModal {
   focusIndex: number;
 }
 
+interface StreamModal {
+  box: BoxRenderable;
+  inputs: InputRenderable[];
+  focusIndex: number;
+  selectedPlatforms: Set<string>;
+  op: 'start' | 'stop' | 'update';
+}
+
 let activeModal: TwitchSetupModal | null = null;
+let activeStreamModal: StreamModal | null = null;
 
 // ─── initUI ─────────────────────────────────────────────────────────────────
 // Builds the complete layout tree once and attaches it to renderer.root.
@@ -536,6 +550,266 @@ function openTwitchSetupModal(): void {
   }
 }
 
+function openStreamModal(preselected: string[]): void {
+  if (!uiNodes || activeStreamModal || activeModal) return;
+  const { renderer } = uiNodes;
+
+  const selectedPlatforms = new Set(preselected.length > 0 ? preselected : [...platforms]);
+
+  // Pre-fill from persisted config
+  const savedStream = getConfig().stream ?? {};
+
+  function makeLabel(text: string): TextRenderable {
+    return new TextRenderable(renderer, { content: text, fg: 'gray' });
+  }
+
+  // ── Platform toggle row ──────────────────────────────────────────
+  // focusIndex === -1 means the platform row itself is focused.
+  // 1/2/3 only toggle platforms when focusIndex === -1, so digits typed
+  // in text fields (e.g. "Destiny 2") are never consumed.
+  function platformToggleContent(focused: boolean): string {
+    const indicator = focused ? '> ' : '  ';
+    return (
+      indicator +
+      platforms.map((p) => (selectedPlatforms.has(p) ? `[x] ${p}` : `[ ] ${p}`)).join('   ')
+    );
+  }
+
+  const platformToggleLabel = makeLabel(' Platforms ([Tab] to focus, Space/Enter to toggle):');
+  const platformToggleText = new TextRenderable(renderer, {
+    content: platformToggleContent(true),
+    fg: 'cyan',
+  });
+
+  // ── Metadata inputs ──────────────────────────────────────────────
+  const titleLabel = makeLabel(' Title (all platforms):');
+  const titleInput = new InputRenderable(renderer, { placeholder: 'Stream title', width: '100%' });
+  titleInput.value = savedStream.title ?? '';
+
+  const gameLabel = makeLabel(' Subject / Category / Game (all platforms):');
+  const gameInput = new InputRenderable(renderer, {
+    placeholder: 'Game or category',
+    width: '100%',
+  });
+  gameInput.value = savedStream.game ?? '';
+
+  // Twitch tags: no spaces, max 25 chars each. Spaces are stripped on submit.
+  const tagsLabel = makeLabel(' Tags — comma-separated (no spaces, Twitch max 25 chars each):');
+  const tagsInput = new InputRenderable(renderer, {
+    placeholder: 'gaming, fps, variety',
+    width: '100%',
+  });
+  tagsInput.value = Array.isArray(savedStream.tags) ? savedStream.tags.join(', ') : (savedStream.tags ?? '');
+
+  const descLabel = makeLabel(' Description (YouTube):');
+  const descInput = new InputRenderable(renderer, {
+    placeholder: 'Stream description',
+    width: '100%',
+  });
+  descInput.value = savedStream.description ?? '';
+
+  const notifLabel = makeLabel(' Notification (Twitch):');
+  const notifInput = new InputRenderable(renderer, {
+    placeholder: 'Going live notification message',
+    width: '100%',
+  });
+  notifInput.value = savedStream.notification ?? '';
+
+  const hint = new TextRenderable(renderer, {
+    content: ' [Tab] next field   [Enter] confirm   [Esc] cancel',
+    fg: 'gray',
+  });
+
+  const box = new BoxRenderable(renderer, {
+    position: 'absolute',
+    top: '5%',
+    left: '5%',
+    width: '90%',
+    zIndex: 100,
+    border: true,
+    borderStyle: 'rounded',
+    borderColor: 'cyan',
+    backgroundColor: 'black',
+    shouldFill: true,
+    padding: 1,
+    flexDirection: 'column',
+    gap: 1,
+    title: ' Stream Info ',
+  });
+
+  box.add(platformToggleLabel);
+  box.add(platformToggleText);
+  box.add(titleLabel);
+  box.add(titleInput);
+  box.add(gameLabel);
+  box.add(gameInput);
+  box.add(tagsLabel);
+  box.add(tagsInput);
+  box.add(descLabel);
+  box.add(descInput);
+  box.add(notifLabel);
+  box.add(notifInput);
+  box.add(hint);
+  renderer.root.add(box);
+
+  const allInputs = [titleInput, gameInput, tagsInput, descInput, notifInput];
+
+  // focusIndex = -1 → platform row focused; >= 0 → modal.inputs[focusIndex] focused
+  const modal: StreamModal = {
+    box,
+    inputs: allInputs,
+    focusIndex: -1,
+    selectedPlatforms,
+    op: 'update',
+  };
+  activeStreamModal = modal;
+
+  function updateConditionalVisibility(): void {
+    platformToggleText.content = platformToggleContent(modal.focusIndex === -1);
+    const hasYoutube = selectedPlatforms.has('youtube');
+    const hasTwitch = selectedPlatforms.has('twitch');
+    descLabel.visible = hasYoutube;
+    descInput.visible = hasYoutube;
+    notifLabel.visible = hasTwitch;
+    notifInput.visible = hasTwitch;
+
+    const visible = [titleInput, gameInput, tagsInput];
+    if (hasYoutube) visible.push(descInput);
+    if (hasTwitch) visible.push(notifInput);
+    modal.inputs = visible;
+    if (modal.focusIndex >= modal.inputs.length) modal.focusIndex = 0;
+  }
+
+  function togglePlatform(idx: number): void {
+    const p = platforms[idx];
+    if (!p) return;
+    if (selectedPlatforms.has(p)) selectedPlatforms.delete(p);
+    else selectedPlatforms.add(p);
+    updateConditionalVisibility();
+  }
+
+  updateConditionalVisibility();
+
+  async function closeModal(confirm: boolean): Promise<void> {
+    if (!activeStreamModal) return;
+    renderer.removeInputHandler(modalKeyHandler);
+    renderer.root.remove(box.id);
+    activeStreamModal = null;
+    uiNodes?.inputEl.focus();
+
+    if (!confirm) {
+      lastMessages.push('[stream] Cancelled.');
+      updateUI(lastMessages);
+      return;
+    }
+
+    const targetPlatforms = [...selectedPlatforms];
+    if (targetPlatforms.length === 0) {
+      lastMessages.push('[stream] No platforms selected.');
+      updateUI(lastMessages);
+      return;
+    }
+
+    // Strip spaces from tags — Twitch forbids spaces in tags
+    const rawTags = tagsInput.value
+      .split(',')
+      .map((t) => t.trim().replace(/\s+/g, ''))
+      .filter(Boolean);
+
+    const newMeta: Record<string, any> = {
+      title: titleInput.value.trim() || undefined,
+      game: gameInput.value.trim() || undefined,
+      tags: rawTags.length > 0 ? rawTags : undefined,
+      description: selectedPlatforms.has('youtube')
+        ? descInput.value.trim() || undefined
+        : undefined,
+      notification: selectedPlatforms.has('twitch')
+        ? notifInput.value.trim() || undefined
+        : undefined,
+    };
+
+    // Only apply fields that actually changed
+    const changed: Record<string, any> = {};
+    for (const key of Object.keys(newMeta)) {
+      if (JSON.stringify(newMeta[key]) !== JSON.stringify(savedStream[key])) {
+        changed[key] = newMeta[key];
+      }
+    }
+
+    if (Object.keys(changed).length === 0) {
+      lastMessages.push('[stream] No changes.');
+      updateUI(lastMessages);
+      return;
+    }
+
+    lastMessages.push(`[stream] Updating on: ${targetPlatforms.join(', ')}…`);
+    updateUI(lastMessages);
+    try {
+      const merged = { ...savedStream, ...changed };
+      await saveConfig({ stream: merged });
+      await streamService.setStreamMetadata(targetPlatforms, merged);
+      lastMessages.push('[stream] Updated.');
+    } catch (err) {
+      lastMessages.push(`[stream] Error: ${String(err)}`);
+    }
+    updateUI(lastMessages);
+  }
+
+  const modalKeyHandler = (sequence: string): boolean => {
+    if (!activeStreamModal) return false;
+
+    if (modal.focusIndex === -1) {
+      if (sequence === '1') { togglePlatform(0); return true; }
+      if (sequence === '2') { togglePlatform(1); return true; }
+      if (sequence === '3') { togglePlatform(2); return true; }
+    }
+
+    if (sequence === '\t' || sequence === '\x1b[Z') {
+      const forward = sequence === '\t';
+      if (modal.focusIndex === -1) {
+        const nextIdx = forward ? 0 : modal.inputs.length - 1;
+        if (modal.inputs.length > 0) {
+          modal.focusIndex = nextIdx;
+          modal.inputs[nextIdx].focus();
+          platformToggleText.content = platformToggleContent(false);
+        }
+      } else {
+        modal.inputs[modal.focusIndex].blur();
+        const total = modal.inputs.length + 1; // +1 for platform row
+        const next = forward
+          ? (modal.focusIndex + 1) % total
+          : (modal.focusIndex - 1 + total) % total;
+        modal.focusIndex = next === modal.inputs.length ? -1 : next;
+        if (modal.focusIndex === -1) {
+          platformToggleText.content = platformToggleContent(true);
+        } else {
+          modal.inputs[modal.focusIndex].focus();
+        }
+      }
+      return true;
+    }
+
+    if (sequence === '\r' || sequence === '\n') {
+      closeModal(true);
+      return true;
+    }
+    if (sequence === '\x1b' || sequence === '\x1b\x1b') {
+      closeModal(false);
+      return true;
+    }
+    return false;
+  };
+
+  renderer.prependInputHandler(modalKeyHandler);
+
+  const escapeViaKeyDown = (key: { name: string }) => {
+    if (key.name === 'escape' && activeStreamModal) closeModal(false);
+  };
+  for (const input of allInputs) {
+    input.onKeyDown = escapeViaKeyDown as any;
+  }
+}
+
 async function handleCommand(trimmed: string): Promise<void> {
   if (!trimmed.startsWith('/')) {
     try {
@@ -699,6 +973,10 @@ async function handleCommand(trimmed: string): Promise<void> {
     } else {
       lastMessages.push('[logs] Usage: /logs clear | /logs tail <n>');
     }
+  } else if (cmd === '/stream') {
+    // Optional platform filter: /stream [youtube] [twitch] [kick]
+    const specified = parts.slice(1).filter((p) => platforms.includes(p));
+    openStreamModal(specified);
   } else if (cmd === '/exit') {
     isRunning = false;
     authService.stopAutoRefresh();
@@ -708,6 +986,7 @@ async function handleCommand(trimmed: string): Promise<void> {
   } else if (cmd === '/help') {
     lastMessages.push('[help] Available commands:');
     lastMessages.push('[help]   /connect <youtube|twitch|kick>  — authenticate a platform');
+    lastMessages.push('[help]   /stream [platform…]  — edit stream info (opens modal, persists to config)');
     lastMessages.push('[help]   /msg <all|youtube|twitch|kick> <text>  — send a message');
     lastMessages.push(
       '[help]   /marker [description] [| timestamp_s]  — place a stream marker on all platforms',

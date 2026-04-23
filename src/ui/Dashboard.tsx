@@ -7,8 +7,6 @@ import { StreamControls, type StreamMetadata } from './StreamControls';
 interface DashboardProps {
   platforms: string[];
   onAuthenticate: (platform: string) => Promise<void>;
-  onStartStream: (platforms: string[], metadata: any) => Promise<void>;
-  onStopStream: (platforms: string[]) => Promise<void>;
   onUpdateMetadata: (platforms: string[], metadata: any) => Promise<void>;
   onSendMessage: (message: string, targetPlatforms: string[]) => Promise<void>;
   getPlatformStatus: (platform: string) => any;
@@ -27,8 +25,6 @@ interface DashboardProps {
 export const Dashboard: React.FC<DashboardProps> = ({
   platforms,
   onAuthenticate: _onAuthenticate,
-  onStartStream,
-  onStopStream,
   onUpdateMetadata,
   onSendMessage,
   getPlatformStatus,
@@ -140,14 +136,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
     return () => clearInterval(interval);
   }, [getChatMessages]);
 
-  const handleStartStream = async (metadata: StreamMetadata) => {
-    await onStartStream(selectedPlatforms, metadata);
-  };
-
-  const handleStopStream = async () => {
-    await onStopStream(selectedPlatforms);
-  };
-
   const handleUpdateMetadata = async (metadata: StreamMetadata) => {
     await onUpdateMetadata(selectedPlatforms, metadata);
   };
@@ -241,8 +229,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
             platforms={platforms}
             selectedPlatforms={selectedPlatforms}
             onSelectPlatforms={setSelectedPlatforms}
-            onStartStream={handleStartStream}
-            onStopStream={handleStopStream}
             onUpdateMetadata={handleUpdateMetadata}
             getStreamStatus={getStreamStatusFn}
           />

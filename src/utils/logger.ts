@@ -140,7 +140,7 @@ try {
     if (typeof fn === 'function') {
       (defaultLogger as any)[l] = function (msg: string, ...args: unknown[]) {
         try {
-          collector.append(l.toUpperCase(), [msg, ...args.map(String)].join(' '));
+          collector.append(l.toUpperCase(), [msg, ...args.map((a) => (typeof a === 'object' ? JSON.stringify(a) : String(a)))].join(' '));
         } catch (_) {}
         return fn.call(this, msg, ...args);
       };

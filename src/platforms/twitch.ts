@@ -16,9 +16,6 @@
  *  - createMarker()            POST /helix/streams/markers — places a timestamped
  *                              chapter point on the live VOD (stream must be live;
  *                              requires channel:manage:broadcast scope)
- *  - startStream() / stopStream() — Twitch does not expose an API to start/stop
- *    an RTMP ingest; those remain no-ops that update local state only.
- *
  * Config keys (config.json or env):
  *   platforms.twitch.clientId        / TWITCH_CLIENT_ID
  *   platforms.twitch.clientSecret    / TWITCH_CLIENT_SECRET
@@ -372,31 +369,6 @@ export class TwitchProvider implements PlatformProvider {
   }
 
   // ---------------------------------------------------------------------------
-  // Stream start / stop — Twitch RTMP is controlled by OBS/encoder, not API.
-  // We update local state only and surface info to the user.
-  // ---------------------------------------------------------------------------
-  async startStream(metadata: StreamMetadata): Promise<void> {
-    if (!this.isAuthenticated()) throw new Error('Not authenticated with Twitch');
-    if (metadata && Object.keys(metadata).length > 0) {
-      await this.updateStreamMetadata(metadata);
-    }
-    this.streamStatus = StreamStatus.STARTING;
-    this.connectionStatus = 'connecting';
-    // Give OBS a moment to start pushing RTMP
-    await new Promise((r) => setTimeout(r, 1000));
-    this.streamStatus = StreamStatus.ONLINE;
-    this.connectionStatus = 'connected';
-  }
-
-  async stopStream(): Promise<void> {
-    if (!this.isAuthenticated()) throw new Error('Not authenticated with Twitch');
-    this.streamStatus = StreamStatus.STOPPING;
-    await new Promise((r) => setTimeout(r, 500));
-    this.streamStatus = StreamStatus.OFFLINE;
-    this.connectionStatus = 'disconnected';
-  }
-
-  // ---------------------------------------------------------------------------
   // updateStreamMetadata — title, game/category, tags, notification via Helix
   // ---------------------------------------------------------------------------
   async updateStreamMetadata(metadata: StreamMetadata): Promise<void> {
@@ -425,7 +397,13 @@ export class TwitchProvider implements PlatformProvider {
         }
       }
 
-      if (metadata.tags) update.tags = metadata.tags;
+      if (metadata.tags != null) {
+        const raw = metadata.tags as string[] | string;
+        update.tags = (Array.isArray(raw)
+          ? raw
+          : String(raw).split(',').map((t) => t.trim().replace(/\s+/g, '')).filter(Boolean)
+        );
+      }
 
       await this.apiClient.channels.updateChannelInfo(this.userId, update);
       defaultLogger.info('[Twitch] channel info updated', update);

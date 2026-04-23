@@ -59,38 +59,6 @@ export class KickProvider implements PlatformProvider {
     this.connectionStatus = 'disconnected';
   }
 
-  async startStream(_metadata: StreamMetadata): Promise<void> {
-    if (!this.isAuthenticated()) {
-      throw new Error('Not authenticated with Kick');
-    }
-
-    // Not implemented: actual Kick API call to start stream
-    this._notImplemented('Kick startStream API call');
-
-    this.streamStatus = StreamStatus.STARTING;
-    this.connectionStatus = 'connecting';
-
-    // Simulate API delay
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-
-    this.streamStatus = StreamStatus.ONLINE;
-    this.connectionStatus = 'connected';
-  }
-
-  async stopStream(): Promise<void> {
-    if (!this.isAuthenticated()) {
-      throw new Error('Not authenticated with Kick');
-    }
-
-    // Not implemented: actual Kick API call to stop stream
-    this._notImplemented('Kick stopStream API call');
-
-    this.streamStatus = StreamStatus.STOPPING;
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-    this.streamStatus = StreamStatus.OFFLINE;
-    this.connectionStatus = 'disconnected';
-  }
-
   async updateStreamMetadata(_metadata: StreamMetadata): Promise<void> {
     if (!this.isAuthenticated()) {
       throw new Error('Not authenticated with Kick');

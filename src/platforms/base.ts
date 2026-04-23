@@ -76,8 +76,6 @@ export interface PlatformProvider {
   authenticate(): Promise<AuthResult>;
   isAuthenticated(): boolean;
   logout(): Promise<void>;
-  startStream(metadata: StreamMetadata): Promise<void>;
-  stopStream(): Promise<void>;
   updateStreamMetadata(metadata: StreamMetadata): Promise<void>;
   getStreamKey(): string;
   getStreamStatus(): StreamStatus;

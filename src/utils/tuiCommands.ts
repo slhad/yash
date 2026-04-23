@@ -14,6 +14,7 @@ export const TUI_COMMANDS = [
   '/marker',
   '/msg',
   '/settings',
+  '/stream',
 ] as const;
 
 export type TuiCommand = (typeof TUI_COMMANDS)[number];
@@ -100,6 +101,14 @@ export function getAutocomplete(input: string): { completion: string | null; hin
 
   if (cmd === '/logs') {
     return completeToken(LOGS_ARGS, restLower);
+  }
+
+  if (cmd === '/stream') {
+    // Optional platform filter; complete platforms not yet listed
+    const typed = restLower.split(/\s+/).filter(Boolean);
+    const partial = typed[typed.length - 1] ?? '';
+    const remaining = PLATFORMS.filter((p) => !typed.slice(0, -1).includes(p));
+    return completeToken(remaining, partial);
   }
 
   if (cmd === '/settings') {

@@ -63,50 +63,6 @@ export class YouTubeProvider implements PlatformProvider {
     this.activeStreams.clear();
   }
 
-  async startStream(metadata: StreamMetadata): Promise<void> {
-    if (!this.isAuthenticated()) {
-      throw new Error('Not authenticated with YouTube');
-    }
-
-    this.streamStatus = StreamStatus.STARTING;
-    this.connectionStatus = 'connecting';
-
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-
-    if (metadata.scheduleId) {
-      this.scheduleId = metadata.scheduleId;
-    } else {
-      this.scheduleId = `schedule_${Date.now()}`;
-    }
-
-    this.broadcastId = `broadcast_${Date.now()}`;
-    this.activeStreams.set(this.broadcastId, {
-      status: StreamStatus.ONLINE,
-      metadata,
-    });
-
-    this.streamStatus = StreamStatus.ONLINE;
-    this.connectionStatus = 'connected';
-  }
-
-  async stopStream(): Promise<void> {
-    if (!this.isAuthenticated()) {
-      throw new Error('Not authenticated with YouTube');
-    }
-
-    this.streamStatus = StreamStatus.STOPPING;
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-
-    if (this.broadcastId) {
-      this.activeStreams.delete(this.broadcastId);
-      this.broadcastId = null;
-    }
-
-    this.scheduleId = null;
-    this.streamStatus = StreamStatus.OFFLINE;
-    this.connectionStatus = 'disconnected';
-  }
-
   async updateStreamMetadata(metadata: StreamMetadata): Promise<void> {
     if (!this.isAuthenticated()) {
       throw new Error('Not authenticated with YouTube');
