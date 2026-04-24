@@ -1212,6 +1212,17 @@ async function main() {
   });
   cliRenderer = renderer;
 
+  // opentui overrides console.* to route output through its capture buffer, which
+  // flushStdoutCache then writes onto the terminal — causing Bun's server logs
+  // (e.g. "Bundled page in Xms") to bleed into the TUI.  Replace those overrides
+  // with no-ops after the renderer is up; all TUI output goes through logCollector.
+  const noop = () => {};
+  console.log = noop;
+  console.info = noop;
+  console.warn = noop;
+  console.error = noop;
+  console.debug = noop;
+
   chatService.subscribeToMessages((msg) => {
     lastMessages.push(transformMessage(msg));
     pushEvent(msg.platform, 'chat', `${msg.username} sent a message`);
@@ -1279,7 +1290,13 @@ async function main() {
         }
       }
     }
-    updateUI(lastMessages);
+    try {
+      updateUI(lastMessages);
+    } catch {
+      // Renderer was destroyed outside the SIGINT path — stop the loop cleanly
+      isRunning = false;
+      clearInterval(updateLoop);
+    }
   }, 2000);
 
   process.on('SIGINT', async () => {

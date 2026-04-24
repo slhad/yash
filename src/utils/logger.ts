@@ -1,6 +1,8 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
+const isServer = typeof process !== 'undefined' && typeof process.env !== 'undefined';
+
 export enum LogLevel {
   DEBUG = 0,
   INFO = 1,
@@ -120,19 +122,24 @@ export class Logger {
       // Fail-safe: if redaction fails, leave the output as-is
     }
 
-    process.stderr.write(output + '\n');
-    fileLog(output);
+    if (isServer) {
+      process.stderr.write(output + '\n');
+      fileLog(output);
+    } else {
+      console.error(output);
+    }
   }
 }
 
 // ---------------------------------------------------------------------------
 // File transport — appends to ~/.yash/yash.log, rotates at 10 MB
 // ---------------------------------------------------------------------------
-const LOG_DIR = process.env.YASH_DATA_DIR || path.join(process.env.HOME || '.', '.yash');
-const LOG_FILE = path.join(LOG_DIR, 'yash.log');
+const LOG_DIR = isServer ? (process.env.YASH_DATA_DIR || path.join(process.env.HOME || '.', '.yash')) : '';
+const LOG_FILE = isServer ? path.join(LOG_DIR, 'yash.log') : '';
 const LOG_MAX_BYTES = 10 * 1024 * 1024; // 10 MB
 
 function fileLog(line: string): void {
+  if (!isServer) return;
   try {
     fs.mkdirSync(LOG_DIR, { recursive: true });
     // Rotate when the file exceeds the size limit

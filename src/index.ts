@@ -1042,10 +1042,7 @@ Bun.serve({
       GET: (req) => prometheusMetricsHandler((name: string) => req.headers.get(name), req.url),
     },
   },
-  development: {
-    hmr: true,
-    console: true,
-  },
+  development: false,
 });
 
 defaultLogger.info('YASH server running at http://localhost:3000');
