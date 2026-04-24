@@ -58,7 +58,7 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
         * `/help` — list available commands (fetched from `/api/help`)
         * `/msg <all|youtube|twitch|kick> <text>` — send targeted platform message
         * `/marker [description] [| timestamp_s]` — create stream marker on all (or selected) platforms
-        * `/connect <youtube|twitch|kick>` — authenticate a platform (Twitch redirects to OAuth; YouTube/Kick use mock auth)
+        * `/connect <youtube|twitch|kick>` — authenticate a platform (all three redirect to real OAuth flows)
         * `/settings get <key>` — read a persistent setting via `/api/settings`
         * `/settings set <key> <value>` — write a persistent setting via `/api/settings`
     * TUI-only commands (not available in WebUI): `/exit`, `/logs`
@@ -89,6 +89,11 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
 ### UI Components
 - Must use https://github.com/anomalyco/opentui for UI components in terminal
 
+### Logging
+- All log output is written to both stderr (console) and `~/.yash/yash.log` (file transport)
+- The file always includes an ISO 8601 timestamp even when the console formatter omits it
+- Log file is rotated when it exceeds 10 MB (renamed to `yash.log.1`); data directory defaults to `~/.yash` and can be overridden via `YASH_DATA_DIR`
+
 ### Architecture
 - Provider abstraction layer with common `PlatformProvider` interface
 - Individual implementations for YouTube, Twitch, and Kick platforms
@@ -99,10 +104,18 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
 - Configuration is stored in [root]/config.json
 
 ### Platform Support
-- YouTube: Handles multiple concurrent streams per key via schedule IDs
-    * In-memory chapter/marker store: `createMarker(description?, timestamp?)` stores `StreamMarker` objects with optional position in seconds
-    * `getChapterDescriptionBlock()` serialises stored chapters to YouTube description timestamp format (`0:00 Intro\n1:23 Q&A\n...`), ready to be written into the video description via the YouTube Data API v3 when wired up
+- YouTube: Real OAuth2 integration via Google Data API v3
+    * OAuth2 Authorization Code flow; tokens persisted to `~/.yash/youtube_tokens.json`; access token auto-refreshed before expiry
+    * `getAuthUrl()` / `handleOAuthCallback(code)` — browser-based consent flow; callback at `GET /api/youtube/callback`
+    * `updateStreamMetadata()` — updates live broadcast title/description via `liveBroadcasts.update` (GET + PUT to preserve all snippet fields)
+    * `sendMessage()` — posts to live chat via `liveChatMessages.insert`
+    * Live chat polling — adaptive interval driven by API's `pollingIntervalMillis` (min 2 s); skips first page to avoid replaying history
+    * Status polling (60 s interval) — detects active broadcast, updates `streamStatus`, viewer count from `liveStreamingDetails.concurrentViewers`
+    * In-memory chapter/marker store: `createMarker(description?, timestamp?)` stores `StreamMarker` objects
+    * `getChapterDescriptionBlock()` serialises chapters to YouTube timestamp format (`0:00 Intro\n1:23 Q&A\n...`)
+    * `getMarkers(options?)` — returns last N markers (default limit 20), filterable by `videoId`
     * `clearMarkers()` resets the chapter store (e.g. at stream end)
+    * `getChannelInfo()` — returns `{ channelId, channelTitle, broadcastId, liveChatId }`
 - Twitch: Single stream key implementation
     * Real OAuth2 Authorization Code flow; tokens auto-refreshed and persisted to `~/.yash/twitch_tokens.json`
     * Helix API: update channel title, game/category (resolved by name → ID), tags
@@ -112,7 +125,15 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
     * EventSub WebSocket: `stream.online`, `stream.offline`, `channel.update`, `channel.chat.message`
     * Stream status seeded from Helix on EventSub connect (handles case where stream was already live when app started)
     * Viewer count polled from Helix every 60 seconds
-- Kick: Single stream key implementation (API integration pending)
+- Kick: Real OAuth 2.1 PKCE integration via `@nekiro/kick-api`
+    * OAuth 2.1 PKCE flow (code verifier/challenge generated locally); tokens persisted to `~/.yash/kick_tokens.json`; pending PKCE verifier persisted to `~/.yash/kick_pending_auth.json` (10-minute TTL, survives restarts)
+    * `getAuthUrl()` / `handleOAuthCallback(code)` — browser-based consent flow; callback at `GET /api/kick/callback`
+    * `updateStreamMetadata()` — updates title/category/tags via Kick channels API
+    * `sendMessage()` — posts to chat via kick-api chat module
+    * Incoming chat receive is not supported (kick-api has no real-time message events at MVP level)
+    * Status polling (60 s interval) — viewer count from livestreams endpoint
+    * `createMarker()` returns `null`, `getMarkers()` returns `[]` — Kick has no marker API
+    * Required OAuth scopes: `user:read`, `channel:read`, `channel:write`, `chat:write`, `events:subscribe`
 
 ### Configuration
 Configuration is stored in `[root]/config.json`. Environment variables take precedence over file values.
@@ -128,7 +149,14 @@ Configuration is stored in `[root]/config.json`. Environment variables take prec
     }
   },
   "platforms": {
-    "youtube": { "enabled": true, "streamKey": "", "showViewers": true },
+    "youtube": {
+      "enabled": true,
+      "streamKey": "",
+      "clientId": "",
+      "clientSecret": "",
+      "redirectUri": "http://localhost:3000/api/youtube/callback",
+      "showViewers": true
+    },
     "twitch": {
       "enabled": true,
       "streamKey": "",
@@ -137,7 +165,14 @@ Configuration is stored in `[root]/config.json`. Environment variables take prec
       "redirectUri": "http://localhost:3000/api/twitch/callback",
       "showViewers": true
     },
-    "kick": { "enabled": true, "streamKey": "", "showViewers": true }
+    "kick": {
+      "enabled": true,
+      "streamKey": "",
+      "clientId": "",
+      "clientSecret": "",
+      "redirectUri": "http://localhost:3000/api/kick/callback",
+      "showViewers": true
+    }
   }
 }
 ```
@@ -161,11 +196,18 @@ Configuration is stored in `[root]/config.json`. Environment variables take prec
 | `TWITCH_CLIENT_ID` | `platforms.twitch.clientId` |
 | `TWITCH_CLIENT_SECRET` | `platforms.twitch.clientSecret` |
 | `TWITCH_REDIRECT_URI` | `platforms.twitch.redirectUri` |
+| `YOUTUBE_CLIENT_ID` | `platforms.youtube.clientId` |
+| `YOUTUBE_CLIENT_SECRET` | `platforms.youtube.clientSecret` |
+| `YOUTUBE_REDIRECT_URI` | `platforms.youtube.redirectUri` |
+| `KICK_CLIENT_ID` | `platforms.kick.clientId` |
+| `KICK_CLIENT_SECRET` | `platforms.kick.clientSecret` |
+| `KICK_REDIRECT_URI` | `platforms.kick.redirectUri` |
 
 ### Features
 - OAuth authentication flows for all platforms
     * Twitch: real OAuth2 Authorization Code flow — visit `GET /api/twitch/auth` to initiate, callback handled at `GET /api/twitch/callback`
-    * YouTube, Kick: mock auth (pending real implementation)
+    * YouTube: real OAuth2 Authorization Code flow — visit `GET /api/youtube/auth` to initiate, callback handled at `GET /api/youtube/callback`; TUI `/connect youtube` returns a redirect URL via `POST /api/connect/youtube`
+    * Kick: real OAuth 2.1 PKCE flow — visit `GET /api/kick/auth` to initiate, callback handled at `GET /api/kick/callback`; TUI `/connect kick` returns a redirect URL via `POST /api/connect/kick`, and opens a credentials setup modal if `clientId`/`clientSecret` are missing
 - Unified chat interface with platform-specific message normalization
 - Stream control (start/stop/update metadata)
 - Stream markers / chapter points
@@ -197,17 +239,24 @@ Configuration is stored in `[root]/config.json`. Environment variables take prec
 | GET | `/api/help` | List all available / commands (for WebUI consumption) |
 | GET | `/api/settings` | Read all settings or `?key=<k>` for a single key |
 | POST | `/api/settings` | Write a setting: `{ key, value }` |
-| POST | `/api/connect/youtube` | Trigger YouTube authentication |
+| POST | `/api/connect/youtube` | Returns YouTube OAuth redirect URL: `{ redirect }` |
 | POST | `/api/connect/twitch` | Returns Twitch OAuth redirect URL: `{ redirect }` |
-| POST | `/api/connect/kick` | Trigger Kick authentication |
+| POST | `/api/connect/kick` | Returns Kick OAuth redirect URL: `{ redirect }` |
 | GET | `/api/js/commands.js` | Shared WebUI command module (ESM bundle of `src/utils/webCommands.ts`) |
 | GET | `/api/twitch/auth` | Redirect to Twitch OAuth consent screen |
-| GET | `/api/twitch/callback` | OAuth callback (exchanges code for tokens) |
+| GET | `/api/twitch/callback` | Twitch OAuth callback (exchanges code for tokens) |
 | GET | `/api/twitch/channel` | Read channel title, game, tags from Helix |
-| PATCH | `/api/twitch/channel` | Update channel: `{ title?, game?, tags? }` |
+| PATCH | `/api/twitch/channel` | Update channel: `{ title?, game?, tags? }` — also persists to `config.json` |
 | POST | `/api/twitch/marker` | Create Twitch stream marker: `{ description? }` |
 | GET | `/api/twitch/markers` | Read Twitch markers: `?videoId=<id>&limit=<n>` |
+| GET | `/api/youtube/auth` | Redirect to Google OAuth consent screen |
+| GET | `/api/youtube/callback` | YouTube OAuth callback (exchanges code for tokens) |
+| GET | `/api/youtube/channel` | Channel info: `{ channelId, channelTitle, broadcastId, liveChatId }` |
 | GET | `/api/youtube/markers` | Read YouTube chapters: `{ markers, descriptionBlock }` |
+| GET | `/api/kick/auth` | Redirect to Kick OAuth consent screen |
+| GET | `/api/kick/callback` | Kick OAuth callback (exchanges code for tokens via PKCE) |
+| GET | `/api/kick/channel` | Kick channel info: `{ title, slug, category, categoryId, followers, verified }` |
+| PATCH | `/api/kick/channel` | Update Kick channel: `{ title?, game?, tags? }` — also persists to `config.json` |
 | GET | `/api/obs/status` | OBS connection status + metrics |
 | GET | `/api/metrics` | JSON metrics snapshot |
 | GET | `/metrics` | Prometheus text format metrics |
@@ -223,9 +272,9 @@ Configuration is stored in `[root]/config.json`. Environment variables take prec
 src/
 ├── platforms/
 │   ├── base.ts          # PlatformProvider interface + shared types
-│   ├── youtube.ts       # Mock auth; in-memory chapter/marker store
+│   ├── youtube.ts       # Real OAuth2 + Google Data API v3; chat + status polling; chapter store
 │   ├── twitch.ts        # Real OAuth2 + Helix + EventSub + Chat (Twurple)
-│   └── kick.ts          # Mock stubs
+│   └── kick.ts          # Real OAuth 2.1 PKCE + @nekiro/kick-api; status polling
 ├── services/
 │   ├── auth.service.ts
 │   ├── chat.service.ts
@@ -296,6 +345,7 @@ interface PlatformProvider {
 | `@twurple/api` | Twitch Helix API client |
 | `@twurple/chat` | Twitch IRC-over-WebSocket chat |
 | `@twurple/eventsub-ws` | Twitch EventSub WebSocket listener |
+| `@nekiro/kick-api` | Kick OAuth 2.1 PKCE + channels/chat API client |
 
 ## Integration tests
 - Chats webview with `playwright-cli` skill, record screenshots in [tmp]/web/
