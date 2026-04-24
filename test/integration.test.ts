@@ -18,6 +18,10 @@ describe('Integration: Services and Providers', () => {
     youtube = new YouTubeProvider();
     twitch = new TwitchProvider();
     kick = new KickProvider();
+    // Force mock auth — real credentials may be present and would trigger OAuth
+    (youtube as any).isAuthenticatedFlag = true;
+    (twitch as any).isAuthenticatedFlag = true;
+    (kick as any).isAuthenticatedFlag = true;
     chatService = new ChatService();
     streamService = new StreamService();
     obsService = new ObsService();
@@ -67,30 +71,11 @@ describe('Integration: Services and Providers', () => {
     await chatService.sendMessage('Broadcast test', ['youtube', 'twitch', 'kick']);
   });
 
-  test('should start stream on all platforms', async () => {
-    await streamService.startStream(['youtube', 'twitch', 'kick'], {
-      title: 'Integration Test Stream',
-      game: 'Testing',
-    });
-
-    expect(streamService.getStreamStatus('youtube')).toBe('ONLINE');
-    expect(streamService.getStreamStatus('twitch')).toBe('ONLINE');
-    expect(streamService.getStreamStatus('kick')).toBe('ONLINE');
-  });
-
   test('should update metadata on all platforms', async () => {
-    await streamService.updateStreamMetadata(['youtube', 'twitch', 'kick'], {
+    await streamService.setStreamMetadata(['youtube', 'twitch', 'kick'], {
       title: 'Updated Title',
       game: 'Updated Game',
     });
-  });
-
-  test('should stop stream on all platforms', async () => {
-    await streamService.stopStream(['youtube', 'twitch', 'kick']);
-
-    expect(streamService.getStreamStatus('youtube')).toBe('OFFLINE');
-    expect(streamService.getStreamStatus('twitch')).toBe('OFFLINE');
-    expect(streamService.getStreamStatus('kick')).toBe('OFFLINE');
   });
 });
 
@@ -154,24 +139,22 @@ describe('Integration: Full Workflow', () => {
     localStreamService.registerProvider('twitch', localTwitch);
     localStreamService.registerProvider('kick', localKick);
 
-    await localYoutube.authenticate();
-    await localTwitch.authenticate();
-    await localKick.authenticate();
+    // Force mock auth — real credentials may be present and would trigger OAuth
+    (localYoutube as any).isAuthenticatedFlag = true;
+    (localTwitch as any).isAuthenticatedFlag = true;
+    (localKick as any).isAuthenticatedFlag = true;
 
     expect(localYoutube.isAuthenticated()).toBe(true);
     expect(localTwitch.isAuthenticated()).toBe(true);
     expect(localKick.isAuthenticated()).toBe(true);
 
-    await localStreamService.startStream(['youtube', 'twitch', 'kick'], {
+    await localStreamService.setStreamMetadata(['youtube', 'twitch', 'kick'], {
       title: 'Full Workflow Test',
       game: 'Integration Testing',
     });
 
     await localChatService.sendMessage('Stream started!', ['youtube', 'twitch', 'kick']);
-
     await localChatService.sendMessage('Stream ending...', ['youtube', 'twitch', 'kick']);
-
-    await localStreamService.stopStream(['youtube', 'twitch', 'kick']);
 
     await localYoutube.logout();
     await localTwitch.logout();

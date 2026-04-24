@@ -23,7 +23,7 @@ describe('Logger', () => {
 
   test('should log at DEBUG level when configured', () => {
     const logger = new Logger({ level: LogLevel.DEBUG, timestamp: false, prefix: '' });
-    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const spy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     logger.debug('debug message');
     expect(spy).toHaveBeenCalled();
     spy.mockRestore();
@@ -31,7 +31,7 @@ describe('Logger', () => {
 
   test('should log at INFO level', () => {
     const logger = new Logger({ level: LogLevel.INFO, timestamp: false, prefix: '' });
-    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const spy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     logger.info('info message');
     expect(spy).toHaveBeenCalled();
     spy.mockRestore();
@@ -39,7 +39,7 @@ describe('Logger', () => {
 
   test('should log at WARN level', () => {
     const logger = new Logger({ level: LogLevel.WARN, timestamp: false, prefix: '' });
-    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const spy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     logger.warn('warn message');
     expect(spy).toHaveBeenCalled();
     spy.mockRestore();
@@ -47,7 +47,7 @@ describe('Logger', () => {
 
   test('should log at ERROR level', () => {
     const logger = new Logger({ level: LogLevel.ERROR, timestamp: false, prefix: '' });
-    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const spy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     logger.error('error message');
     expect(spy).toHaveBeenCalled();
     spy.mockRestore();
@@ -55,7 +55,7 @@ describe('Logger', () => {
 
   test('should not log below configured level', () => {
     const logger = new Logger({ level: LogLevel.ERROR, timestamp: false, prefix: '' });
-    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const spy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     logger.debug('debug message');
     logger.info('info message');
     logger.warn('warn message');
@@ -65,7 +65,7 @@ describe('Logger', () => {
 
   test('should include prefix when provided', () => {
     const logger = new Logger({ level: LogLevel.INFO, timestamp: false, prefix: 'APP' });
-    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const spy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     logger.info('test');
     expect(spy).toHaveBeenCalledWith(expect.stringContaining('[APP]'));
     spy.mockRestore();
@@ -73,7 +73,7 @@ describe('Logger', () => {
 
   test('should include timestamp when enabled', () => {
     const logger = new Logger({ level: LogLevel.INFO, timestamp: true, prefix: '' });
-    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const spy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     logger.info('test');
     expect(spy).toHaveBeenCalledWith(expect.stringMatching(/\[\d{4}-\d{2}-\d{2}T/));
     spy.mockRestore();
@@ -81,7 +81,7 @@ describe('Logger', () => {
 
   test('should log objects as JSON', () => {
     const logger = new Logger({ level: LogLevel.INFO, timestamp: false, prefix: '' });
-    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const spy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     logger.info('message', { key: 'value' });
     expect(spy).toHaveBeenCalledWith(expect.stringContaining('{"key":"value"}'));
     spy.mockRestore();

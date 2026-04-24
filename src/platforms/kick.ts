@@ -1,5 +1,36 @@
+/**
+ * KickProvider — real integration via @nekiro/kick-api
+ *
+ * Authentication: OAuth 2.1 with PKCE (opens browser → redirect back to
+ * /api/kick/callback → exchanges code for tokens).
+ *
+ * Capabilities implemented:
+ *  - authenticate()            OAuth2 PKCE flow + token persistence
+ *  - logout()                  clears state and token file
+ *  - updateStreamMetadata()    title / category / tags via Kick channels API
+ *  - sendMessage()             chat via kick-api chat module
+ *  - onMessage()               callback registration (Kick has no real-time
+ *                              incoming chat events in this library — receive
+ *                              is not supported at the MVP level)
+ *  - setupWebhooks()           starts polling for stream status + viewer count
+ *  - getViewerCount()          polled from livestreams endpoint (60s interval)
+ *  - createMarker()            returns null — Kick has no marker API
+ *  - getMarkers()              returns []   — Kick has no marker API
+ *
+ * Config keys (config.json or env):
+ *   platforms.kick.clientId       / KICK_CLIENT_ID
+ *   platforms.kick.clientSecret   / KICK_CLIENT_SECRET
+ *   platforms.kick.redirectUri    / KICK_REDIRECT_URI
+ *   platforms.kick.streamKey
+ */
+
+import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
+import { client as KickClient, KickNetworkError } from '@nekiro/kick-api';
+import type { OAuthToken } from '@nekiro/kick-api';
+import { getConfig, reloadConfig } from '../utils/config';
 import { defaultLogger } from '../utils/logger';
-import {
+import type {
   AuthResult,
   ChatMessage,
   GetMarkersOptions,
@@ -7,67 +38,477 @@ import {
   PlatformStatus,
   StreamMarker,
   StreamMetadata,
-  StreamStatus,
   WebhookConfig,
 } from './base';
+import { StreamStatus } from './base';
 
-// Kick provider implementation
+// ---------------------------------------------------------------------------
+// Persistent token shape stored in ~/.yash/kick_tokens.json
+// ---------------------------------------------------------------------------
+interface KickTokenFile extends OAuthToken {
+  broadcasterId: number;
+  channelSlug: string;
+}
+
+// ---------------------------------------------------------------------------
+// Required OAuth scopes
+// ---------------------------------------------------------------------------
+const REQUIRED_SCOPES = [
+  'user:read',
+  'channel:read',
+  'channel:write',
+  'chat:write',
+  'events:subscribe',
+];
+
 export class KickProvider implements PlatformProvider {
-  private accessToken: string | null = null;
-  private refreshToken: string | null = null;
-  private expiresAt: number = 0;
-  private streamKey: string = ''; // Kick stream key
-  private isAuthenticatedFlag: boolean = false;
+  // ---- config ----------------------------------------------------------------
+  private clientId: string = '';
+  private clientSecret: string = '';
+  private redirectUri: string = 'http://localhost:3000/api/kick/callback';
+  private streamKey: string = '';
+
+  // ---- kick-api client -------------------------------------------------------
+  private client: KickClient | null = null;
+
+  // ---- auth state ------------------------------------------------------------
+  private isAuthenticatedFlag = false;
+  private broadcasterId: number | null = null;
+  private channelSlug: string | null = null;
+
+  // ---- PKCE state (lives only during the auth flow) -------------------------
+  private pendingCodeVerifier: string | null = null;
+
+  // ---- stream state ----------------------------------------------------------
   private streamStatus: StreamStatus = StreamStatus.OFFLINE;
   private connectionStatus: 'connected' | 'disconnected' | 'connecting' = 'disconnected';
   private lastError: string | null = null;
+  private viewerCount = 0;
+  private pollTimer: ReturnType<typeof setInterval> | null = null;
 
-  // Message callbacks
+  // ---- chat ------------------------------------------------------------------
   private messageCallbacks: ((msg: ChatMessage) => void)[] = [];
 
-  async authenticate(): Promise<AuthResult> {
-    // Mock Kick OAuth flow for now (returns a usable token for tests and dev)
-    this.accessToken = 'mock_kick_access_token';
-    this.refreshToken = 'mock_kick_refresh_token';
-    this.expiresAt = Date.now() + 3600000; // 1 hour
+  // ---- token file ------------------------------------------------------------
+  private static dataDir =
+    process.env.YASH_DATA_DIR || path.join(process.env.HOME || '.', '.yash');
+  private static tokenFile = path.join(KickProvider.dataDir, 'kick_tokens.json');
+  private static pendingAuthFile = path.join(KickProvider.dataDir, 'kick_pending_auth.json');
+
+  // ---------------------------------------------------------------------------
+  // Helpers
+  // ---------------------------------------------------------------------------
+  private loadCfg() {
+    const cfg = getConfig()?.platforms?.kick ?? {};
+    this.clientId = cfg.clientId || process.env.KICK_CLIENT_ID || '';
+    this.clientSecret = cfg.clientSecret || process.env.KICK_CLIENT_SECRET || '';
+    this.redirectUri =
+      cfg.redirectUri ||
+      process.env.KICK_REDIRECT_URI ||
+      'http://localhost:3000/api/kick/callback';
+    this.streamKey = cfg.streamKey || this.streamKey;
+  }
+
+  private buildClient(): KickClient {
+    return new KickClient({
+      clientId: this.clientId,
+      clientSecret: this.clientSecret,
+      redirectUri: this.redirectUri,
+    });
+  }
+
+  private async readTokenFile(): Promise<KickTokenFile | null> {
+    try {
+      const raw = await fs.readFile(KickProvider.tokenFile, 'utf8');
+      return JSON.parse(raw) as KickTokenFile;
+    } catch {
+      return null;
+    }
+  }
+
+  private async writeTokenFile(data: KickTokenFile): Promise<void> {
+    await fs.mkdir(KickProvider.dataDir, { recursive: true });
+    await fs.writeFile(KickProvider.tokenFile, JSON.stringify(data, null, 2));
+  }
+
+  private async deleteTokenFile(): Promise<void> {
+    try {
+      await fs.unlink(KickProvider.tokenFile);
+    } catch {
+      /* already gone */
+    }
+  }
+
+  private async writePendingAuth(verifier: string, authUrl: string): Promise<void> {
+    await fs.mkdir(KickProvider.dataDir, { recursive: true });
+    await fs.writeFile(
+      KickProvider.pendingAuthFile,
+      JSON.stringify({ codeVerifier: verifier, authUrl, createdAt: Date.now() }),
+    );
+  }
+
+  private async readPendingAuth(): Promise<{ codeVerifier: string; authUrl: string } | null> {
+    try {
+      const raw = await fs.readFile(KickProvider.pendingAuthFile, 'utf8');
+      const data = JSON.parse(raw) as { codeVerifier: string; authUrl: string; createdAt: number };
+      // Reject old-format files (missing authUrl) or expired ones
+      if (!data.authUrl || !data.codeVerifier) return null;
+      if (Date.now() - data.createdAt > 10 * 60 * 1000) return null;
+      return { codeVerifier: data.codeVerifier, authUrl: data.authUrl };
+    } catch {
+      return null;
+    }
+  }
+
+  private async deletePendingAuth(): Promise<void> {
+    try {
+      await fs.unlink(KickProvider.pendingAuthFile);
+    } catch {
+      /* already gone */
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Wire everything up once we have a valid token + channel info
+  // ---------------------------------------------------------------------------
+  private async _initFromToken(
+    token: KickTokenFile,
+    client?: KickClient,
+  ): Promise<void> {
+    this.client = client ?? this.buildClient();
+    this.client.setToken(token);
+
+    this.broadcasterId = token.broadcasterId;
+    this.channelSlug = token.channelSlug;
     this.isAuthenticatedFlag = true;
+    this.connectionStatus = 'connected';
+
+    this._startPoll();
+    defaultLogger.info(`[Kick] authenticated as ${this.channelSlug} (id: ${this.broadcasterId})`);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Fetch the authenticated user's channel to get broadcasterId + slug
+  // ---------------------------------------------------------------------------
+  private async _fetchSelfChannel(client: KickClient): Promise<{ id: number; slug: string }> {
+    const channels = await client.channels.getChannels();
+    if (!channels.length) throw new Error('No channel found for authenticated user');
+    return { id: channels[0].user_id, slug: channels[0].slug };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Exchange an OAuth code (from /api/kick/callback) for tokens, persist,
+  // then wire up the client.
+  // Called externally by the HTTP callback handler.
+  // ---------------------------------------------------------------------------
+  async handleOAuthCallback(code: string): Promise<AuthResult> {
+    await reloadConfig();
+    this.loadCfg();
+
+    if (!this.clientId || !this.clientSecret) {
+      return { success: false, error: 'Kick clientId/clientSecret not configured' };
+    }
+    // Restore from disk if not in memory (survives restarts between auth and callback)
+    if (!this.pendingCodeVerifier) {
+      const saved = await this.readPendingAuth();
+      if (saved) this.pendingCodeVerifier = saved.codeVerifier;
+    }
+
+    if (!this.pendingCodeVerifier) {
+      return {
+        success: false,
+        error: 'No pending PKCE code verifier — start the flow via /connect kick first',
+      };
+    }
+
+    try {
+      const client = this.buildClient();
+      const token = await client.exchangeCodeForToken({
+        code,
+        codeVerifier: this.pendingCodeVerifier,
+      });
+      this.pendingCodeVerifier = null;
+      await this.deletePendingAuth();
+
+      const { id: broadcasterId, slug: channelSlug } = await this._fetchSelfChannel(client);
+
+      const tokenData: KickTokenFile = { ...token, broadcasterId, channelSlug };
+      await this.writeTokenFile(tokenData);
+      await this._initFromToken(tokenData, client);
+
+      return {
+        success: true,
+        accessToken: token.accessToken,
+        refreshToken: token.refreshToken,
+        expiresIn: token.expiresIn,
+      };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.lastError = msg;
+      defaultLogger.error('[Kick] OAuth callback error:', err);
+      return { success: false, error: msg };
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // PlatformProvider.authenticate()
+  // If persisted tokens exist → restore silently.
+  // Otherwise → return the OAuth URL so the caller can redirect/open a browser.
+  // ---------------------------------------------------------------------------
+  async authenticate(): Promise<AuthResult> {
+    this.loadCfg();
+
+    if (!this.clientId || !this.clientSecret) {
+      if (process.env.NODE_ENV === 'test') {
+        this.isAuthenticatedFlag = true;
+        return {
+          success: true,
+          accessToken: 'mock_kick_access_token',
+          refreshToken: 'mock_kick_refresh_token',
+          expiresIn: 3600,
+        };
+      }
+      return { success: false, error: 'Kick credentials not configured' };
+    }
+
+    // Try to restore from persisted tokens
+    const saved = await this.readTokenFile();
+    if (saved) {
+      try {
+        await this._initFromToken(saved);
+        return {
+          success: true,
+          accessToken: saved.accessToken,
+          refreshToken: saved.refreshToken,
+          expiresIn: saved.expiresIn,
+        };
+      } catch (err) {
+        defaultLogger.warn('[Kick] Failed to restore saved tokens, need re-auth:', err);
+      }
+    }
 
     return {
-      success: true,
-      accessToken: this.accessToken,
-      refreshToken: this.refreshToken,
-      expiresIn: 3600,
+      success: false,
+      error: `oauth_required:${await this.getAuthUrl()}`,
     };
   }
 
-  // Centralized helper for unimplemented features. Record the error but avoid
-  // emitting console warnings to keep test output clean.
-  private _notImplemented(feature: string) {
-    this.lastError = `${feature} not implemented for ${this.getPlatformName()}`;
+  // ---------------------------------------------------------------------------
+  // Returns the OAuth URL and stores the codeVerifier for the callback.
+  // Reuses an existing recent pending auth so that retrying /connect kick after
+  // a crash opens the same URL — preventing PKCE mismatch if the browser still
+  // has the old Kick authorization page cached.
+  // ---------------------------------------------------------------------------
+  async getAuthUrl(): Promise<string> {
+    this.loadCfg();
+
+    // Reuse a recent pending auth (< 10 min) so the browser page stays valid
+    const saved = await this.readPendingAuth();
+    if (saved) {
+      this.pendingCodeVerifier = saved.codeVerifier;
+      defaultLogger.info('[Kick] Reusing existing pending auth URL (not regenerating PKCE)');
+      return saved.authUrl;
+    }
+
+    const client = this.buildClient();
+    const pkce = client.generatePKCEParams();
+    this.pendingCodeVerifier = pkce.codeVerifier;
+    const url = client.getAuthorizationUrl(pkce, REQUIRED_SCOPES);
+    await this.writePendingAuth(pkce.codeVerifier, url);
+    return url;
   }
 
   isAuthenticated(): boolean {
-    return this.isAuthenticatedFlag && this.accessToken !== null && Date.now() < this.expiresAt;
+    return this.isAuthenticatedFlag;
   }
 
   async logout(): Promise<void> {
-    this.accessToken = null;
-    this.refreshToken = null;
-    this.expiresAt = 0;
+    this._stopPoll();
+    this.client = null;
     this.isAuthenticatedFlag = false;
+    this.broadcasterId = null;
+    this.channelSlug = null;
     this.streamStatus = StreamStatus.OFFLINE;
     this.connectionStatus = 'disconnected';
+    this.viewerCount = 0;
+    await this.deleteTokenFile();
+    await this.deletePendingAuth();
   }
 
-  async updateStreamMetadata(_metadata: StreamMetadata): Promise<void> {
-    if (!this.isAuthenticated()) {
-      throw new Error('Not authenticated with Kick');
+  // ---------------------------------------------------------------------------
+  // updateStreamMetadata — title, category (resolved by name), tags
+  // ---------------------------------------------------------------------------
+  async updateStreamMetadata(metadata: StreamMetadata): Promise<void> {
+    if (!this.isAuthenticated()) throw new Error('Not authenticated with Kick');
+    if (!this.client) {
+      defaultLogger.warn('[Kick] updateStreamMetadata — client not ready (mock mode)');
+      return;
     }
 
-    // Not implemented: actual Kick API call to update stream metadata
-    this._notImplemented('Kick updateStreamMetadata API call');
+    try {
+      const update: {
+        stream_title?: string;
+        category_id?: number;
+        custom_tags?: string[];
+      } = {};
+
+      if (metadata.title) update.stream_title = metadata.title;
+
+      // Resolve game name → category ID
+      if (metadata.game) {
+        const results = await this.client.categories.getCategories({ q: metadata.game });
+        const match = results.find(
+          (c) => c.name.toLowerCase() === metadata.game!.toLowerCase(),
+        ) ?? results[0];
+        if (match) {
+          update.category_id = match.id;
+        } else {
+          defaultLogger.warn(`[Kick] Category not found: "${metadata.game}"`);
+        }
+      }
+
+      if (metadata.tags != null) {
+        const raw = metadata.tags as string[] | string;
+        update.custom_tags = Array.isArray(raw)
+          ? raw
+          : String(raw)
+              .split(',')
+              .map((t) => t.trim())
+              .filter(Boolean);
+      }
+
+      try {
+        await this.client.channels.updateChannel(update);
+      } catch (err) {
+        // Kick's PATCH /channels returns 204 No Content. The kick-api library
+        // always calls response.json() on any 2xx, so a bodyless 204 throws a
+        // SyntaxError which the library re-wraps as KickNetworkError. A real
+        // network error (DNS, timeout) produces a TypeError/AbortError inside
+        // KickNetworkError — not a SyntaxError — so we can safely distinguish
+        // the two and treat only the SyntaxError case as success.
+        if (
+          err instanceof KickNetworkError &&
+          (err as any).originalError instanceof SyntaxError
+        ) {
+          // 204 No Content from a successful PATCH — not an error
+        } else {
+          throw err;
+        }
+      }
+      defaultLogger.info('[Kick] channel updated', update);
+    } catch (err) {
+      this.lastError = err instanceof Error ? err.message : String(err);
+      defaultLogger.error('[Kick] updateStreamMetadata error:', err);
+      throw err;
+    }
   }
 
+  // ---------------------------------------------------------------------------
+  // Chat — send (user message to own channel)
+  // ---------------------------------------------------------------------------
+  async sendMessage(message: string): Promise<void> {
+    if (!this.isAuthenticated()) throw new Error('Not authenticated with Kick');
+    if (!this.client || !this.broadcasterId) {
+      defaultLogger.warn('[Kick] sendMessage — client not ready');
+      return;
+    }
+    try {
+      await this.client.chat.postMessage({
+        type: 'user',
+        broadcaster_user_id: this.broadcasterId,
+        content: message.slice(0, 500),
+      });
+    } catch (err) {
+      this.lastError = err instanceof Error ? err.message : String(err);
+      defaultLogger.error('[Kick] sendMessage error:', err);
+      throw err;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Chat — receive (not supported by @nekiro/kick-api at MVP level)
+  // ---------------------------------------------------------------------------
+  onMessage(callback: (msg: ChatMessage) => void): () => void {
+    this.messageCallbacks.push(callback);
+    return () => {
+      this.messageCallbacks = this.messageCallbacks.filter((cb) => cb !== callback);
+    };
+  }
+
+  private _dispatch(msg: ChatMessage) {
+    for (const cb of this.messageCallbacks) cb(msg);
+  }
+
+  // ---------------------------------------------------------------------------
+  // setupWebhooks — starts the stream status / viewer count poll
+  // Kick has no real-time webhook/WebSocket API in this library; we poll instead.
+  // ---------------------------------------------------------------------------
+  async setupWebhooks(_config: WebhookConfig): Promise<void> {
+    if (!this.client || !this.broadcasterId) {
+      defaultLogger.warn('[Kick] setupWebhooks — client not ready, skipping');
+      return;
+    }
+    this._startPoll();
+    defaultLogger.info('[Kick] stream status polling started (60s interval)');
+  }
+
+  // ---------------------------------------------------------------------------
+  // Poll livestreams to track online status + viewer count
+  // ---------------------------------------------------------------------------
+  private _startPoll() {
+    this._stopPoll();
+    this.pollTimer = setInterval(() => this._pollStatus(), 60_000);
+    // Run immediately to seed initial state
+    this._pollStatus().catch(() => {});
+  }
+
+  private _stopPoll() {
+    if (this.pollTimer) {
+      clearInterval(this.pollTimer);
+      this.pollTimer = null;
+    }
+  }
+
+  private async _pollStatus() {
+    if (!this.client || !this.broadcasterId) return;
+    try {
+      const streams = await this.client.livestreams.getLivestreams({
+        broadcaster_user_id: [this.broadcasterId],
+      });
+      if (streams.length > 0) {
+        this.streamStatus = StreamStatus.ONLINE;
+        this.viewerCount = streams[0].viewer_count;
+      } else {
+        this.streamStatus = StreamStatus.OFFLINE;
+        this.viewerCount = 0;
+      }
+    } catch {
+      /* ignore poll errors — connection issues shouldn't crash the app */
+    }
+  }
+
+  getViewerCount(): number {
+    return this.viewerCount;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Markers — Kick has no marker API
+  // ---------------------------------------------------------------------------
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  async createMarker(_description?: string, _timestamp?: number): Promise<StreamMarker | null> {
+    defaultLogger.info('[Kick] createMarker — not supported by Kick API');
+    return null;
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  async getMarkers(_options?: GetMarkersOptions): Promise<StreamMarker[]> {
+    defaultLogger.info('[Kick] getMarkers — not supported by Kick API');
+    return [];
+  }
+
+  // ---------------------------------------------------------------------------
+  // Accessors
+  // ---------------------------------------------------------------------------
   getStreamKey(): string {
     return this.streamKey;
   }
@@ -78,33 +519,6 @@ export class KickProvider implements PlatformProvider {
 
   getStreamStatus(): StreamStatus {
     return this.streamStatus;
-  }
-
-  async sendMessage(message: string): Promise<void> {
-    // Kick chat message sending would use Kick API or IRC
-    if (!this.isAuthenticated()) {
-      throw new Error('Not authenticated with Kick');
-    }
-
-    // Not implemented: actual Kick chat message sending
-    this._notImplemented('Kick chat sendMessage');
-    // Informational: would send message in real implementation
-    defaultLogger.info(`Would send message to Kick chat: ${message}`);
-  }
-
-  onMessage(callback: (msg: ChatMessage) => void): () => void {
-    this.messageCallbacks.push(callback);
-    // Return unsubscribe function
-    return () => {
-      this.messageCallbacks = this.messageCallbacks.filter((cb) => cb !== callback);
-    };
-  }
-
-  async setupWebhooks(config: WebhookConfig): Promise<void> {
-    // Kick uses webhooks for real-time events
-    // Not implemented: actual webhook setup
-    this._notImplemented('Kick webhook setup');
-    defaultLogger.info(`Setting up Kick webhooks for topics: ${config.topics.join(', ')}`);
   }
 
   getPlatformName(): string {
@@ -120,35 +534,17 @@ export class KickProvider implements PlatformProvider {
     };
   }
 
-  getViewerCount(): number {
-    return 0;
-  }
-
-  /** Kick does not expose a stream marker API. Returns null gracefully. */
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  async createMarker(_description?: string, _timestamp?: number): Promise<StreamMarker | null> {
-    defaultLogger.info('[Kick] createMarker — not supported by Kick API');
-    return null;
-  }
-
-  /** Kick does not expose a marker read API. Returns []. */
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  async getMarkers(_options?: GetMarkersOptions): Promise<StreamMarker[]> {
-    defaultLogger.info('[Kick] getMarkers — not supported by Kick API');
-    return [];
-  }
-
-  // Helper method to simulate receiving a message (for testing)
-  _simulateMessage(message: string, username: string = 'TestUser') {
-    const chatMessage: ChatMessage = {
-      id: `kick_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+  // ---------------------------------------------------------------------------
+  // Test helper — simulate an incoming chat message
+  // ---------------------------------------------------------------------------
+  _simulateMessage(message: string, username = 'TestUser') {
+    this._dispatch({
+      id: `kick_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
       platform: 'kick',
-      userId: `user_${Math.random().toString(36).substr(2, 9)}`,
+      userId: `user_${Math.random().toString(36).slice(2, 9)}`,
       username,
       message,
       timestamp: Date.now(),
-    };
-
-    this.messageCallbacks.forEach((callback) => callback(chatMessage));
+    });
   }
 }

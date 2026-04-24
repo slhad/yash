@@ -1,3 +1,6 @@
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+
 export enum LogLevel {
   DEBUG = 0,
   INFO = 1,
@@ -118,6 +121,34 @@ export class Logger {
     }
 
     process.stderr.write(output + '\n');
+    fileLog(output);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// File transport — appends to ~/.yash/yash.log, rotates at 10 MB
+// ---------------------------------------------------------------------------
+const LOG_DIR = process.env.YASH_DATA_DIR || path.join(process.env.HOME || '.', '.yash');
+const LOG_FILE = path.join(LOG_DIR, 'yash.log');
+const LOG_MAX_BYTES = 10 * 1024 * 1024; // 10 MB
+
+function fileLog(line: string): void {
+  try {
+    fs.mkdirSync(LOG_DIR, { recursive: true });
+    // Rotate when the file exceeds the size limit
+    try {
+      const stat = fs.statSync(LOG_FILE);
+      if (stat.size > LOG_MAX_BYTES) {
+        fs.renameSync(LOG_FILE, LOG_FILE + '.1');
+      }
+    } catch {
+      // file doesn't exist yet — fine
+    }
+    // Always include a timestamp in the file even if the logger omits it
+    const ts = new Date().toISOString();
+    fs.appendFileSync(LOG_FILE, `[${ts}] ${line}\n`);
+  } catch {
+    // never crash the app because of a logging failure
   }
 }
 

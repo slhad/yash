@@ -140,8 +140,8 @@ describe('YouTubeProvider — getMarkers filter', () => {
 
 describe('TwitchProvider — createMarker accepts timestamp param', () => {
   test('mock mode returns synthetic marker, timestamp ignored in returned positionInSeconds', async () => {
-    const p = new TwitchProvider();
-    await p.authenticate(); // mock mode
+    const p = new TwitchProvider() as any;
+    p.isAuthenticatedFlag = true; // bypass OAuth — real credentials may be present
     // Pass a timestamp — Twitch ignores it (position is server-side)
     const m = await p.createMarker('Chapter', 300);
     expect(m).not.toBeNull();
@@ -152,7 +152,7 @@ describe('TwitchProvider — createMarker accepts timestamp param', () => {
 
   test('real apiClient: description truncated to 140, timestamp not forwarded', async () => {
     const p = new TwitchProvider() as any;
-    await p.authenticate();
+    p.isAuthenticatedFlag = true; // bypass OAuth — real credentials may be present
     let capturedDesc = '';
     p.apiClient = {
       streams: {
@@ -191,16 +191,16 @@ describe('All providers — createMarker(description?, timestamp?)', () => {
   for (const factory of providers) {
     const name = factory().getPlatformName();
     test(`${name} accepts createMarker() with no args`, async () => {
-      const p = factory();
-      if (name === 'twitch') await p.authenticate();
+      const p = factory() as any;
+      if (name === 'twitch') p.isAuthenticatedFlag = true;
       const result = await p.createMarker();
       // YouTube returns a marker, Twitch returns mock marker, Kick returns null
       expect(result === null || typeof result === 'object').toBe(true);
     });
 
     test(`${name} accepts createMarker(description, timestamp)`, async () => {
-      const p = factory();
-      if (name === 'twitch') await p.authenticate();
+      const p = factory() as any;
+      if (name === 'twitch') p.isAuthenticatedFlag = true;
       const result = await p.createMarker('label', 42);
       expect(result === null || typeof result === 'object').toBe(true);
     });

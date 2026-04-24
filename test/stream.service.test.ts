@@ -11,15 +11,16 @@ describe('StreamService', () => {
   let kickProvider: KickProvider;
   let youtubeProvider: YouTubeProvider;
 
-  beforeEach(async () => {
+  beforeEach(() => {
     streamService = new StreamService();
     twitchProvider = new TwitchProvider();
     kickProvider = new KickProvider();
     youtubeProvider = new YouTubeProvider();
 
-    await twitchProvider.authenticate();
-    await kickProvider.authenticate();
-    await youtubeProvider.authenticate();
+    // Force mock auth — real credentials may be present and would trigger OAuth
+    (twitchProvider as any).isAuthenticatedFlag = true;
+    (kickProvider as any).isAuthenticatedFlag = true;
+    (youtubeProvider as any).isAuthenticatedFlag = true;
   });
 
   test('should be instantiable', () => {
@@ -35,53 +36,15 @@ describe('StreamService', () => {
     expect(Object.keys(status).length).toBe(3);
   });
 
-  test('should start stream on specified platforms', async () => {
-    streamService.registerProvider('twitch', twitchProvider);
-    streamService.registerProvider('kick', kickProvider);
-
-    const metadata: StreamMetadata = {
-      title: 'Test Stream',
-      game: 'Testing',
-    };
-
-    await streamService.startStream(['twitch', 'kick'], metadata);
-
-    expect(twitchProvider.getStreamStatus()).toBe('ONLINE');
-    expect(kickProvider.getStreamStatus()).toBe('ONLINE');
-  });
-
-  test('should stop stream on specified platforms', async () => {
-    streamService.registerProvider('twitch', twitchProvider);
-
-    const metadata: StreamMetadata = { title: 'Test Stream' };
-    await streamService.startStream(['twitch'], metadata);
-    expect(twitchProvider.getStreamStatus()).toBe('ONLINE');
-
-    await streamService.stopStream(['twitch']);
-    expect(twitchProvider.getStreamStatus()).toBe('OFFLINE');
-  });
-
-  test('should stop all streams when no platforms specified', async () => {
-    streamService.registerProvider('twitch', twitchProvider);
-    streamService.registerProvider('kick', kickProvider);
-
-    await streamService.startStream(['twitch', 'kick'], { title: 'Test' });
-    await streamService.stopStream();
-
-    expect(twitchProvider.getStreamStatus()).toBe('OFFLINE');
-    expect(kickProvider.getStreamStatus()).toBe('OFFLINE');
-  });
-
   test('should update stream metadata', async () => {
     streamService.registerProvider('twitch', twitchProvider);
 
-    await streamService.startStream(['twitch'], { title: 'Original' });
-    await streamService.updateStreamMetadata(['twitch'], {
+    await streamService.setStreamMetadata(['twitch'], {
       title: 'Updated Title',
       game: 'New Game',
     });
 
-    expect(twitchProvider.getStreamStatus()).toBe('ONLINE');
+    expect(twitchProvider.getStreamStatus()).toBe('OFFLINE');
   });
 
   test('should get stream key for platform', () => {
@@ -121,11 +84,10 @@ describe('StreamService', () => {
       statusUpdate = { platform, status };
     });
 
-    await streamService.startStream(['twitch'], { title: 'Test' });
+    await streamService.setStreamMetadata(['twitch'], { title: 'Test' });
 
     expect(statusUpdate).not.toBeNull();
     expect(statusUpdate?.platform).toBe('twitch');
-    expect(statusUpdate?.status).toBe('ONLINE');
 
     unsubscribe();
   });
@@ -138,20 +100,12 @@ describe('StreamService', () => {
       callCount++;
     });
 
-    await streamService.startStream(['twitch'], { title: 'Test' });
+    await streamService.setStreamMetadata(['twitch'], { title: 'Test' });
     expect(callCount).toBeGreaterThanOrEqual(1);
 
     unsubscribe();
-    const initialCount = callCount;
-    await streamService.stopStream(['twitch']);
-    expect(callCount).toBe(initialCount);
-  });
-
-  test('should ignore starting stream on unregistered platforms', async () => {
-    streamService.registerProvider('twitch', twitchProvider);
-
-    await streamService.startStream(['nonexistent'], { title: 'Test' });
-
-    expect(twitchProvider.getStreamStatus()).toBe('OFFLINE');
+    const countAfterUnsub = callCount;
+    await streamService.setStreamMetadata(['twitch'], { title: 'Test 2' });
+    expect(callCount).toBe(countAfterUnsub);
   });
 });

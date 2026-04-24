@@ -550,6 +550,134 @@ function openTwitchSetupModal(): void {
   }
 }
 
+function openKickSetupModal(): void {
+  if (!uiNodes || activeModal) return;
+  const { renderer } = uiNodes;
+
+  const instructions = new TextRenderable(renderer, {
+    content:
+      ' To connect Kick:\n' +
+      '  1. Enable 2FA on your account (required by Kick)\n' +
+      '  2. Go to kick.com/settings/developer and create an app\n' +
+      '  3. Set redirect URL to http://localhost:3000/api/kick/callback\n' +
+      '  4. Paste the generated Client ID and Client Secret below.\n',
+    fg: 'white',
+  });
+
+  const clientIdLabel = new TextRenderable(renderer, { content: ' Client ID:', fg: 'cyan' });
+  const clientIdInput = new InputRenderable(renderer, {
+    placeholder: 'paste your Kick Client ID…',
+    width: '100%',
+  });
+
+  const clientSecretLabel = new TextRenderable(renderer, {
+    content: ' Client Secret:',
+    fg: 'cyan',
+  });
+  const clientSecretInput = new InputRenderable(renderer, {
+    placeholder: 'paste your Kick Client Secret…',
+    width: '100%',
+  });
+
+  const hint = new TextRenderable(renderer, {
+    content: ' [Tab] switch field   [Enter] save   [Esc] cancel',
+    fg: 'gray',
+  });
+
+  const box = new BoxRenderable(renderer, {
+    position: 'absolute',
+    top: '10%',
+    left: '10%',
+    width: '80%',
+    zIndex: 100,
+    border: true,
+    borderStyle: 'rounded',
+    borderColor: 'green',
+    backgroundColor: 'black',
+    shouldFill: true,
+    padding: 1,
+    flexDirection: 'column',
+    gap: 1,
+    title: ' Kick Setup ',
+  });
+
+  box.add(instructions);
+  box.add(clientIdLabel);
+  box.add(clientIdInput);
+  box.add(clientSecretLabel);
+  box.add(clientSecretInput);
+  box.add(hint);
+
+  renderer.root.add(box);
+
+  const modal: TwitchSetupModal = {
+    box,
+    clientIdInput,
+    clientSecretInput,
+    focusIndex: 0,
+  };
+  activeModal = modal;
+
+  const inputs = [clientIdInput, clientSecretInput];
+  inputs[0].focus();
+
+  function closeModal(save: boolean): void {
+    if (!activeModal) return;
+    if (save) {
+      const clientId = clientIdInput.value.trim();
+      const clientSecret = clientSecretInput.value.trim();
+      saveConfig({
+        platforms: {
+          kick: {
+            ...(clientId ? { clientId } : {}),
+            ...(clientSecret ? { clientSecret } : {}),
+          },
+        },
+      }).then(() => {
+        lastMessages.push(
+          '[system] Kick credentials saved. Run /connect kick to authenticate.',
+        );
+        updateUI(lastMessages);
+      });
+    } else {
+      lastMessages.push('[system] Kick setup cancelled.');
+      updateUI(lastMessages);
+    }
+    renderer.removeInputHandler(modalKeyHandler);
+    renderer.root.remove(box.id);
+    activeModal = null;
+    uiNodes?.inputEl.focus();
+  }
+
+  const modalKeyHandler = (sequence: string): boolean => {
+    if (!activeModal) return false;
+    if (sequence === '\t') {
+      inputs[activeModal.focusIndex].blur();
+      activeModal.focusIndex = (activeModal.focusIndex + 1) % inputs.length;
+      inputs[activeModal.focusIndex].focus();
+      return true;
+    }
+    if (sequence === '\r' || sequence === '\n') {
+      closeModal(true);
+      return true;
+    }
+    if (sequence === '\x1b' || sequence === '\x1b\x1b') {
+      closeModal(false);
+      return true;
+    }
+    return false;
+  };
+
+  renderer.prependInputHandler(modalKeyHandler);
+
+  const escapeViaKeyDown = (key: { name: string }) => {
+    if (key.name === 'escape' && activeModal) closeModal(false);
+  };
+  for (const input of inputs) {
+    input.onKeyDown = escapeViaKeyDown as any;
+  }
+}
+
 function openStreamModal(preselected: string[]): void {
   if (!uiNodes || activeStreamModal || activeModal) return;
   const { renderer } = uiNodes;
@@ -842,10 +970,19 @@ async function handleCommand(trimmed: string): Promise<void> {
           lastMessages.push(`[system] ${platform} authentication succeeded`);
         } else if (res?.error?.startsWith('oauth_required:')) {
           const authUrl = res.error.slice('oauth_required:'.length);
+          const fallbackUrl = `http://localhost:3000/api/${platform}/auth`;
           lastMessages.push(`[system] Opening browser for ${platform} OAuth...`);
-          Bun.spawn(['xdg-open', authUrl]);
+          const proc = Bun.spawn(['xdg-open', authUrl]);
+          proc.exited.then((code) => {
+            if (code !== 0) {
+              lastMessages.push(`[system] Browser failed to open — visit ${fallbackUrl} manually`);
+              updateUI(lastMessages);
+            }
+          });
         } else if (platform === 'twitch' && res?.error === 'Twitch credentials not configured') {
           openTwitchSetupModal();
+        } else if (platform === 'kick' && res?.error === 'Kick credentials not configured') {
+          openKickSetupModal();
         } else {
           lastMessages.push(
             `[system] ${platform} authentication failed: ${res?.error ?? 'unknown error'}`,

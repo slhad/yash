@@ -203,17 +203,83 @@ Bun.serve({
     },
 
     // ------------------------------------------------------------------
+    // YouTube OAuth — GET /api/youtube/auth  →  redirect to Google
+    // ------------------------------------------------------------------
+    '/api/youtube/auth': {
+      GET: () => {
+        const url = youtube.getAuthUrl();
+        return new Response(null, {
+          status: 302,
+          headers: { Location: url },
+        });
+      },
+    },
+
+    // ------------------------------------------------------------------
+    // YouTube OAuth — GET /api/youtube/callback?code=...
+    // Google redirects here after the user approves the app.
+    // ------------------------------------------------------------------
+    '/api/youtube/callback': {
+      GET: async (req) => {
+        const url = new URL(req.url);
+        const code = url.searchParams.get('code');
+        const error = url.searchParams.get('error');
+
+        if (error) {
+          return new Response(`<html><body><h2>YouTube auth error: ${error}</h2></body></html>`, {
+            status: 400,
+            headers: { 'Content-Type': 'text/html' },
+          });
+        }
+
+        if (!code) {
+          return new Response(JSON.stringify({ error: 'missing code parameter' }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+
+        const result = await youtube.handleOAuthCallback(code);
+        if (result.success) {
+          return new Response(
+            `<html><body><h2>✅ YouTube connected successfully!</h2><p>You can close this tab.</p></body></html>`,
+            { status: 200, headers: { 'Content-Type': 'text/html' } },
+          );
+        }
+
+        return new Response(
+          `<html><body><h2>❌ YouTube auth failed</h2><pre>${result.error}</pre></body></html>`,
+          { status: 400, headers: { 'Content-Type': 'text/html' } },
+        );
+      },
+    },
+
+    // ------------------------------------------------------------------
     // YouTube chapter markers — GET /api/youtube/markers
     // Returns in-memory chapter list + the formatted description block.
     // ------------------------------------------------------------------
     '/api/youtube/markers': {
-      GET: () => {
-        const markers = (youtube as any).chapterMarkers ?? [];
-        const block =
-          typeof (youtube as any).getChapterDescriptionBlock === 'function'
-            ? (youtube as any).getChapterDescriptionBlock()
-            : '';
+      GET: async () => {
+        const markers = await youtube.getMarkers();
+        const block = youtube.getChapterDescriptionBlock();
         return new Response(JSON.stringify({ markers, descriptionBlock: block }), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      },
+    },
+
+    // ------------------------------------------------------------------
+    // YouTube channel info — GET /api/youtube/channel
+    // ------------------------------------------------------------------
+    '/api/youtube/channel': {
+      GET: () => {
+        if (!youtube.isAuthenticated()) {
+          return new Response(JSON.stringify({ error: 'not authenticated' }), {
+            status: 401,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        return new Response(JSON.stringify(youtube.getChannelInfo()), {
           headers: { 'Content-Type': 'application/json' },
         });
       },
@@ -339,6 +405,9 @@ Bun.serve({
         try {
           const body = await req.json();
           await twitch.updateStreamMetadata(body);
+          const cfg = getConfig();
+          const current = cfg.stream ?? {};
+          await saveConfig({ stream: { ...current, ...body } });
           return new Response(JSON.stringify({ success: true }), {
             headers: { 'Content-Type': 'application/json' },
           });
@@ -418,29 +487,132 @@ Bun.serve({
       },
     },
     '/api/connect/youtube': {
+      POST: () => {
+        const url = youtube.getAuthUrl();
+        return new Response(JSON.stringify({ redirect: url }), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      },
+    },
+    '/api/connect/kick': {
       POST: async () => {
-        try {
-          const res = await youtube.authenticate();
-          return new Response(JSON.stringify({ success: res?.success ?? false }), {
+        const url = await kick.getAuthUrl();
+        return new Response(JSON.stringify({ redirect: url }), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      },
+    },
+
+    // ------------------------------------------------------------------
+    // Kick OAuth — GET /api/kick/auth  →  redirect to Kick
+    // ------------------------------------------------------------------
+    '/api/kick/auth': {
+      GET: async () => {
+        const url = await kick.getAuthUrl();
+        return new Response(null, {
+          status: 302,
+          headers: { Location: url },
+        });
+      },
+    },
+
+    // ------------------------------------------------------------------
+    // Kick OAuth — GET /api/kick/callback?code=...
+    // Kick redirects here after the user approves the app.
+    // ------------------------------------------------------------------
+    '/api/kick/callback': {
+      GET: async (req) => {
+        const url = new URL(req.url);
+        const code = url.searchParams.get('code');
+        const error = url.searchParams.get('error');
+
+        if (error) {
+          return new Response(`<html><body><h2>Kick auth error: ${error}</h2></body></html>`, {
+            status: 400,
+            headers: { 'Content-Type': 'text/html' },
+          });
+        }
+
+        if (!code) {
+          return new Response(JSON.stringify({ error: 'missing code parameter' }), {
+            status: 400,
             headers: { 'Content-Type': 'application/json' },
           });
+        }
+
+        const result = await kick.handleOAuthCallback(code);
+        if (result.success) {
+          return new Response(
+            `<html><body><h2>✅ Kick connected successfully!</h2><p>You can close this tab.</p></body></html>`,
+            { status: 200, headers: { 'Content-Type': 'text/html' } },
+          );
+        }
+
+        return new Response(
+          `<html><body><h2>❌ Kick auth failed</h2><pre>${result.error}</pre></body></html>`,
+          { status: 400, headers: { 'Content-Type': 'text/html' } },
+        );
+      },
+    },
+
+    // ------------------------------------------------------------------
+    // Kick channel info — GET /api/kick/channel
+    // Returns current title, category, tags from the Kick channels API
+    // ------------------------------------------------------------------
+    '/api/kick/channel': {
+      GET: async () => {
+        if (!kick.isAuthenticated()) {
+          return new Response(JSON.stringify({ error: 'not authenticated' }), {
+            status: 401,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        const provider = kick as any;
+        if (!provider.client || !provider.channelSlug) {
+          return new Response(JSON.stringify({ error: 'api client not ready' }), {
+            status: 503,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        try {
+          const channel = await provider.client.channels.getChannel(provider.channelSlug);
+          return new Response(
+            JSON.stringify({
+              title: channel?.user?.username,
+              slug: channel?.slug,
+              category: channel?.category?.name ?? null,
+              categoryId: channel?.category?.id ?? null,
+              followers: channel?.followers_count ?? 0,
+              verified: channel?.verified ?? false,
+            }),
+            { headers: { 'Content-Type': 'application/json' } },
+          );
         } catch (err) {
-          return new Response(JSON.stringify({ success: false, error: String(err) }), {
+          return new Response(JSON.stringify({ error: String(err) }), {
             status: 500,
             headers: { 'Content-Type': 'application/json' },
           });
         }
       },
-    },
-    '/api/connect/kick': {
-      POST: async () => {
+      // PATCH /api/kick/channel  { title?, game?, tags? }
+      PATCH: async (req) => {
+        if (!kick.isAuthenticated()) {
+          return new Response(JSON.stringify({ error: 'not authenticated' }), {
+            status: 401,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
         try {
-          const res = await kick.authenticate();
-          return new Response(JSON.stringify({ success: res?.success ?? false }), {
+          const body = await req.json();
+          await kick.updateStreamMetadata(body);
+          const cfg = getConfig();
+          const current = cfg.stream ?? {};
+          await saveConfig({ stream: { ...current, ...body } });
+          return new Response(JSON.stringify({ success: true }), {
             headers: { 'Content-Type': 'application/json' },
           });
         } catch (err) {
-          return new Response(JSON.stringify({ success: false, error: String(err) }), {
+          return new Response(JSON.stringify({ error: String(err) }), {
             status: 500,
             headers: { 'Content-Type': 'application/json' },
           });

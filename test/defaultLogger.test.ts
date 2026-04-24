@@ -3,7 +3,7 @@ import { defaultLogger } from '../src/utils/logger';
 
 describe('defaultLogger', () => {
   test('should have timestamps disabled by default', () => {
-    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const spy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     defaultLogger.info('default logger test');
     expect(spy).toHaveBeenCalled();
     const calledWith = spy.mock.calls[0][0] as string;

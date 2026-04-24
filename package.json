@@ -23,6 +23,7 @@
     "typescript": "^6.0.2"
   },
   "dependencies": {
+    "@nekiro/kick-api": "^2.1.2",
     "@opentui/core": "^0.1.97",
     "@opentui/react": "^0.1.97",
     "@twurple/api": "^8.1.3",

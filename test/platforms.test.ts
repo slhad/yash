@@ -29,8 +29,6 @@ describe('Platform Providers', () => {
       'authenticate',
       'isAuthenticated',
       'logout',
-      'startStream',
-      'stopStream',
       'updateStreamMetadata',
       'getStreamKey',
       'setStreamKey',
@@ -50,42 +48,6 @@ describe('Platform Providers', () => {
   });
 });
 
-describe('YouTubeProvider schedule IDs', () => {
-  test('should track schedule ID after startStream', async () => {
-    const provider = new YouTubeProvider();
-    await provider.authenticate();
-
-    await provider.startStream({ title: 'Test', scheduleId: 'schedule_123' });
-
-    expect(provider.getScheduleId()).toBe('schedule_123');
-    expect(provider.getBroadcastId()).toBeDefined();
-  });
-
-  test('should track multiple concurrent streams', async () => {
-    const provider = new YouTubeProvider();
-    await provider.authenticate();
-
-    await provider.startStream({ title: 'Stream 1', scheduleId: 'schedule_1' });
-    const broadcast1 = provider.getBroadcastId();
-
-    await provider.startStream({ title: 'Stream 2', scheduleId: 'schedule_2' });
-    const broadcast2 = provider.getBroadcastId();
-
-    expect(broadcast1).not.toBe(broadcast2);
-  });
-
-  test('should clear schedule ID after stopStream', async () => {
-    const provider = new YouTubeProvider();
-    await provider.authenticate();
-
-    await provider.startStream({ title: 'Test', scheduleId: 'schedule_123' });
-    expect(provider.getScheduleId()).toBe('schedule_123');
-
-    await provider.stopStream();
-    expect(provider.getScheduleId()).toBeNull();
-    expect(provider.getBroadcastId()).toBeNull();
-  });
-});
 
 describe('Stream Key Management', () => {
   test('YouTube should store and retrieve stream key', () => {

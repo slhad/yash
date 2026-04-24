@@ -133,8 +133,8 @@ describe('ChatService', () => {
   });
 
   test('should send message to specific platforms', async () => {
-    await twitchProvider.authenticate();
-    await kickProvider.authenticate();
+    (twitchProvider as any).isAuthenticatedFlag = true; // bypass OAuth — real credentials may be present
+    (kickProvider as any).isAuthenticatedFlag = true;
     chatService.registerProvider('twitch', twitchProvider);
     chatService.registerProvider('kick', kickProvider);
 

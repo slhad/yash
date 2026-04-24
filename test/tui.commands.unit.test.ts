@@ -91,11 +91,13 @@ describe('getAutocomplete', () => {
     expect(result.completion).toBeNull();
   });
 
-  test('/s → partial completion (ambiguous: /settings)', () => {
-    // Only one match starting with /s
+  test('/s → ambiguous between /settings and /stream, no advance possible', () => {
     const result = getAutocomplete('/s');
-    expect(result.completion).toBe('/settings');
-    expect(result.hints).toEqual(['/settings']);
+    // Both /settings and /stream start with /s — longest common prefix is /s
+    // which equals the input, so completion cannot advance further
+    expect(result.completion).toBeNull();
+    expect(result.hints).toContain('/settings');
+    expect(result.hints).toContain('/stream');
   });
 
   test('/he → completes to /help', () => {

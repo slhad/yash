@@ -16,6 +16,11 @@ function makeProvider() {
   return new TwitchProvider();
 }
 
+/** Bypass the real OAuth flow in unit tests that inject a fake apiClient. */
+function forceAuth(p: any) {
+  (p as any).isAuthenticatedFlag = true;
+}
+
 // ---------------------------------------------------------------------------
 // Instantiation
 // ---------------------------------------------------------------------------
@@ -30,8 +35,6 @@ describe('TwitchProvider — instantiation', () => {
       'authenticate',
       'isAuthenticated',
       'logout',
-      'startStream',
-      'stopStream',
       'updateStreamMetadata',
       'getStreamKey',
       'setStreamKey',
@@ -73,7 +76,8 @@ describe('TwitchProvider — stream key', () => {
 // ---------------------------------------------------------------------------
 describe('TwitchProvider — mock authenticate', () => {
   test('returns success with mock tokens when no credentials are set', async () => {
-    const p = makeProvider();
+    const p = makeProvider() as any;
+    p.loadCfg = () => {};  // prevent reading real credentials from config
     const result = await p.authenticate();
     expect(result.success).toBe(true);
     expect(result.accessToken).toBeDefined();
@@ -81,7 +85,8 @@ describe('TwitchProvider — mock authenticate', () => {
   });
 
   test('isAuthenticated() is true after mock authenticate', async () => {
-    const p = makeProvider();
+    const p = makeProvider() as any;
+    p.loadCfg = () => {};
     await p.authenticate();
     expect(p.isAuthenticated()).toBe(true);
   });
@@ -92,51 +97,21 @@ describe('TwitchProvider — mock authenticate', () => {
 // ---------------------------------------------------------------------------
 describe('TwitchProvider — logout', () => {
   test('clears auth state', async () => {
-    const p = makeProvider();
-    await p.authenticate();
+    const p = makeProvider() as any;
+    forceAuth(p);
     expect(p.isAuthenticated()).toBe(true);
     await p.logout();
     expect(p.isAuthenticated()).toBe(false);
   });
 
   test('getStatus() shows disconnected after logout', async () => {
-    const p = makeProvider();
-    await p.authenticate();
+    const p = makeProvider() as any;
+    forceAuth(p);
     await p.logout();
     const s = p.getStatus();
     expect(s.authenticated).toBe(false);
     expect(s.connectionStatus).toBe('disconnected');
     expect(s.streamStatus).toBe(StreamStatus.OFFLINE);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// startStream / stopStream (mock mode)
-// ---------------------------------------------------------------------------
-describe('TwitchProvider — startStream / stopStream', () => {
-  test('transitions to ONLINE after startStream', async () => {
-    const p = makeProvider();
-    await p.authenticate();
-    await p.startStream({ title: 'Test stream' });
-    expect(p.getStreamStatus()).toBe(StreamStatus.ONLINE);
-  });
-
-  test('transitions to OFFLINE after stopStream', async () => {
-    const p = makeProvider();
-    await p.authenticate();
-    await p.startStream({});
-    await p.stopStream();
-    expect(p.getStreamStatus()).toBe(StreamStatus.OFFLINE);
-  });
-
-  test('startStream throws when not authenticated', async () => {
-    const p = makeProvider();
-    await expect(p.startStream({})).rejects.toThrow('Not authenticated');
-  });
-
-  test('stopStream throws when not authenticated', async () => {
-    const p = makeProvider();
-    await expect(p.stopStream()).rejects.toThrow('Not authenticated');
   });
 });
 
@@ -149,10 +124,10 @@ describe('TwitchProvider — sendMessage', () => {
     await expect(p.sendMessage('hello')).rejects.toThrow('Not authenticated');
   });
 
-  test('does not throw after authenticate in mock mode (no chat client)', async () => {
-    const p = makeProvider();
-    await p.authenticate();
-    // No real chatClient in mock mode — should warn and return gracefully
+  test('does not throw when authenticated but no chat client connected', async () => {
+    const p = makeProvider() as any;
+    forceAuth(p);
+    // No real chatClient — should warn and return gracefully
     await expect(p.sendMessage('hello')).resolves.toBeUndefined();
   });
 });
@@ -245,11 +220,49 @@ describe('TwitchProvider — updateStreamMetadata', () => {
     await expect(p.updateStreamMetadata({ title: 'x' })).rejects.toThrow('Not authenticated');
   });
 
-  test('warns and returns when apiClient not ready (mock mode)', async () => {
-    const p = makeProvider();
-    await p.authenticate(); // mock mode — no apiClient
-    // Should not throw; logs a warning
+  test('warns and returns when apiClient not ready', async () => {
+    const p = makeProvider() as any;
+    forceAuth(p); // no apiClient set
     await expect(p.updateStreamMetadata({ title: 'My Stream' })).resolves.toBeUndefined();
+  });
+
+  test('passes tags array to updateChannelInfo', async () => {
+    const p = makeProvider() as any;
+    await p.authenticate();
+    let captured: any = null;
+    p.apiClient = {
+      games: { getGameByName: async () => null },
+      channels: {
+        updateChannelInfo: async (_userId: string, data: any) => {
+          captured = data;
+        },
+      },
+    };
+    p.userId = 'fake_user_id';
+    p.isAuthenticatedFlag = true;
+
+    await p.updateStreamMetadata({ tags: ['FPS', 'Speedrun'] });
+    expect(captured).not.toBeNull();
+    expect(captured.tags).toEqual(['FPS', 'Speedrun']);
+  });
+
+  test('parses comma-separated tags string', async () => {
+    const p = makeProvider() as any;
+    await p.authenticate();
+    let captured: any = null;
+    p.apiClient = {
+      games: { getGameByName: async () => null },
+      channels: {
+        updateChannelInfo: async (_userId: string, data: any) => {
+          captured = data;
+        },
+      },
+    };
+    p.userId = 'fake_user_id';
+    p.isAuthenticatedFlag = true;
+
+    await p.updateStreamMetadata({ tags: 'FPS, Speedrun, Chill' });
+    expect(captured.tags).toEqual(['FPS', 'Speedrun', 'Chill']);
   });
 });
 
@@ -276,8 +289,8 @@ describe('TwitchProvider — createMarker', () => {
   });
 
   test('returns a synthetic StreamMarker in mock mode (no apiClient)', async () => {
-    const p = makeProvider();
-    await p.authenticate(); // mock: no apiClient set
+    const p = makeProvider() as any;
+    forceAuth(p);
     const marker = await p.createMarker('intro');
     expect(marker).not.toBeNull();
     expect(marker!.platform).toBe('twitch');
@@ -288,17 +301,16 @@ describe('TwitchProvider — createMarker', () => {
   });
 
   test('works with no description', async () => {
-    const p = makeProvider();
-    await p.authenticate();
+    const p = makeProvider() as any;
+    forceAuth(p);
     const marker = await p.createMarker();
     expect(marker).not.toBeNull();
     expect(marker!.description).toBe('');
   });
 
   test('truncates description to 140 chars when apiClient is present', async () => {
-    // Inject a fake apiClient to exercise the trim path
     const p = makeProvider() as any;
-    await p.authenticate();
+    forceAuth(p);
     p.apiClient = {
       streams: {
         createStreamMarker: async (_userId: string, desc: string) => ({
@@ -319,7 +331,7 @@ describe('TwitchProvider — createMarker', () => {
 
   test('returns null when stream is not live (404 from API)', async () => {
     const p = makeProvider() as any;
-    await p.authenticate();
+    forceAuth(p);
     p.apiClient = {
       streams: {
         createStreamMarker: async () => {
@@ -335,7 +347,7 @@ describe('TwitchProvider — createMarker', () => {
 
   test('re-throws non-404 API errors', async () => {
     const p = makeProvider() as any;
-    await p.authenticate();
+    forceAuth(p);
     p.apiClient = {
       streams: {
         createStreamMarker: async () => {
@@ -381,16 +393,16 @@ describe('TwitchProvider — getMarkers', () => {
     await expect(p.getMarkers()).rejects.toThrow('Not authenticated');
   });
 
-  test('returns [] in mock mode (no apiClient)', async () => {
-    const p = makeProvider();
-    await p.authenticate();
+  test('returns [] when authenticated but no apiClient', async () => {
+    const p = makeProvider() as any;
+    forceAuth(p);
     const markers = await p.getMarkers();
     expect(markers).toEqual([]);
   });
 
   test('returns mapped markers from apiClient (no videoId filter)', async () => {
     const p = makeProvider() as any;
-    await p.authenticate();
+    forceAuth(p);
 
     const fakeMarker = {
       id: 'mkr_1',
@@ -422,7 +434,7 @@ describe('TwitchProvider — getMarkers', () => {
 
   test('uses getStreamMarkersForVideo when videoId is provided', async () => {
     const p = makeProvider() as any;
-    await p.authenticate();
+    forceAuth(p);
 
     let usedVideoApi = false;
     p.apiClient = {
@@ -443,7 +455,7 @@ describe('TwitchProvider — getMarkers', () => {
 
   test('returns empty array when no markers exist', async () => {
     const p = makeProvider() as any;
-    await p.authenticate();
+    forceAuth(p);
     p.apiClient = {
       streams: {
         getStreamMarkersForUser: async () => ({ data: [] }),
@@ -457,7 +469,7 @@ describe('TwitchProvider — getMarkers', () => {
 
   test('re-throws API errors', async () => {
     const p = makeProvider() as any;
-    await p.authenticate();
+    forceAuth(p);
     p.apiClient = {
       streams: {
         getStreamMarkersForUser: async () => {
