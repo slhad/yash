@@ -38,6 +38,7 @@ import type {
   StreamMetadata,
   WebhookConfig,
 } from './base';
+import type { MetadataUpdateResult } from './base';
 import { StreamStatus } from './base';
 
 // ---------------------------------------------------------------------------
@@ -370,15 +371,15 @@ export class YouTubeProvider implements PlatformProvider {
   // Requires GET then PUT to preserve all required snippet fields.
   // ---------------------------------------------------------------------------
 
-  async updateStreamMetadata(metadata: StreamMetadata): Promise<void> {
+  async updateStreamMetadata(metadata: StreamMetadata): Promise<MetadataUpdateResult> {
     if (!this.isAuthenticated()) throw new Error('Not authenticated with YouTube');
-    if (!this.tokenData) return;
+    if (!this.tokenData) return {};
 
     if (!this.broadcastId) {
       const broadcast = await this._findActiveBroadcast();
       if (!broadcast) {
         defaultLogger.warn('[YouTube] updateStreamMetadata — no active broadcast found');
-        return;
+        return {};
       }
       this.broadcastId = broadcast.id;
       this.liveChatId = broadcast.liveChatId;
@@ -410,6 +411,7 @@ export class YouTubeProvider implements PlatformProvider {
       if (!putResp.ok) throw new Error(`Failed to update broadcast: ${await putResp.text()}`);
 
       defaultLogger.info('[YouTube] broadcast metadata updated');
+      return {};
     } catch (err) {
       this.lastError = err instanceof Error ? err.message : String(err);
       defaultLogger.error('[YouTube] updateStreamMetadata error:', err);

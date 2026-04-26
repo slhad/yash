@@ -71,12 +71,18 @@ export interface GetMarkersOptions {
   limit?: number;
 }
 
+export interface MetadataUpdateResult {
+  skipped?: string[];
+  skippedTags?: string[];
+  appliedTags?: string[];
+}
+
 export interface PlatformProvider {
   setStreamKey(key: string): void;
   authenticate(): Promise<AuthResult>;
   isAuthenticated(): boolean;
   logout(): Promise<void>;
-  updateStreamMetadata(metadata: StreamMetadata): Promise<void>;
+  updateStreamMetadata(metadata: StreamMetadata): Promise<MetadataUpdateResult>;
   getStreamKey(): string;
   getStreamStatus(): StreamStatus;
   sendMessage(message: string): Promise<void>;

@@ -26,7 +26,7 @@
 
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { client as KickClient, KickNetworkError } from '@nekiro/kick-api';
+import { client as KickClient, KickNetworkError, KickServerError } from '@nekiro/kick-api';
 import type { OAuthToken } from '@nekiro/kick-api';
 import { getConfig, reloadConfig } from '../utils/config';
 import { defaultLogger } from '../utils/logger';
@@ -40,6 +40,7 @@ import type {
   StreamMetadata,
   WebhookConfig,
 } from './base';
+import type { MetadataUpdateResult } from './base';
 import { StreamStatus } from './base';
 
 // ---------------------------------------------------------------------------
@@ -169,6 +170,45 @@ export class KickProvider implements PlatformProvider {
   }
 
   // ---------------------------------------------------------------------------
+  // Intercept the kick-api client's internal token property so that any
+  // auto-refresh (triggered transparently by the library on expired tokens)
+  // is immediately persisted back to disk.
+  // ---------------------------------------------------------------------------
+  private _watchClientToken(client: KickClient, initialExpiresAt: number): void {
+    let _token: OAuthToken | null = (client as any).token;
+    let lastExpiresAt = initialExpiresAt;
+    const provider = this;
+
+    Object.defineProperty(client, 'token', {
+      configurable: true,
+      enumerable: true,
+      get(): OAuthToken | null {
+        return _token;
+      },
+      set(newToken: OAuthToken | null): void {
+        _token = newToken;
+        if (
+          newToken &&
+          newToken.expiresAt !== lastExpiresAt &&
+          provider.broadcasterId &&
+          provider.channelSlug
+        ) {
+          lastExpiresAt = newToken.expiresAt;
+          const tokenFile: KickTokenFile = {
+            ...newToken,
+            broadcasterId: provider.broadcasterId!,
+            channelSlug: provider.channelSlug!,
+          };
+          provider.writeTokenFile(tokenFile).catch(() => {
+            defaultLogger.warn('[Kick] Failed to persist refreshed token');
+          });
+          defaultLogger.info('[Kick] Token auto-refreshed, persisted to disk');
+        }
+      },
+    });
+  }
+
+  // ---------------------------------------------------------------------------
   // Wire everything up once we have a valid token + channel info
   // ---------------------------------------------------------------------------
   private async _initFromToken(
@@ -178,10 +218,20 @@ export class KickProvider implements PlatformProvider {
     this.client = client ?? this.buildClient();
     this.client.setToken(token);
 
+    if (!token.broadcasterId) {
+      const { id, slug } = await this._fetchSelfChannel(this.client);
+      token.broadcasterId = id;
+      token.channelSlug = slug;
+      await this.writeTokenFile(token);
+      defaultLogger.info('[Kick] broadcasterId missing from token file — fetched and persisted');
+    }
+
     this.broadcasterId = token.broadcasterId;
     this.channelSlug = token.channelSlug;
     this.isAuthenticatedFlag = true;
     this.connectionStatus = 'connected';
+
+    this._watchClientToken(this.client, token.expiresAt);
 
     this._startPoll();
     defaultLogger.info(`[Kick] authenticated as ${this.channelSlug} (id: ${this.broadcasterId})`);
@@ -193,7 +243,11 @@ export class KickProvider implements PlatformProvider {
   private async _fetchSelfChannel(client: KickClient): Promise<{ id: number; slug: string }> {
     const channels = await client.channels.getChannels();
     if (!channels.length) throw new Error('No channel found for authenticated user');
-    return { id: channels[0].user_id, slug: channels[0].slug };
+    // The type definition says `user_id` but the real API returns `broadcaster_user_id`
+    const ch = channels[0] as any;
+    const id: number = ch.broadcaster_user_id ?? ch.user_id ?? ch.user?.id ?? ch.id;
+    if (!id) throw new Error('Could not determine broadcaster_user_id from Kick channel response');
+    return { id, slug: ch.slug };
   }
 
   // ---------------------------------------------------------------------------
@@ -336,13 +390,37 @@ export class KickProvider implements PlatformProvider {
   }
 
   // ---------------------------------------------------------------------------
+  // Wraps updateChannel and swallows the expected 204 No Content "error".
+  // Kick's PATCH /channels returns 204 on success. The kick-api library always
+  // calls response.json() on 2xx and re-wraps the resulting parse error as
+  // KickNetworkError. Node/browser: SyntaxError on empty body. Bun: response
+  // .json() returns null → TypeError accessing .data. Real network errors
+  // (DNS, timeout) produce TypeError("Failed to fetch") / AbortError.
+  // ---------------------------------------------------------------------------
+  private async _doUpdateChannel(
+    update: { stream_title?: string; category_id?: number; custom_tags?: string[] },
+  ): Promise<void> {
+    try {
+      await this.client!.channels.updateChannel(update);
+    } catch (err) {
+      const origErr = (err as any).originalError;
+      const is204 =
+        err instanceof KickNetworkError &&
+        (origErr instanceof SyntaxError ||
+          origErr?.name === 'SyntaxError' ||
+          (origErr?.name === 'TypeError' && origErr?.message?.includes('null')));
+      if (!is204) throw err;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // updateStreamMetadata — title, category (resolved by name), tags
   // ---------------------------------------------------------------------------
-  async updateStreamMetadata(metadata: StreamMetadata): Promise<void> {
+  async updateStreamMetadata(metadata: StreamMetadata): Promise<MetadataUpdateResult> {
     if (!this.isAuthenticated()) throw new Error('Not authenticated with Kick');
     if (!this.client) {
       defaultLogger.warn('[Kick] updateStreamMetadata — client not ready (mock mode)');
-      return;
+      return {};
     }
 
     try {
@@ -371,31 +449,46 @@ export class KickProvider implements PlatformProvider {
         const raw = metadata.tags as string[] | string;
         update.custom_tags = Array.isArray(raw)
           ? raw
-          : String(raw)
-              .split(',')
-              .map((t) => t.trim())
-              .filter(Boolean);
+          : String(raw).split(',').map((t) => t.trim()).filter(Boolean);
       }
 
       try {
-        await this.client.channels.updateChannel(update);
+        await this._doUpdateChannel(update);
       } catch (err) {
-        // Kick's PATCH /channels returns 204 No Content. The kick-api library
-        // always calls response.json() on any 2xx, so a bodyless 204 throws a
-        // SyntaxError which the library re-wraps as KickNetworkError. A real
-        // network error (DNS, timeout) produces a TypeError/AbortError inside
-        // KickNetworkError — not a SyntaxError — so we can safely distinguish
-        // the two and treat only the SyntaxError case as success.
-        if (
-          err instanceof KickNetworkError &&
-          (err as any).originalError instanceof SyntaxError
-        ) {
-          // 204 No Content from a successful PATCH — not an error
-        } else {
-          throw err;
+        // Tags caused a 500 — probe each tag individually to find which are valid.
+        if (update.custom_tags?.length && err instanceof KickServerError && (err as any).status === 500) {
+          const allTags = update.custom_tags;
+          delete update.custom_tags;
+
+          // Update title/category first so those fields always go through.
+          if (Object.keys(update).length) {
+            await this._doUpdateChannel(update);
+          }
+
+          // Probe each tag in parallel.
+          defaultLogger.warn('[Kick] custom_tags caused 500, probing tags individually:', allTags);
+          const probeResults = await Promise.allSettled(
+            allTags.map((tag) => this._doUpdateChannel({ custom_tags: [tag] })),
+          );
+          const validTags: string[] = [];
+          const invalidTags: string[] = [];
+          probeResults.forEach((r, i) => {
+            if (r.status === 'fulfilled') validTags.push(allTags[i]!);
+            else invalidTags.push(allTags[i]!);
+          });
+
+          // Apply all valid tags in one final call.
+          if (validTags.length) {
+            await this._doUpdateChannel({ custom_tags: validTags });
+          }
+
+          defaultLogger.info('[Kick] tag probe done — valid:', validTags, 'invalid:', invalidTags);
+          return { appliedTags: validTags, skippedTags: invalidTags };
         }
+        throw err;
       }
       defaultLogger.info('[Kick] channel updated', update);
+      return {};
     } catch (err) {
       this.lastError = err instanceof Error ? err.message : String(err);
       defaultLogger.error('[Kick] updateStreamMetadata error:', err);

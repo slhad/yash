@@ -41,6 +41,7 @@ import type {
   StreamMetadata,
   WebhookConfig,
 } from './base';
+import type { MetadataUpdateResult } from './base';
 import { StreamStatus } from './base';
 
 // ---------------------------------------------------------------------------
@@ -371,11 +372,11 @@ export class TwitchProvider implements PlatformProvider {
   // ---------------------------------------------------------------------------
   // updateStreamMetadata — title, game/category, tags, notification via Helix
   // ---------------------------------------------------------------------------
-  async updateStreamMetadata(metadata: StreamMetadata): Promise<void> {
+  async updateStreamMetadata(metadata: StreamMetadata): Promise<MetadataUpdateResult> {
     if (!this.isAuthenticated()) throw new Error('Not authenticated with Twitch');
     if (!this.apiClient || !this.userId) {
       defaultLogger.warn('[Twitch] updateStreamMetadata called before apiClient ready');
-      return;
+      return {};
     }
 
     try {
@@ -407,6 +408,7 @@ export class TwitchProvider implements PlatformProvider {
 
       await this.apiClient.channels.updateChannelInfo(this.userId, update);
       defaultLogger.info('[Twitch] channel info updated', update);
+      return {};
     } catch (err) {
       this.lastError = err instanceof Error ? err.message : String(err);
       defaultLogger.error('[Twitch] updateStreamMetadata error:', err);

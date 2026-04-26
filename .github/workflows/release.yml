@@ -1,0 +1,81 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-appimage:
+    name: Build AppImage (Linux x86_64)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: stable
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Pre-build web assets
+        run: bun run build:web
+
+      - name: Build standalone binary
+        run: bun build --compile --target=bun-linux-x64 src/index.tsx --outfile dist/yash
+
+      - name: Create AppDir
+        run: |
+          mkdir -p AppDir/usr/bin AppDir/usr/share/icons/hicolor/256x256/apps
+
+          cp dist/yash AppDir/usr/bin/yash
+
+          cat > AppDir/AppRun <<'APPRUN'
+          #!/bin/bash
+          HERE="$(dirname "$(readlink -f "$0")")"
+          exec "$HERE/usr/bin/yash" "$@"
+          APPRUN
+          chmod +x AppDir/AppRun
+
+          cat > AppDir/yash.desktop <<'DESKTOP'
+          [Desktop Entry]
+          Name=YASH
+          Comment=Yet Another Stream Hub
+          Exec=yash
+          Icon=yash
+          Type=Application
+          Categories=Utility;Network;
+          Terminal=true
+          DESKTOP
+
+          # Generate a simple icon using ImageMagick (available on ubuntu-latest)
+          convert -size 256x256 xc:'#1a1a2e' \
+            -fill '#e94560' -draw "roundrectangle 32,32 224,224 20,20" \
+            -fill white -pointsize 100 -gravity center -annotate 0 "Y" \
+            AppDir/yash.png
+          cp AppDir/yash.png AppDir/usr/share/icons/hicolor/256x256/apps/yash.png
+
+      - name: Download appimagetool
+        run: |
+          wget -q -O appimagetool \
+            https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool
+
+      - name: Build AppImage
+        env:
+          VERSION: ${{ github.ref_name }}
+          ARCH: x86_64
+          # Avoid FUSE dependency by extracting appimagetool before running
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        run: ./appimagetool AppDir "yash-${VERSION}-x86_64.AppImage"
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: yash-*-x86_64.AppImage
+          generate_release_notes: true

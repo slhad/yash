@@ -75,12 +75,16 @@ export class ChatService {
     const platformsToSendTo =
       targetPlatforms.length > 0 ? targetPlatforms : Array.from(this.providers.keys());
 
-    const sendPromises = platformsToSendTo
-      .filter((platform) => this.providers.has(platform))
-      .map((platform) => this.providers.get(platform)?.sendMessage(message));
+    const platforms = platformsToSendTo.filter((p) => this.providers.has(p));
+    const results = await Promise.allSettled(
+      platforms.map((p) => this.providers.get(p)!.sendMessage(message)),
+    );
 
-    // Wait for all messages to be sent
-    await Promise.all(sendPromises);
+    const failures = results
+      .map((r, i) => (r.status === 'rejected' ? `${platforms[i]}: ${(r as PromiseRejectedResult).reason?.message ?? r.reason}` : null))
+      .filter(Boolean);
+
+    if (failures.length) throw new Error(failures.join('; '));
   }
 
   /**

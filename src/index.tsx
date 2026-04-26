@@ -213,7 +213,9 @@ function initUI(renderer: CliRenderer, messages: string[]): UINodes {
     stickyStart: 'bottom',
   });
   for (const msg of messages.slice(-15)) {
-    chatScroll.add(new TextRenderable(renderer, { content: msg, fg: 'white' }));
+    const content = typeof msg === 'string' ? msg : msg.content;
+    const fg = typeof msg === 'string' ? 'white' : msg.fg;
+    chatScroll.add(new TextRenderable(renderer, { content, fg }));
   }
 
   const chatBox = new BoxRenderable(renderer, {
@@ -404,7 +406,9 @@ function updateUI(messages: string[]): void {
   // Chat: clear and refill
   clearScrollBox(chatScroll);
   for (const msg of messages.slice(-15)) {
-    chatScroll.add(new TextRenderable(renderer, { content: msg, fg: 'white' }));
+    const content = typeof msg === 'string' ? msg : msg.content;
+    const fg = typeof msg === 'string' ? 'white' : msg.fg;
+    chatScroll.add(new TextRenderable(renderer, { content, fg }));
   }
 
   // Sidebar: clear and refill
@@ -875,10 +879,38 @@ function openStreamModal(preselected: string[]): void {
     try {
       const merged = { ...savedStream, ...changed };
       await saveConfig({ stream: merged });
-      await streamService.setStreamMetadata(targetPlatforms, merged);
-      lastMessages.push('[stream] Updated.');
+      let platformResults: { platform: string; skipped?: string[]; skippedTags?: string[]; appliedTags?: string[]; error?: string }[] = [];
+      try {
+        platformResults = await streamService.setStreamMetadata(targetPlatforms, merged);
+      } catch (err: any) {
+        platformResults = err.platformResults ?? [];
+      }
+      for (const r of platformResults) {
+        if (r.error) {
+          lastMessages.push({ content: `[stream] ${r.platform}: ✗ ${r.error}`, fg: 'red' });
+        } else {
+          // Build the success line — include accepted tags inline if present.
+          const okFields = Object.keys(changed)
+            .filter((k) => k !== 'tags' || (!r.skippedTags?.length && !r.appliedTags?.length))
+            .filter((k) => !r.skipped?.includes(k))
+            .join(', ');
+          const appliedTagStr = r.appliedTags?.length ? `  tags: ${r.appliedTags.join(', ')}` : '';
+          const hasRejected = (r.skippedTags?.length ?? 0) > 0;
+          lastMessages.push({
+            content: `[stream] ${r.platform}: ✓${okFields ? ` ${okFields}` : ''}${appliedTagStr}`,
+            fg: hasRejected ? 'yellow' : 'green',
+          });
+          // Rejected tags on a separate red line.
+          if (hasRejected) {
+            lastMessages.push({
+              content: `[stream] ${r.platform}:   ✗ tags rejected: ${r.skippedTags!.join(', ')}`,
+              fg: 'red',
+            });
+          }
+        }
+      }
     } catch (err) {
-      lastMessages.push(`[stream] Error: ${String(err)}`);
+      lastMessages.push({ content: `[stream] Error: ${String(err)}`, fg: 'red' });
     }
     updateUI(lastMessages);
   }
@@ -1145,7 +1177,8 @@ async function handleCommand(trimmed: string): Promise<void> {
 // ─── Main ────────────────────────────────────────────────────────────────────
 
 let isRunning = true;
-const lastMessages: string[] = [];
+type ChatLine = string | { content: string; fg: string };
+const lastMessages: ChatLine[] = [];
 let cliRenderer: Awaited<ReturnType<typeof createCliRenderer>> | null = null;
 const inputHistory: string[] = [];
 let historyIndex = -1;

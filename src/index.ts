@@ -1,6 +1,7 @@
 import index from '../index.html';
 import sidebyside from '../sidebyside.html';
 import unified from '../unified.html';
+import commandsJs from './utils/webCommands.bundle.js' with { type: 'text' };
 
 // When launched as TUI companion (YASH_TUI_ONLY=1), skip HTML page routes —
 // only OAuth callbacks and connect/API endpoints are needed.
@@ -37,23 +38,8 @@ export {
   youtube,
 };
 
-// Lazy-built bundle of the shared WebUI command module, cached in memory.
-// Built once on first browser request via Bun.build(), then served from cache.
-let commandsJsCache: string | null = null;
-async function getCommandsJs(): Promise<string> {
-  if (!commandsJsCache) {
-    const result = await Bun.build({
-      entrypoints: ['./src/utils/webCommands.ts'],
-      format: 'esm',
-      target: 'browser',
-      minify: false,
-    });
-    if (!result.success || result.outputs.length === 0) {
-      throw new Error(`Bun.build failed: ${result.logs.map((l) => l.message).join(', ')}`);
-    }
-    commandsJsCache = await result.outputs[0].text();
-  }
-  return commandsJsCache;
+function getCommandsJs(): string {
+  return commandsJs;
 }
 
 Bun.serve({
@@ -672,15 +658,15 @@ Bun.serve({
     // sidebyside.html as `<script type="module">` imports.
     // ------------------------------------------------------------------
     '/api/js/commands.js': {
-      GET: async () => {
+      GET: () => {
         try {
-          const js = await getCommandsJs();
+          const js = getCommandsJs();
           return new Response(js, {
             headers: { 'Content-Type': 'application/javascript' },
           });
         } catch (err) {
-          defaultLogger.error('Failed to build commands.js', err);
-          return new Response(`console.error("commands.js build failed: ${String(err)}");`, {
+          defaultLogger.error('Failed to serve commands.js', err);
+          return new Response(`console.error("commands.js failed: ${String(err)}");`, {
             status: 500,
             headers: { 'Content-Type': 'application/javascript' },
           });

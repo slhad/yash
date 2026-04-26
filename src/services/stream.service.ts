@@ -1,5 +1,8 @@
-import { PlatformProvider, StreamMetadata, StreamStatus } from '../platforms/base';
+import type { MetadataUpdateResult, PlatformProvider, StreamMetadata } from '../platforms/base';
+import { StreamStatus } from '../platforms/base';
 import { defaultLogger } from '../utils/logger';
+
+export type PlatformMetadataResult = { platform: string; skipped?: string[]; skippedTags?: string[]; appliedTags?: string[]; error?: string };
 
 export class StreamService {
   private providers: Map<string, PlatformProvider> = new Map();
@@ -10,29 +13,41 @@ export class StreamService {
     this.checkAndNotifyStatus(platform);
   }
 
-  async setStreamMetadata(platforms: string[], metadata: StreamMetadata): Promise<void> {
-    const updatePromises = platforms
-      .filter((platform) => this.providers.has(platform))
-      .map((platform) => this.providers.get(platform)?.updateStreamMetadata(metadata));
+  async setStreamMetadata(
+    platforms: string[],
+    metadata: StreamMetadata,
+  ): Promise<PlatformMetadataResult[]> {
+    const eligible = platforms.filter((p) => this.providers.has(p));
+    const settled = await Promise.allSettled(
+      eligible.map((p) => this.providers.get(p)!.updateStreamMetadata(metadata)),
+    );
 
-    try {
-      await Promise.all(updatePromises);
+    const platformResults: PlatformMetadataResult[] = [];
+    const failures: string[] = [];
 
-      for (const platform of platforms) {
-        if (this.providers.has(platform)) {
-          const provider = this.providers.get(platform)!;
-          this.notifyStatusChange(platform, provider.getStreamStatus());
-        }
+    settled.forEach((r, i) => {
+      const platform = eligible[i]!;
+      const provider = this.providers.get(platform)!;
+      if (r.status === 'fulfilled') {
+        this.notifyStatusChange(platform, provider.getStreamStatus());
+        const val = (r as PromiseFulfilledResult<MetadataUpdateResult>).value;
+        const result: PlatformMetadataResult = { platform };
+        if (val.skipped?.length) result.skipped = val.skipped;
+        if (val.skippedTags?.length) result.skippedTags = val.skippedTags;
+        if (val.appliedTags?.length) result.appliedTags = val.appliedTags;
+        platformResults.push(result);
+      } else {
+        const reason = (r as PromiseRejectedResult).reason;
+        defaultLogger.error(`Failed to update stream metadata on ${platform}:`, reason);
+        this.notifyStatusChange(platform, StreamStatus.ERROR);
+        const msg: string = reason?.message ?? String(reason);
+        failures.push(`${platform}: ${msg}`);
+        platformResults.push({ platform, error: msg });
       }
-    } catch (error) {
-      defaultLogger.error('Failed to update stream metadata on some platforms:', error);
-      for (const platform of platforms) {
-        if (this.providers.has(platform)) {
-          this.notifyStatusChange(platform, StreamStatus.ERROR);
-        }
-      }
-      throw error;
-    }
+    });
+
+    if (failures.length) throw Object.assign(new Error(failures.join('; ')), { platformResults });
+    return platformResults;
   }
 
   getStreamKey(platform: string): string | null {
