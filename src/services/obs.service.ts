@@ -1,6 +1,5 @@
-// ObsService for interacting with OBS-studio via obs-websocket library
-// Note: This is a TypeScript service that would use the obs-websocket-js library
-// For now, we'll create a mock implementation that demonstrates the interface
+// ObsService for interacting with OBS-studio via obs-websocket v5 protocol
+import { createHash } from 'crypto';
 
 import { getConfig, isDemoMode } from '../utils/config';
 import { defaultLogger } from '../utils/logger';
@@ -27,7 +26,7 @@ export class ObsService {
   private connectDelayMs: number = 1000;
   // Optional WebSocket transport support
   private ws: any = null;
-  private pendingRequests: Map<number, { resolve: (v: any) => void; reject: (e: any) => void }> =
+  private pendingRequests: Map<string, { resolve: (v: any) => void; reject: (e: any) => void }> =
     new Map();
   private requestCounter: number = 0;
   private useWebSocketTransport: boolean = false;
@@ -137,21 +136,17 @@ export class ObsService {
       return;
     }
 
-    // If WebSocket transport is requested and available, use a real WS client
+    // If WebSocket transport is requested and available, use the OBS WebSocket v5 protocol
     if (this.useWebSocketTransport && typeof WebSocket !== 'undefined') {
       this.connectionPromise = new Promise((resolve, reject) => {
         try {
           defaultLogger.info(`Connecting to OBS at ws://${this.host}:${this.port}...`);
           const ws = new WebSocket(`ws://${this.host}:${this.port}`);
           this.ws = ws;
+          let identified = false;
 
           ws.onopen = () => {
-            this.connected = true;
-            this.connectionPromise = null;
-            this.notifyStatusChange(true);
-            this.setupReconnection();
-            defaultLogger.info('Connected to OBS');
-            resolve();
+            defaultLogger.info('OBS WebSocket open, waiting for Hello...');
           };
 
           ws.onmessage = (ev: any) => {
@@ -159,19 +154,40 @@ export class ObsService {
               const data =
                 typeof ev.data === 'string' ? ev.data : new TextDecoder().decode(ev.data);
               const msg = JSON.parse(data);
-              if (msg && msg.requestId !== undefined) {
-                const id =
-                  typeof msg.requestId === 'number' ? msg.requestId : Number(msg.requestId);
-                const pending =
-                  this.pendingRequests.get(id) ?? this.pendingRequests.get(msg.requestId);
-                if (pending) {
-                  pending.resolve(msg.response);
-                  this.pendingRequests.delete(id);
-                  this.pendingRequests.delete(msg.requestId);
+
+              if (msg.op === 0) {
+                // Hello — respond with Identify (with auth if required)
+                const identifyData: Record<string, unknown> = { rpcVersion: 1 };
+                if (msg.d?.authentication && this.password) {
+                  identifyData.authentication = this.computeObsAuth(
+                    msg.d.authentication.challenge,
+                    msg.d.authentication.salt,
+                  );
+                }
+                ws.send(JSON.stringify({ op: 1, d: identifyData }));
+              } else if (msg.op === 2) {
+                // Identified — authentication succeeded, connection ready
+                identified = true;
+                this.connected = true;
+                this.connectionPromise = null;
+                this.notifyStatusChange(true);
+                this.setupReconnection();
+                defaultLogger.info('Connected to OBS');
+                resolve();
+              } else if (msg.op === 7) {
+                // RequestResponse
+                const reqId = msg.d?.requestId;
+                if (reqId !== undefined) {
+                  const key = String(reqId);
+                  const pending = this.pendingRequests.get(key);
+                  if (pending) {
+                    pending.resolve(msg.d.responseData);
+                    this.pendingRequests.delete(key);
+                  }
                 }
               }
             } catch (e) {
-              // ignore
+              // ignore parse errors
             }
           };
 
@@ -179,13 +195,17 @@ export class ObsService {
             this.connected = false;
             this.notifyStatusChange(false);
             defaultLogger.info('Disconnected from OBS');
-            // Start reconnection attempts using exponential backoff + jitter
-            this.scheduleReconnectAttempt();
+            if (!identified) {
+              this.connectionPromise = null;
+              reject(new Error(`Failed to connect to OBS at ws://${this.host}:${this.port}`));
+            } else {
+              this.scheduleReconnectAttempt();
+            }
           };
 
           ws.onerror = (err: any) => {
-            defaultLogger.error('OBS websocket error', err);
-            reject(err);
+            // onclose fires after onerror and handles cleanup/rejection
+            defaultLogger.error('OBS WebSocket error', err);
           };
         } catch (error) {
           defaultLogger.error('Failed to create WebSocket to OBS:', error);
@@ -270,6 +290,33 @@ export class ObsService {
   }
 
   /**
+   * Return the current connection parameters (host, port, password).
+   */
+  getConnectionInfo(): { host: string; port: number; password: string | null } {
+    return { host: this.host, port: this.port, password: this.password };
+  }
+
+  /**
+   * Update connection parameters at runtime. Call disconnect() + connect() to apply.
+   */
+  reconfigure(host: string, port: number, password: string | null): void {
+    this.host = host;
+    this.port = port;
+    this.password = password;
+  }
+
+  /**
+   * Compute OBS WebSocket v5 authentication string:
+   * base64(sha256(base64(sha256(password + salt)) + challenge))
+   */
+  private computeObsAuth(challenge: string, salt: string): string {
+    const secret = createHash('sha256')
+      .update((this.password ?? '') + salt)
+      .digest('base64');
+    return createHash('sha256').update(secret + challenge).digest('base64');
+  }
+
+  /**
    * Send a request to OBS
    */
   async sendRequest(requestType: string, requestData: any = {}): Promise<any> {
@@ -277,10 +324,10 @@ export class ObsService {
       throw new Error('Not connected to OBS');
     }
 
-    // If using WebSocket transport and ws is available, send request over WS
+    // If using WebSocket transport and ws is available, send request in OBS WS v5 format
     if (this.useWebSocketTransport && this.ws) {
-      const requestId = ++this.requestCounter;
-      const payload = { requestType, requestData, requestId };
+      const requestId = String(++this.requestCounter);
+      const payload = { op: 6, d: { requestType, requestData, requestId } };
       defaultLogger.info(`Sending OBS request: ${requestType}`, requestData);
 
       return new Promise((resolve, reject) => {

@@ -15,7 +15,12 @@ export const kick = new KickProvider();
 
 export const chatService = new ChatService();
 export const streamService = new StreamService();
-export const obsService = new ObsService('localhost', 4455, null);
+export const obsService = new ObsService(
+  process.env.YASH_OBS_SERVER ?? 'localhost',
+  process.env.YASH_OBS_PORT ? parseInt(process.env.YASH_OBS_PORT, 10) : 4455,
+  process.env.YASH_OBS_PASSWORD ?? null,
+  true, // real WebSocket transport (OBS WebSocket v5)
+);
 export const authService = new AuthService();
 export const adminService = new AdminService();
 export const settingsStore = new SettingsStore();

@@ -3,9 +3,9 @@ import { ObsService } from '../src/services/obs.service';
 
 describe('ObsService WebSocket transport', () => {
   test('should be able to send requests and receive responses via WebSocket', async () => {
-    // Start a WebSocket server on a random port
     const port = 9001;
-    // Use an in-process fake WebSocket to avoid network flakiness in tests
+
+    // Fake WebSocket implementing OBS WebSocket v5 protocol
     class FakeWebSocket {
       url: string;
       onopen: (() => void) | null = null;
@@ -14,18 +14,44 @@ describe('ObsService WebSocket transport', () => {
       onerror: ((e: any) => void) | null = null;
       constructor(url: string) {
         this.url = url;
-        // simulate async open
-        setTimeout(() => this.onopen?.(), 0);
+        setTimeout(() => {
+          this.onopen?.();
+          // Send Hello (op:0) — no authentication required
+          this.onmessage?.({
+            data: JSON.stringify({ op: 0, d: { obsWebSocketVersion: '5.3.6', rpcVersion: 1 } }),
+          });
+        }, 0);
       }
       send(data: string) {
         try {
           const msg = JSON.parse(data);
-          const response = {
-            requestId: msg.requestId,
-            response: { success: true, echo: msg.requestType },
-          };
-          // simulate async response
-          setTimeout(() => this.onmessage?.({ data: JSON.stringify(response) }), 0);
+          if (msg.op === 1) {
+            // Identify → Identified (op:2)
+            setTimeout(
+              () =>
+                this.onmessage?.({
+                  data: JSON.stringify({ op: 2, d: { negotiatedRpcVersion: 1 } }),
+                }),
+              0,
+            );
+          } else if (msg.op === 6) {
+            // Request → RequestResponse (op:7)
+            setTimeout(
+              () =>
+                this.onmessage?.({
+                  data: JSON.stringify({
+                    op: 7,
+                    d: {
+                      requestType: msg.d.requestType,
+                      requestId: msg.d.requestId,
+                      requestStatus: { result: true, code: 100 },
+                      responseData: { success: true, echo: msg.d.requestType },
+                    },
+                  }),
+                }),
+              0,
+            );
+          }
         } catch (e) {
           setTimeout(() => this.onerror?.(e), 0);
         }
@@ -47,7 +73,6 @@ describe('ObsService WebSocket transport', () => {
 
     await obs.disconnect();
 
-    // restore global WebSocket
     (globalThis as any).WebSocket = OriginalWebSocket;
   });
 });

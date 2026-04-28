@@ -791,6 +791,152 @@ function openYouTubeSetupModal(): void {
   }
 }
 
+function openObsConnectModal(): void {
+  if (!uiNodes || activeModal) return;
+  const { renderer } = uiNodes;
+
+  const info = obsService.getConnectionInfo();
+  const statusLabel = obsService.isConnected() ? '● Connected' : '○ Disconnected';
+
+  const instructions = new TextRenderable(renderer, {
+    content:
+      ` OBS status: ${statusLabel}\n\n` +
+      ' To enable the OBS WebSocket server:\n' +
+      '  OBS → Tools → WebSocket Server Settings → Enable WebSocket server\n' +
+      '  Set the port and password below to match.\n',
+    fg: 'white',
+  });
+
+  const hostLabel = new TextRenderable(renderer, { content: ' Host:', fg: 'yellow' });
+  const hostInput = new InputRenderable(renderer, {
+    placeholder: 'e.g. localhost',
+    width: '100%',
+    value: info.host,
+  });
+
+  const portLabel = new TextRenderable(renderer, { content: ' Port:', fg: 'yellow' });
+  const portInput = new InputRenderable(renderer, {
+    placeholder: 'e.g. 4455',
+    width: '100%',
+    value: String(info.port),
+  });
+
+  const passwordLabel = new TextRenderable(renderer, { content: ' Password:', fg: 'yellow' });
+  const passwordInput = new InputRenderable(renderer, {
+    placeholder: '(leave blank if no password)',
+    width: '100%',
+    value: info.password ?? '',
+  });
+
+  const hint = new TextRenderable(renderer, {
+    content: ' [Tab] switch field   [Enter] connect   [Esc] cancel',
+    fg: 'gray',
+  });
+
+  const box = new BoxRenderable(renderer, {
+    position: 'absolute',
+    top: '10%',
+    left: '10%',
+    width: '80%',
+    zIndex: 100,
+    border: true,
+    borderStyle: 'rounded',
+    borderColor: 'yellow',
+    backgroundColor: 'black',
+    shouldFill: true,
+    padding: 1,
+    flexDirection: 'column',
+    gap: 1,
+    title: ' OBS WebSocket ',
+  });
+
+  box.add(instructions);
+  box.add(hostLabel);
+  box.add(hostInput);
+  box.add(portLabel);
+  box.add(portInput);
+  box.add(passwordLabel);
+  box.add(passwordInput);
+  box.add(hint);
+
+  renderer.root.add(box);
+
+  activeModal = { box, focusIndex: 0 };
+
+  const inputs = [hostInput, portInput, passwordInput];
+  inputs[0].focus();
+
+  function closeModal(save: boolean): void {
+    if (!activeModal) return;
+    renderer.removeInputHandler(modalKeyHandler);
+    renderer.root.remove(box.id);
+    activeModal = null;
+    uiNodes?.inputEl.focus();
+
+    if (!save) {
+      lastMessages.push('[obs] Cancelled.');
+      updateUI(lastMessages);
+      return;
+    }
+
+    const host = hostInput.value.trim() || 'localhost';
+    const port = Number.parseInt(portInput.value.trim(), 10) || 4455;
+    const password = passwordInput.value.trim() || null;
+
+    saveConfig({
+      obs: { websocket: { server: host, port: String(port), password: password ?? '' } },
+    }).then(async () => {
+      obsService.reconfigure(host, port, password);
+      lastMessages.push(
+        `[obs] Saved — ws://${host}:${port}  password: ${password ?? '(none)'}`,
+      );
+      if (obsService.isConnected()) {
+        await obsService.disconnect();
+      }
+      lastMessages.push('[obs] Connecting...');
+      updateUI(lastMessages);
+      try {
+        await obsService.connect();
+        lastMessages.push('[obs] Connected to OBS');
+      } catch {
+        lastMessages.push(
+          '[obs] Connection failed — is OBS running with WebSocket server enabled?',
+        );
+      }
+      updateUI(lastMessages);
+    });
+  }
+
+  const modalKeyHandler = (sequence: string): boolean => {
+    if (!activeModal) return false;
+    if (sequence === '\t') {
+      inputs[activeModal.focusIndex].blur();
+      activeModal.focusIndex = (activeModal.focusIndex + 1) % inputs.length;
+      inputs[activeModal.focusIndex].focus();
+      return true;
+    }
+    if (sequence === '\r' || sequence === '\n') {
+      closeModal(true);
+      return true;
+    }
+    if (sequence === '\x1b' || sequence === '\x1b\x1b') {
+      closeModal(false);
+      return true;
+    }
+    if (sequence === '\x1b[A' || sequence === '\x1b[B') return true;
+    return false;
+  };
+
+  renderer.prependInputHandler(modalKeyHandler);
+
+  const escapeViaKeyDown = (key: { name: string }) => {
+    if (key.name === 'escape' && activeModal) closeModal(false);
+  };
+  for (const input of inputs) {
+    input.onKeyDown = escapeViaKeyDown as any;
+  }
+}
+
 function openYouTubeStreamKeyModal(onSaved?: () => void): void {
   if (!uiNodes || activeModal) return;
   const { renderer } = uiNodes;
@@ -1743,6 +1889,12 @@ async function handleCommand(trimmed: string): Promise<void> {
 
   if (cmd === '/connect' && parts[1]) {
     const platform = parts[1].toLowerCase();
+
+    if (platform === 'obs') {
+      openObsConnectModal();
+      return;
+    }
+
     const provider =
       platform === 'youtube'
         ? youtube
@@ -1930,7 +2082,9 @@ async function handleCommand(trimmed: string): Promise<void> {
     process.exit(0);
   } else if (cmd === '/help') {
     lastMessages.push('[help] Available commands:');
-    lastMessages.push('[help]   /connect <youtube|twitch|kick>  — authenticate a platform');
+    lastMessages.push(
+      '[help]   /connect <youtube|twitch|kick|obs>  — authenticate a platform or configure OBS',
+    );
     lastMessages.push(
       '[help]   /stream [platform…]  — edit stream info (opens modal, persists to config)',
     );

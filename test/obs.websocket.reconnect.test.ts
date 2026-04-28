@@ -13,7 +13,6 @@ describe('ObsService WebSocket reconnection (integration)', () => {
       setAvailable(val: boolean) {
         this.available = val;
         if (!val) {
-          // simulate immediate close for all connected clients
           for (const c of Array.from(this.clients)) {
             c._simulateClose();
           }
@@ -21,6 +20,7 @@ describe('ObsService WebSocket reconnection (integration)', () => {
       },
     };
 
+    // Fake WebSocket implementing OBS WebSocket v5 protocol
     class FakeWebSocket {
       url: string;
       onopen: (() => void) | null = null;
@@ -31,10 +31,14 @@ describe('ObsService WebSocket reconnection (integration)', () => {
         this.url = url;
         if (FakeServer.available) {
           FakeServer.clients.add(this);
-          // async open
-          setTimeout(() => this.onopen?.(), 0);
+          setTimeout(() => {
+            this.onopen?.();
+            // Send Hello (op:0) — no authentication required
+            this.onmessage?.({
+              data: JSON.stringify({ op: 0, d: { obsWebSocketVersion: '5.3.6', rpcVersion: 1 } }),
+            });
+          }, 0);
         } else {
-          // simulate immediate error/close
           setTimeout(() => {
             this.onerror?.(new Error('connection refused'));
             this.onclose?.();
@@ -45,11 +49,33 @@ describe('ObsService WebSocket reconnection (integration)', () => {
       send(data: string) {
         try {
           const msg = JSON.parse(data);
-          const response = {
-            requestId: msg.requestId,
-            response: { success: true, echo: msg.requestType },
-          };
-          setTimeout(() => this.onmessage?.({ data: JSON.stringify(response) }), 0);
+          if (msg.op === 1) {
+            // Identify → Identified (op:2)
+            setTimeout(
+              () =>
+                this.onmessage?.({
+                  data: JSON.stringify({ op: 2, d: { negotiatedRpcVersion: 1 } }),
+                }),
+              0,
+            );
+          } else if (msg.op === 6) {
+            // Request → RequestResponse (op:7)
+            setTimeout(
+              () =>
+                this.onmessage?.({
+                  data: JSON.stringify({
+                    op: 7,
+                    d: {
+                      requestType: msg.d.requestType,
+                      requestId: msg.d.requestId,
+                      requestStatus: { result: true, code: 100 },
+                      responseData: { success: true, echo: msg.d.requestType },
+                    },
+                  }),
+                }),
+              0,
+            );
+          }
         } catch (e) {
           setTimeout(() => this.onerror?.(e), 0);
         }
@@ -62,7 +88,6 @@ describe('ObsService WebSocket reconnection (integration)', () => {
         }, 0);
       }
 
-      // helper for server-initiated close
       _simulateClose() {
         setTimeout(() => {
           this.onclose?.();
@@ -94,22 +119,20 @@ describe('ObsService WebSocket reconnection (integration)', () => {
     await waitFor(() => obs.isConnected(), 2000);
     expect(obs.isConnected()).toBe(true);
 
-    // simulate server going down -> connected should become false
+    // simulate server going down
     FakeServer.setAvailable(false);
-    // allow the close callbacks to run (next tick)
     await new Promise((r) => setTimeout(r, 0));
     await Promise.resolve();
     await waitFor(() => !obs.isConnected(), 2000);
     expect(obs.isConnected()).toBe(false);
 
-    // bring server back up before the scheduled reconnect attempt occurs
+    // bring server back up before the scheduled reconnect fires
     FakeServer.setAvailable(true);
 
-    // Wait for reconnect to succeed; poll instead of fixed sleep
+    // wait for reconnect to succeed
     await waitFor(() => obs.isConnected(), baseMs + 2000);
     expect(obs.isConnected()).toBe(true);
 
-    // cleanup
     (globalThis as any).WebSocket = originalWebSocket;
   });
 });

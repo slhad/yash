@@ -20,7 +20,7 @@ export const TUI_COMMANDS = [
 
 export type TuiCommand = (typeof TUI_COMMANDS)[number];
 
-const PLATFORMS = ['youtube', 'twitch', 'kick'];
+const PLATFORMS = ['youtube', 'twitch', 'kick', 'obs'];
 const MSG_TARGETS = ['all', 'youtube', 'twitch', 'kick'];
 const SETTINGS_KEYS = [
   'title.visible',
