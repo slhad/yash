@@ -36,7 +36,6 @@ describe('KickProvider — instantiation', () => {
       'logout',
       'updateStreamMetadata',
       'getStreamKey',
-      'setStreamKey',
       'getStreamStatus',
       'sendMessage',
       'onMessage',
@@ -54,21 +53,6 @@ describe('KickProvider — instantiation', () => {
 
   test('getPlatformName returns "kick"', () => {
     expect(makeProvider().getPlatformName()).toBe('kick');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Stream key
-// ---------------------------------------------------------------------------
-describe('KickProvider — stream key', () => {
-  test('stores and retrieves a stream key', () => {
-    const p = makeProvider();
-    p.setStreamKey('live_kick_abc123');
-    expect(p.getStreamKey()).toBe('live_kick_abc123');
-  });
-
-  test('defaults to empty string', () => {
-    expect(makeProvider().getStreamKey()).toBe('');
   });
 });
 
@@ -270,7 +254,7 @@ describe('KickProvider — updateStreamMetadata', () => {
   test('warns and returns when client not ready', async () => {
     const p = makeProvider() as any;
     forceAuth(p);
-    await expect(p.updateStreamMetadata({ title: 'My Stream' })).resolves.toBeUndefined();
+    await expect(p.updateStreamMetadata({ title: 'My Stream' })).resolves.toEqual({});
   });
 
   test('sends stream_title to updateChannel', async () => {

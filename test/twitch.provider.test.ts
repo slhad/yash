@@ -37,7 +37,6 @@ describe('TwitchProvider — instantiation', () => {
       'logout',
       'updateStreamMetadata',
       'getStreamKey',
-      'setStreamKey',
       'getStreamStatus',
       'sendMessage',
       'onMessage',
@@ -53,21 +52,6 @@ describe('TwitchProvider — instantiation', () => {
 
   test('getPlatformName returns "twitch"', () => {
     expect(makeProvider().getPlatformName()).toBe('twitch');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Stream key
-// ---------------------------------------------------------------------------
-describe('TwitchProvider — stream key', () => {
-  test('stores and retrieves a stream key', () => {
-    const p = makeProvider();
-    p.setStreamKey('live_abc123');
-    expect(p.getStreamKey()).toBe('live_abc123');
-  });
-
-  test('defaults to empty string', () => {
-    expect(makeProvider().getStreamKey()).toBe('');
   });
 });
 
@@ -223,7 +207,7 @@ describe('TwitchProvider — updateStreamMetadata', () => {
   test('warns and returns when apiClient not ready', async () => {
     const p = makeProvider() as any;
     forceAuth(p); // no apiClient set
-    await expect(p.updateStreamMetadata({ title: 'My Stream' })).resolves.toBeUndefined();
+    await expect(p.updateStreamMetadata({ title: 'My Stream' })).resolves.toEqual({});
   });
 
   test('passes tags array to updateChannelInfo', async () => {

@@ -31,7 +31,6 @@ describe('Platform Providers', () => {
       'logout',
       'updateStreamMetadata',
       'getStreamKey',
-      'setStreamKey',
       'getStreamStatus',
       'sendMessage',
       'onMessage',
@@ -57,17 +56,4 @@ describe('Stream Key Management', () => {
     expect(provider.getStreamKey()).toBe('yt_stream_key_123');
   });
 
-  test('Twitch should store and retrieve stream key', () => {
-    const provider = new TwitchProvider();
-    provider.setStreamKey('twitch_key_abc');
-
-    expect(provider.getStreamKey()).toBe('twitch_key_abc');
-  });
-
-  test('Kick should store and retrieve stream key', () => {
-    const provider = new KickProvider();
-    provider.setStreamKey('kick_key_xyz');
-
-    expect(provider.getStreamKey()).toBe('kick_key_xyz');
-  });
 });

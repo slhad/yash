@@ -66,6 +66,25 @@ const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const GOOGLE_REVOKE_URL = 'https://oauth2.googleapis.com/revoke';
 const YT_API = 'https://www.googleapis.com/youtube/v3';
 
+// ---------------------------------------------------------------------------
+// Stream setup config (stored under platforms.youtube.setup in config.json)
+// ---------------------------------------------------------------------------
+export interface YouTubeStreamSetup {
+  defaultPlaylist: { enabled: boolean; playlistId: string; playlistTitle: string };
+  subjectPlaylist: { enabled: boolean };
+  chaptering: { enabled: boolean };
+  tags: { enabled: boolean };
+  description: { enabled: boolean };
+}
+
+const DEFAULT_SETUP: YouTubeStreamSetup = {
+  defaultPlaylist: { enabled: false, playlistId: '', playlistTitle: '' },
+  subjectPlaylist: { enabled: false },
+  chaptering: { enabled: true },
+  tags: { enabled: false },
+  description: { enabled: false },
+};
+
 export class YouTubeProvider implements PlatformProvider {
   // ---- config ----------------------------------------------------------------
   private clientId = '';
@@ -99,6 +118,10 @@ export class YouTubeProvider implements PlatformProvider {
   // The Data API v3 has no dedicated chapters endpoint; serialise via
   // getChapterDescriptionBlock() and include in updateStreamMetadata().
   private chapterMarkers: StreamMarker[] = [];
+
+  // ---- playlist dedup --------------------------------------------------------
+  // Track which broadcastId has already had playlists applied to avoid duplicates.
+  private playlistsAppliedForBroadcast: string | null = null;
 
   // ---- token file ------------------------------------------------------------
   private static dataDir =
@@ -197,23 +220,65 @@ export class YouTubeProvider implements PlatformProvider {
   // Find the active live broadcast and its chat ID
   // ---------------------------------------------------------------------------
 
-  private async _findActiveBroadcast(): Promise<{ id: string; liveChatId: string } | null> {
-    if (!this.isAuthenticated() || !this.tokenData) return null;
+  private async _findStreamIdByKey(streamKey: string): Promise<string | null> {
     try {
-      const resp = await this._request(
-        `${YT_API}/liveBroadcasts?part=id,snippet,status&broadcastStatus=active&mine=true&maxResults=1`,
-      );
+      const resp = await this._request(`${YT_API}/liveStreams?part=id,cdn&mine=true&maxResults=50`);
       if (!resp.ok) return null;
       const data = (await resp.json()) as {
-        items?: Array<{ id: string; snippet: { liveChatId?: string } }>;
+        items?: Array<{ id: string; cdn?: { ingestionInfo?: { streamName?: string } } }>;
       };
-      const broadcast = data.items?.[0];
-      if (!broadcast?.snippet?.liveChatId) return null;
-      return { id: broadcast.id, liveChatId: broadcast.snippet.liveChatId };
-    } catch (err) {
-      defaultLogger.error('[YouTube] _findActiveBroadcast error:', err);
+      return (
+        data.items?.find((s) => s.cdn?.ingestionInfo?.streamName === streamKey)?.id ?? null
+      );
+    } catch {
       return null;
     }
+  }
+
+  private async _findActiveBroadcast(): Promise<{ id: string; liveChatId: string } | null> {
+    if (!this.isAuthenticated() || !this.tokenData) return null;
+
+    const streamId = this.streamKey ? await this._findStreamIdByKey(this.streamKey) : null;
+
+    // Check active (live) first, then upcoming (ready = set up but not yet live)
+    for (const broadcastStatus of ['active', 'upcoming'] as const) {
+      try {
+        const resp = await this._request(
+          `${YT_API}/liveBroadcasts?part=id,snippet,status,contentDetails&broadcastStatus=${broadcastStatus}&mine=true&maxResults=50`,
+        );
+        if (!resp.ok) continue;
+
+        const data = (await resp.json()) as {
+          items?: Array<{
+            id: string;
+            snippet: { liveChatId?: string };
+            status: { lifeCycleStatus: string };
+            contentDetails?: { boundStreamId?: string };
+          }>;
+        };
+
+        let items = data.items ?? [];
+
+        // Narrow to the exact stream if we resolved a stream ID
+        if (streamId) {
+          items = items.filter((b) => b.contentDetails?.boundStreamId === streamId);
+        }
+
+        // For upcoming, only accept broadcasts that are fully ready
+        if (broadcastStatus === 'upcoming') {
+          items = items.filter((b) => b.status.lifeCycleStatus === 'ready');
+        }
+
+        const broadcast = items[0];
+        if (broadcast?.snippet?.liveChatId) {
+          return { id: broadcast.id, liveChatId: broadcast.snippet.liveChatId };
+        }
+      } catch (err) {
+        defaultLogger.error(`[YouTube] _findActiveBroadcast (${broadcastStatus}) error:`, err);
+      }
+    }
+
+    return null;
   }
 
   // ---------------------------------------------------------------------------
@@ -311,13 +376,14 @@ export class YouTubeProvider implements PlatformProvider {
   // ---------------------------------------------------------------------------
 
   async authenticate(): Promise<AuthResult> {
+    if (process.env.NODE_ENV === 'test') {
+      this.isAuthenticatedFlag = true;
+      return { success: true, accessToken: 'mock_youtube_access_token', expiresIn: 3600 };
+    }
+
     this.loadCfg();
 
     if (!this.clientId || !this.clientSecret) {
-      if (process.env.NODE_ENV === 'test') {
-        this.isAuthenticatedFlag = true;
-        return { success: true, accessToken: 'mock_youtube_access_token', expiresIn: 3600 };
-      }
       return { success: false, error: 'YouTube credentials not configured' };
     }
 
@@ -364,6 +430,7 @@ export class YouTubeProvider implements PlatformProvider {
     this.viewerCount = 0;
     this.chatNextPageToken = null;
     this.chatInitialized = false;
+    this.playlistsAppliedForBroadcast = null;
   }
 
   // ---------------------------------------------------------------------------
@@ -398,10 +465,19 @@ export class YouTubeProvider implements PlatformProvider {
       const current = getData.items?.[0];
       if (!current) throw new Error('Broadcast not found');
 
+      const setup = this.getSetup();
+      const shouldEnhance =
+        setup.description.enabled ||
+        setup.tags.enabled ||
+        (setup.chaptering.enabled && this.chapterMarkers.length > 0);
+      const finalDescription = shouldEnhance
+        ? this.buildFinalDescription(metadata.description ?? '', metadata.tags)
+        : undefined;
+
       const updatedSnippet = {
         ...current.snippet,
         ...(metadata.title !== undefined && { title: metadata.title }),
-        ...(metadata.description !== undefined && { description: metadata.description }),
+        ...(finalDescription !== undefined && { description: finalDescription }),
       };
 
       const putResp = await this._request(`${YT_API}/liveBroadcasts?part=snippet`, {
@@ -411,6 +487,12 @@ export class YouTubeProvider implements PlatformProvider {
       if (!putResp.ok) throw new Error(`Failed to update broadcast: ${await putResp.text()}`);
 
       defaultLogger.info('[YouTube] broadcast metadata updated');
+
+      // Apply playlist memberships once per broadcast (fire-and-forget)
+      this.applySetupPlaylists(metadata.game).catch((err) =>
+        defaultLogger.error('[YouTube] applySetupPlaylists error:', err),
+      );
+
       return {};
     } catch (err) {
       this.lastError = err instanceof Error ? err.message : String(err);
@@ -694,6 +776,166 @@ export class YouTubeProvider implements PlatformProvider {
         return `${ts} ${m.description}`;
       })
       .join('\n');
+  }
+
+  // ---------------------------------------------------------------------------
+  // List stream keys for the authenticated channel
+  // ---------------------------------------------------------------------------
+
+  async listStreams(): Promise<Array<{ id: string; title: string; streamKey: string }>> {
+    if (!this.isAuthenticated() || !this.tokenData) return [];
+    try {
+      const resp = await this._request(
+        `${YT_API}/liveStreams?part=id,snippet,cdn&mine=true&maxResults=50`,
+      );
+      if (!resp.ok) return [];
+      const data = (await resp.json()) as {
+        items?: Array<{
+          id: string;
+          snippet: { title: string };
+          cdn?: { ingestionInfo?: { streamName?: string } };
+        }>;
+      };
+      return (data.items ?? [])
+        .filter((s) => s.cdn?.ingestionInfo?.streamName)
+        .map((s) => ({
+          id: s.id,
+          title: s.snippet.title,
+          streamKey: s.cdn!.ingestionInfo!.streamName!,
+        }));
+    } catch (err) {
+      defaultLogger.error('[YouTube] listStreams error:', err);
+      return [];
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Stream setup config
+  // ---------------------------------------------------------------------------
+
+  getSetup(): YouTubeStreamSetup {
+    const cfg = getConfig()?.platforms?.youtube?.setup ?? {};
+    return {
+      defaultPlaylist: { ...DEFAULT_SETUP.defaultPlaylist, ...(cfg.defaultPlaylist ?? {}) },
+      subjectPlaylist: { ...DEFAULT_SETUP.subjectPlaylist, ...(cfg.subjectPlaylist ?? {}) },
+      chaptering: { ...DEFAULT_SETUP.chaptering, ...(cfg.chaptering ?? {}) },
+      tags: { ...DEFAULT_SETUP.tags, ...(cfg.tags ?? {}) },
+      description: { ...DEFAULT_SETUP.description, ...(cfg.description ?? {}) },
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Build final YouTube description (user desc + tags + timestamps block)
+  // ---------------------------------------------------------------------------
+
+  private buildFinalDescription(userDesc: string, tags?: string[]): string {
+    const setup = this.getSetup();
+    const sections: string[] = [];
+
+    // description.enabled: include the /stream description
+    if (setup.description.enabled && userDesc.trim()) {
+      sections.push(userDesc.trim());
+    }
+
+    // tags.enabled: format /stream tags as hashtag block (#tag1 #tag2 …)
+    if (setup.tags.enabled && tags && tags.length > 0) {
+      sections.push(tags.map((t) => (t.startsWith('#') ? t : `#${t}`)).join(' '));
+    }
+
+    if (setup.chaptering.enabled && this.chapterMarkers.length > 0) {
+      const block = this.getChapterDescriptionBlock();
+      if (block) sections.push(`Timestamps :\n${block}`);
+    }
+
+    return sections.join('\n\n');
+  }
+
+  // ---------------------------------------------------------------------------
+  // Playlist management
+  // ---------------------------------------------------------------------------
+
+  async listPlaylists(): Promise<Array<{ id: string; title: string }>> {
+    if (!this.isAuthenticated() || !this.tokenData) return [];
+    try {
+      const resp = await this._request(
+        `${YT_API}/playlists?part=id,snippet&mine=true&maxResults=50`,
+      );
+      if (!resp.ok) return [];
+      const data = (await resp.json()) as {
+        items?: Array<{ id: string; snippet: { title: string } }>;
+      };
+      return (data.items ?? []).map((p) => ({ id: p.id, title: p.snippet.title }));
+    } catch (err) {
+      defaultLogger.error('[YouTube] listPlaylists error:', err);
+      return [];
+    }
+  }
+
+  async createPlaylist(title: string): Promise<{ id: string; title: string } | null> {
+    if (!this.isAuthenticated() || !this.tokenData) return null;
+    try {
+      const resp = await this._request(`${YT_API}/playlists?part=id,snippet`, {
+        method: 'POST',
+        body: JSON.stringify({
+          snippet: { title },
+          status: { privacyStatus: 'public' },
+        }),
+      });
+      if (!resp.ok) throw new Error(await resp.text());
+      const data = (await resp.json()) as { id: string; snippet: { title: string } };
+      defaultLogger.info(`[YouTube] playlist created: "${data.snippet.title}" (${data.id})`);
+      return { id: data.id, title: data.snippet.title };
+    } catch (err) {
+      defaultLogger.error('[YouTube] createPlaylist error:', err);
+      return null;
+    }
+  }
+
+  async addVideoToPlaylist(videoId: string, playlistId: string): Promise<void> {
+    if (!this.isAuthenticated() || !this.tokenData) return;
+    const resp = await this._request(`${YT_API}/playlistItems?part=snippet`, {
+      method: 'POST',
+      body: JSON.stringify({
+        snippet: { playlistId, resourceId: { kind: 'youtube#video', videoId } },
+      }),
+    });
+    if (!resp.ok) throw new Error(`addVideoToPlaylist failed: ${await resp.text()}`);
+    defaultLogger.info(`[YouTube] video ${videoId} added to playlist ${playlistId}`);
+  }
+
+  async applySetupPlaylists(subject?: string): Promise<void> {
+    if (!this.broadcastId) return;
+    if (this.playlistsAppliedForBroadcast === this.broadcastId) return;
+    this.playlistsAppliedForBroadcast = this.broadcastId;
+
+    const setup = this.getSetup();
+
+    if (setup.defaultPlaylist.enabled && setup.defaultPlaylist.playlistId) {
+      try {
+        await this.addVideoToPlaylist(this.broadcastId, setup.defaultPlaylist.playlistId);
+        defaultLogger.info(`[YouTube] added to default playlist "${setup.defaultPlaylist.playlistTitle}"`);
+      } catch (err) {
+        defaultLogger.error('[YouTube] failed to add to default playlist:', err);
+      }
+    }
+
+    if (setup.subjectPlaylist.enabled && subject?.trim()) {
+      try {
+        const playlists = await this.listPlaylists();
+        let playlist = playlists.find(
+          (p) => p.title.toLowerCase() === subject.trim().toLowerCase(),
+        );
+        if (!playlist) {
+          playlist = (await this.createPlaylist(subject.trim())) ?? undefined;
+        }
+        if (playlist) {
+          await this.addVideoToPlaylist(this.broadcastId, playlist.id);
+          defaultLogger.info(`[YouTube] added to subject playlist "${playlist.title}"`);
+        }
+      } catch (err) {
+        defaultLogger.error('[YouTube] failed to add to subject playlist:', err);
+      }
+    }
   }
 
   // ---------------------------------------------------------------------------
