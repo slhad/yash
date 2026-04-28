@@ -14,6 +14,7 @@ export const TUI_COMMANDS = [
   '/marker',
   '/msg',
   '/settings',
+  '/setup-youtube',
   '/stream',
 ] as const;
 
@@ -39,7 +40,7 @@ const SETTINGS_OPS = ['get', 'set'];
 /** Longest common prefix of an array of strings. */
 function longestCommonPrefix(strs: string[]): string {
   if (strs.length === 0) return '';
-  let prefix = strs[0];
+  let prefix = strs[0] ?? '';
   for (const s of strs) {
     while (!s.startsWith(prefix)) prefix = prefix.slice(0, -1);
     if (!prefix) break;
@@ -61,7 +62,7 @@ export function getAutocomplete(input: string): { completion: string | null; hin
   if (!lower.includes(' ')) {
     const matches = (TUI_COMMANDS as readonly string[]).filter((c) => c.startsWith(lower));
     if (matches.length === 0) return { completion: null, hints: [] };
-    if (matches.length === 1) return { completion: matches[0], hints: matches };
+    if (matches.length === 1) return { completion: matches[0] ?? null, hints: matches };
     const prefix = longestCommonPrefix(matches);
     return { completion: prefix.length > lower.length ? prefix : null, hints: matches };
   }
@@ -117,9 +118,9 @@ export function getAutocomplete(input: string): { completion: string | null; hin
     }
     // /settings get <key> or /settings set <key> [value]
     const parts = rest.split(' ');
-    const op = parts[0].toLowerCase();
+    const op = (parts[0] ?? '').toLowerCase();
     if ((op === 'get' || op === 'set') && parts.length === 2) {
-      const partial = parts[1].toLowerCase();
+      const partial = (parts[1] ?? '').toLowerCase();
       const matches = SETTINGS_KEYS.filter((k) => k.startsWith(partial));
       if (matches.length === 0) return { completion: null, hints: matches };
       const prefix = longestCommonPrefix(matches);

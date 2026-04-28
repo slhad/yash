@@ -132,7 +132,7 @@ describe('YouTubeProvider — getMarkers filter', () => {
     (p as any).chapterMarkers.push({ ...m1, id: 'yt_2', description: 'B', videoId: 'vid_2' });
     const filtered = await p.getMarkers({ videoId: 'vid_1' });
     expect(filtered).toHaveLength(1);
-    expect(filtered[0].description).toBe('A');
+    expect(filtered[0]?.description).toBe('A');
   });
 });
 

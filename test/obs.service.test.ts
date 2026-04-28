@@ -77,10 +77,10 @@ describe('ObsService', () => {
     });
 
     await obsService.connect();
-    expect(connectedStatus).toBe(true);
+    expect(connectedStatus as unknown as boolean).toBe(true);
 
     await obsService.disconnect();
-    expect(connectedStatus).toBe(false);
+    expect(connectedStatus as unknown as boolean).toBe(false);
 
     unsubscribe();
   });

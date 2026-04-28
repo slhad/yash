@@ -75,7 +75,7 @@ export function parseSettingsValue(raw: string): unknown {
 
 // ─── Autocomplete ─────────────────────────────────────────────────────────────
 
-const VALID_COMMANDS = ['/connect', '/help', '/marker', '/msg', '/settings'];
+const VALID_COMMANDS = ['/connect', '/help', '/marker', '/msg', '/settings', '/setup-youtube'];
 
 /**
  * Returns a hint string for the current input value, or `null` if no hint
@@ -180,7 +180,7 @@ export async function handleWebCommand(text: string, ctx: WebCommandContext): Pr
   if (!trimmed.startsWith('/')) return false;
 
   const parts = trimmed.split(/\s+/);
-  const cmd = parts[0].toLowerCase();
+  const cmd = (parts[0] ?? '').toLowerCase();
   const fb = ctx.feedback ?? (() => {});
 
   // ── /help ────────────────────────────────────────────────────────────────
@@ -324,6 +324,79 @@ export async function handleWebCommand(text: string, ctx: WebCommandContext): Pr
       fb('settings', 'Usage: /settings get <key> | /settings set <key> <value>');
       fb('settings', `Keys: ${SETTINGS_KEYS.join(', ')}`);
     }
+    return true;
+  }
+
+  // ── /setup-youtube ───────────────────────────────────────────────────────
+  // Usage: /setup-youtube                      → show current setup
+  //        /setup-youtube <setting> <on|off>   → toggle a setting
+  //        /setup-youtube tags-text <value>     → set tags text
+  //        /setup-youtube description-text <v> → set description text
+  if (cmd === '/setup-youtube') {
+    const sub = parts[1]?.toLowerCase();
+    const val = parts[2]?.toLowerCase();
+
+    if (!sub) {
+      try {
+        const res = await fetch('/api/youtube/setup');
+        if (res.ok) {
+          const s = await res.json();
+          fb('youtube-setup', 'YouTube stream setup:');
+          fb(
+            'youtube-setup',
+            `  Default Playlist : ${s.defaultPlaylist?.enabled ? `ON  — ${s.defaultPlaylist.playlistTitle || '(no name)'}` : 'OFF'}`,
+          );
+          fb('youtube-setup', `  Subject Playlist : ${s.subjectPlaylist?.enabled ? 'ON' : 'OFF'}`);
+          fb('youtube-setup', `  Chaptering       : ${s.chaptering?.enabled ? 'ON' : 'OFF'}`);
+          fb(
+            'youtube-setup',
+            `  Tags             : ${s.tags?.enabled ? 'ON  — uses tags from /stream' : 'OFF'}`,
+          );
+          fb(
+            'youtube-setup',
+            `  Description      : ${s.description?.enabled ? 'ON  — uses description from /stream' : 'OFF'}`,
+          );
+        } else {
+          fb('youtube-setup', 'Could not fetch YouTube setup.');
+        }
+      } catch {
+        fb('youtube-setup', 'Could not fetch YouTube setup.');
+      }
+      return true;
+    }
+
+    const bool = val === 'on' ? true : val === 'off' ? false : null;
+
+    const toggleMap: Record<string, string> = {
+      chaptering: 'chaptering',
+      tags: 'tags',
+      description: 'description',
+      subject: 'subjectPlaylist',
+      playlist: 'defaultPlaylist',
+    };
+
+    if (sub in toggleMap && bool !== null) {
+      try {
+        const res = await fetch('/api/youtube/setup');
+        const current = res.ok ? await res.json() : {};
+        const key = toggleMap[sub]!;
+        const patch = { [key]: { ...(current[key] ?? {}), enabled: bool } };
+        await fetch('/api/youtube/setup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(patch),
+        });
+        fb('youtube-setup', `${sub} ${bool ? 'enabled' : 'disabled'}.`);
+      } catch {
+        fb('youtube-setup', 'Failed to update YouTube setup.');
+      }
+      return true;
+    }
+
+    fb(
+      'youtube-setup',
+      'Usage: /setup-youtube [chaptering|tags|description|subject|playlist] [on|off]',
+    );
     return true;
   }
 

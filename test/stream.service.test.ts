@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
+import { StreamStatus } from '../src/platforms/base';
 import type { StreamMetadata } from '../src/platforms/base';
 import { KickProvider } from '../src/platforms/kick';
 import { TwitchProvider } from '../src/platforms/twitch';
@@ -44,7 +45,7 @@ describe('StreamService', () => {
       game: 'New Game',
     });
 
-    expect(twitchProvider.getStreamStatus()).toBe('OFFLINE');
+    expect(twitchProvider.getStreamStatus()).toBe(StreamStatus.OFFLINE);
   });
 
   test('should get stream key for platform', () => {
@@ -58,7 +59,7 @@ describe('StreamService', () => {
     streamService.registerProvider('youtube', youtubeProvider);
 
     const status = streamService.getStreamStatus('youtube');
-    expect(status).toBe('OFFLINE');
+    expect(status).toBe(StreamStatus.OFFLINE);
   });
 
   test('should get all stream statuses', () => {
@@ -66,8 +67,8 @@ describe('StreamService', () => {
     streamService.registerProvider('kick', kickProvider);
 
     const allStatus = streamService.getAllStreamStatus();
-    expect(allStatus.twitch).toBe('OFFLINE');
-    expect(allStatus.kick).toBe('OFFLINE');
+    expect(allStatus.twitch).toBe(StreamStatus.OFFLINE);
+    expect(allStatus.kick).toBe(StreamStatus.OFFLINE);
     expect(allStatus.youtube).toBeUndefined();
   });
 
@@ -87,7 +88,7 @@ describe('StreamService', () => {
     await streamService.setStreamMetadata(['twitch'], { title: 'Test' });
 
     expect(statusUpdate).not.toBeNull();
-    expect(statusUpdate?.platform).toBe('twitch');
+    expect((statusUpdate as { platform: string; status: string } | null)?.platform).toBe('twitch');
 
     unsubscribe();
   });

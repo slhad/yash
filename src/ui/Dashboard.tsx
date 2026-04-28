@@ -1,3 +1,4 @@
+/** @jsxImportSource react */
 import React, { useEffect, useState } from 'react';
 import { ChatDisplay } from './ChatDisplay';
 import { MessageInput } from './MessageInput';
@@ -102,7 +103,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
           newAuthStatus[platform] = false;
           newStreamStatus[platform] = 'ERROR';
           newConnectionStatus[platform] = 'disconnected';
-          newLastError[platform] = error.message || 'Unknown error';
+          newLastError[platform] = (error instanceof Error ? error.message : null) || 'Unknown error';
         }
       }
 

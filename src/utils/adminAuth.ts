@@ -14,7 +14,7 @@ const rateMap = new Map<string, { count: number; windowStart: number }>();
 
 function getClientIpFromReq(req: Request): string | null {
   const xf = req.headers.get('x-forwarded-for');
-  if (xf && xf.trim().length > 0) return xf.split(',')[0].trim();
+  if (xf && xf.trim().length > 0) return (xf.split(',')[0] ?? xf).trim();
   const xr = req.headers.get('x-real-ip');
   if (xr && xr.trim().length > 0) return xr.trim();
   return null;

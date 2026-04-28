@@ -38,9 +38,10 @@ describe('ChatService', () => {
     twitchProvider._simulateMessage('Hello chat!', 'TestUser');
 
     expect(receivedMessage).not.toBeNull();
-    expect(receivedMessage?.platform).toBe('twitch');
-    expect(receivedMessage?.message).toBe('Hello chat!');
-    expect(receivedMessage?.username).toBe('TestUser');
+    const msg1 = receivedMessage as ChatMessage | null;
+    expect(msg1?.platform).toBe('twitch');
+    expect(msg1?.message).toBe('Hello chat!');
+    expect(msg1?.username).toBe('TestUser');
 
     unsubscribe();
   });
@@ -55,9 +56,10 @@ describe('ChatService', () => {
     kickProvider._simulateMessage('Test message', 'KickUser');
 
     expect(receivedMessage).not.toBeNull();
-    expect(receivedMessage?.id).toBeDefined();
-    expect(receivedMessage?.timestamp).toBeDefined();
-    expect(receivedMessage?.userId).toBeDefined();
+    const msg2 = receivedMessage as ChatMessage | null;
+    expect(msg2?.id).toBeDefined();
+    expect(msg2?.timestamp).toBeDefined();
+    expect(msg2?.userId).toBeDefined();
 
     chatService.clearHistory();
   });

@@ -13,7 +13,7 @@ describe('ObsService backoff', () => {
 
     // Create a subclass that always fails to connect so backoff grows
     class AlwaysFailObs extends ObsService {
-      async connect(): Promise<void> {
+      override async connect(): Promise<void> {
         return Promise.reject(new Error('connect-failed'));
       }
     }

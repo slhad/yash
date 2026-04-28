@@ -1,4 +1,4 @@
-import { ChatMessage, PlatformProvider } from '../platforms/base';
+import type { ChatMessage, PlatformProvider } from '../platforms/base';
 
 export class ChatService {
   private providers: Map<string, PlatformProvider> = new Map();
@@ -43,16 +43,12 @@ export class ChatService {
   private normalizeMessage(message: ChatMessage): ChatMessage {
     // Ensure all required fields are present
     return {
-      id:
-        message.id ||
-        `${message.platform}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      platform: message.platform,
+      ...message,
+      id: message.id || `${message.platform}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       userId: message.userId || `unknown_${Math.random().toString(36).substr(2, 9)}`,
       username: message.username || 'UnknownUser',
       message: message.message || '',
       timestamp: message.timestamp || Date.now(),
-      // Preserve any platform-specific fields that might exist
-      ...message,
     };
   }
 
@@ -81,7 +77,11 @@ export class ChatService {
     );
 
     const failures = results
-      .map((r, i) => (r.status === 'rejected' ? `${platforms[i]}: ${(r as PromiseRejectedResult).reason?.message ?? r.reason}` : null))
+      .map((r, i) =>
+        r.status === 'rejected'
+          ? `${platforms[i]}: ${(r as PromiseRejectedResult).reason?.message ?? r.reason}`
+          : null,
+      )
       .filter(Boolean);
 
     if (failures.length) throw new Error(failures.join('; '));

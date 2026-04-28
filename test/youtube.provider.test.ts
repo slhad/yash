@@ -156,7 +156,9 @@ describe('YouTubeProvider — chat', () => {
   test('_simulateMessage uses TestUser as default username', () => {
     const p = makeProvider();
     let username = '';
-    p.onMessage((msg) => { username = msg.username; });
+    p.onMessage((msg) => {
+      username = msg.username;
+    });
     p._simulateMessage('hi');
     expect(username).toBe('TestUser');
   });
@@ -240,7 +242,7 @@ describe('YouTubeProvider — markers', () => {
 
     const filtered = await p.getMarkers({ videoId: 'vid_123' });
     expect(filtered).toHaveLength(1);
-    expect(filtered[0].description).toBe('A');
+    expect(filtered[0]?.description).toBe('A');
 
     const all = await p.getMarkers();
     expect(all).toHaveLength(2);

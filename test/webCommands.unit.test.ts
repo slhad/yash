@@ -215,7 +215,7 @@ describe('handleWebCommand — /msg', () => {
   test('/msg twitch hi → POSTs with platforms: ["twitch"]', async () => {
     const { calls } = mockFetch(() => ({ ok: true }));
     await handleWebCommand('/msg twitch hi', { platforms: [] });
-    const body = JSON.parse(calls[0].init!.body as string);
+    const body = JSON.parse(calls[0]!.init!.body as string);
     expect(body.platforms).toEqual(['twitch']);
     expect(body.message).toBe('hi');
   });
@@ -254,7 +254,7 @@ describe('handleWebCommand — /marker', () => {
 
     const result = await handleWebCommand('/marker', { platforms: [] });
     expect(result).toBe(true);
-    const body = JSON.parse(calls[0].init!.body as string);
+    const body = JSON.parse(calls[0]!.init!.body as string);
     expect(body.description).toBeUndefined();
     expect(body.timestamp).toBeUndefined();
   });
@@ -262,14 +262,14 @@ describe('handleWebCommand — /marker', () => {
   test('/marker Intro → sets description', async () => {
     const { calls } = mockFetch(() => ({ ok: true, body: { markers: [] } }));
     await handleWebCommand('/marker Intro', { platforms: [] });
-    const body = JSON.parse(calls[0].init!.body as string);
+    const body = JSON.parse(calls[0]!.init!.body as string);
     expect(body.description).toBe('Intro');
   });
 
   test('/marker Q&A | 3723 → sets description and timestamp', async () => {
     const { calls } = mockFetch(() => ({ ok: true, body: { markers: [] } }));
     await handleWebCommand('/marker Q&A | 3723', { platforms: [] });
-    const body = JSON.parse(calls[0].init!.body as string);
+    const body = JSON.parse(calls[0]!.init!.body as string);
     expect(body.description).toBe('Q&A');
     expect(body.timestamp).toBe(3723);
   });
@@ -277,14 +277,14 @@ describe('handleWebCommand — /marker', () => {
   test('ctx.platforms passed through when non-empty', async () => {
     const { calls } = mockFetch(() => ({ ok: true, body: { markers: [] } }));
     await handleWebCommand('/marker test', { platforms: ['twitch'] });
-    const body = JSON.parse(calls[0].init!.body as string);
+    const body = JSON.parse(calls[0]!.init!.body as string);
     expect(body.platforms).toEqual(['twitch']);
   });
 
   test('ctx.platforms empty → sends all three platforms', async () => {
     const { calls } = mockFetch(() => ({ ok: true, body: { markers: [] } }));
     await handleWebCommand('/marker', { platforms: [] });
-    const body = JSON.parse(calls[0].init!.body as string);
+    const body = JSON.parse(calls[0]!.init!.body as string);
     expect(body.platforms).toContain('youtube');
     expect(body.platforms).toContain('twitch');
     expect(body.platforms).toContain('kick');
@@ -420,7 +420,7 @@ describe('handleWebCommand — /settings', () => {
       platforms: [],
       feedback: (l, t) => feedback.push([l, t]),
     });
-    const body = JSON.parse(calls[0].init!.body as string);
+    const body = JSON.parse(calls[0]!.init!.body as string);
     expect(body.key).toBe('title.visible');
     expect(body.value).toBe(true); // parsed as boolean, not string
     expect(feedback.some(([, t]) => t.includes('title.visible'))).toBe(true);
@@ -429,14 +429,14 @@ describe('handleWebCommand — /settings', () => {
   test('/settings set events.width 30 → POSTs number 30', async () => {
     const { calls } = mockFetch(() => ({ ok: true, body: {} }));
     await handleWebCommand('/settings set events.width 30', { platforms: [] });
-    const body = JSON.parse(calls[0].init!.body as string);
+    const body = JSON.parse(calls[0]!.init!.body as string);
     expect(body.value).toBe(30);
   });
 
   test('/settings set messages.position bottom → POSTs string "bottom"', async () => {
     const { calls } = mockFetch(() => ({ ok: true, body: {} }));
     await handleWebCommand('/settings set messages.position bottom', { platforms: [] });
-    const body = JSON.parse(calls[0].init!.body as string);
+    const body = JSON.parse(calls[0]!.init!.body as string);
     expect(body.value).toBe('bottom');
   });
 

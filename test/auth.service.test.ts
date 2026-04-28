@@ -29,8 +29,8 @@ describe('AuthService', () => {
         const entries: Array<{ account: string; password: string }> = [];
         for (const k of Object.keys(this.store)) {
           if (k.startsWith(`${service}:`)) {
-            const account = k.split(':')[1];
-            entries.push({ account, password: this.store[k] });
+            const account = k.split(':')[1] ?? '';
+            entries.push({ account, password: this.store[k] ?? '' });
           }
         }
         return entries;
@@ -41,7 +41,7 @@ describe('AuthService', () => {
     }
 
     const mockKeytar = new MockKeytar();
-    authService = new AuthService(mockKeytar as any);
+    authService = new AuthService();
     // Wait a short time for loadTokens to complete; increase buffer for CI
     await new Promise((resolve) => setTimeout(resolve, 50));
   });

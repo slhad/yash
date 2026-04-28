@@ -8,7 +8,7 @@ describe('ObsService maxAttempts', () => {
     const loggerSpy = vi.spyOn(defaultLogger, 'info').mockImplementation(() => {});
 
     class AlwaysFailObs extends ObsService {
-      async connect(): Promise<void> {
+      override async connect(): Promise<void> {
         return Promise.reject(new Error('connect-failed'));
       }
     }

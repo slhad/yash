@@ -1,3 +1,4 @@
+/** @jsxImportSource react */
 import React, { useRef, useState } from 'react';
 import { getWebAutocomplete } from '../utils/webCommands';
 
@@ -54,7 +55,7 @@ export const MessageInput: React.FC<MessageInputProps> = ({
       if (history.length === 0) return;
       if (historyIdxRef.current === -1) historyIdxRef.current = history.length - 1;
       else if (historyIdxRef.current > 0) historyIdxRef.current--;
-      setMessage(history[historyIdxRef.current]);
+      setMessage(history[historyIdxRef.current] ?? '');
       return;
     }
     if (e.key === 'ArrowDown') {
@@ -66,7 +67,7 @@ export const MessageInput: React.FC<MessageInputProps> = ({
         historyIdxRef.current = -1;
         setMessage('');
       } else {
-        setMessage(history[historyIdxRef.current]);
+        setMessage(history[historyIdxRef.current] ?? '');
       }
     }
   };

@@ -1,3 +1,4 @@
+/** @jsxImportSource react */
 import React from 'react';
 
 interface StatusBarProps {
@@ -78,6 +79,7 @@ export const StatusBar: React.FC<StatusBarProps> = ({ platformStatus, obsConnect
 
       {platforms.map((platform) => {
         const status = platformStatus[platform];
+        if (!status) return null;
         const streamInd = getStreamIndicator(status.streamStatus);
 
         return (

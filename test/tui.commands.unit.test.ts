@@ -17,7 +17,7 @@ describe('TUI_COMMANDS', () => {
   test('contains all expected commands', () => {
     const expected = ['/connect', '/exit', '/help', '/logs', '/marker', '/msg', '/settings'];
     for (const cmd of expected) {
-      expect(TUI_COMMANDS).toContain(cmd);
+      expect(TUI_COMMANDS).toContain(cmd as (typeof TUI_COMMANDS)[number]);
     }
   });
 

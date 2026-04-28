@@ -21,6 +21,8 @@ import {
   youtube,
 } from './services';
 import { authorizeAdmin } from './utils/adminAuth';
+import { importKeysHandler, updateRolesHandler } from './handlers/adminKeysHandlers';
+import type { PlatformProvider } from './platforms/base';
 import { getConfig, isDemoMode, saveConfig } from './utils/config';
 import { defaultLogger } from './utils/logger';
 import { apiMetricsHandler, prometheusMetricsHandler } from './utils/metricsHandlers';
@@ -42,9 +44,14 @@ function getCommandsJs(): string {
   return commandsJs;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const htmlRoutes: Record<string, any> = isTuiOnly
+  ? {}
+  : { '/': index, '/unified': unified, '/sidebyside': sidebyside };
+
 Bun.serve({
   routes: {
-    ...(isTuiOnly ? {} : { '/': index, '/unified': unified, '/sidebyside': sidebyside }),
+    ...htmlRoutes,
     '/api/status': {
       GET: () => {
         const status = platforms.reduce(
@@ -88,7 +95,10 @@ Bun.serve({
         const { platforms: targetPlatforms, metadata } = await req.json();
         // Normalize tags to string[] regardless of whether the client sent a string
         if (metadata?.tags != null && typeof metadata.tags === 'string') {
-          metadata.tags = metadata.tags.split(',').map((t: string) => t.trim().replace(/\s+/g, '')).filter(Boolean);
+          metadata.tags = metadata.tags
+            .split(',')
+            .map((t: string) => t.trim().replace(/\s+/g, ''))
+            .filter(Boolean);
         }
         const cfg = getConfig();
         const current = cfg.stream ?? {};
@@ -272,6 +282,42 @@ Bun.serve({
     },
 
     // ------------------------------------------------------------------
+    // YouTube stream setup — GET/POST /api/youtube/setup
+    // ------------------------------------------------------------------
+    '/api/youtube/setup': {
+      GET: () => {
+        return new Response(JSON.stringify(youtube.getSetup()), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      },
+      POST: async (req) => {
+        const body = await req.json().catch(() => ({}));
+        await saveConfig({ platforms: { youtube: { setup: body } } });
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      },
+    },
+
+    // ------------------------------------------------------------------
+    // YouTube playlists — GET /api/youtube/playlists
+    // ------------------------------------------------------------------
+    '/api/youtube/playlists': {
+      GET: async () => {
+        if (!youtube.isAuthenticated()) {
+          return new Response(JSON.stringify({ error: 'not authenticated' }), {
+            status: 401,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        const playlists = await youtube.listPlaylists();
+        return new Response(JSON.stringify(playlists), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      },
+    },
+
+    // ------------------------------------------------------------------
     // Cross-platform marker — POST /api/stream/marker
     // Body: { platforms?: string[], description?: string, timestamp?: number }
     //   timestamp — seconds from stream start (used by YouTube for chapters;
@@ -286,7 +332,7 @@ Bun.serve({
         const timestamp: number | undefined =
           typeof body?.timestamp === 'number' ? body.timestamp : undefined;
 
-        const providerMap: Record<string, typeof twitch> = { youtube, twitch, kick };
+        const providerMap: Record<string, PlatformProvider> = { youtube, twitch, kick };
         const results = await Promise.allSettled(
           targetPlatforms.map(async (p) => {
             const provider = providerMap[p];

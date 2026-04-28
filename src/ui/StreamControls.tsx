@@ -1,3 +1,4 @@
+/** @jsxImportSource react */
 import React, { useEffect, useState } from 'react';
 import { defaultLogger } from '../utils/logger';
 
@@ -88,7 +89,10 @@ export const StreamControls: React.FC<StreamControlsProps> = ({
       .filter(Boolean);
     const savedTags = Array.isArray(savedMeta.tags)
       ? savedMeta.tags
-      : (savedMeta.tags ?? '').split(',').map((t: string) => t.trim()).filter(Boolean);
+      : (savedMeta.tags ?? '')
+          .split(',')
+          .map((t: string) => t.trim())
+          .filter(Boolean);
     return (
       cur.title !== (savedMeta.title ?? '') ||
       cur.game !== (savedMeta.game ?? '') ||

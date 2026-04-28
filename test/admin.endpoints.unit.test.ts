@@ -38,7 +38,7 @@ describe('Admin endpoints (handlers)', () => {
     const list = svc2.listKeys();
     const found = list.find((k: any) => k.id === created.id);
     expect(found).toBeTruthy();
-    expect(found.roles).toContain('ops');
+    expect(found?.roles).toContain('ops');
   });
 
   test('importKeysHandler imports keys exported from another store', async () => {

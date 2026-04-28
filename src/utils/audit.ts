@@ -76,8 +76,8 @@ export class Audit {
         .trim()
         .split(/\r?\n/)
         .filter((l) => l && l.trim().length > 0);
-      if (lines.length > 0) {
-        const last = lines[lines.length - 1];
+      const last = lines[lines.length - 1];
+      if (last) {
         const idx = last.lastIndexOf('.');
         if (idx !== -1) prevSig = last.substring(idx + 1).trim();
       }
@@ -126,7 +126,7 @@ export class Audit {
       const lines = data.split(/\r?\n/).filter((l) => l && l.trim().length > 0);
       let prevSig = '';
       for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
+        const line = lines[i] ?? '';
         if (!this.verifyLine(line, prevSig)) {
           return { ok: false, badIndex: i, error: 'signature mismatch' };
         }

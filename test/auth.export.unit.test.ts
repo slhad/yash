@@ -15,8 +15,8 @@ class MockKeytar {
     const entries: Array<{ account: string; password: string }> = [];
     for (const k of Object.keys(this.store)) {
       if (k.startsWith(`${service}:`)) {
-        const account = k.split(':')[1];
-        entries.push({ account, password: this.store[k] });
+        const account = k.split(':')[1] ?? '';
+        entries.push({ account, password: this.store[k] ?? '' });
       }
     }
     return entries;
@@ -39,7 +39,7 @@ describe('AuthService exports (removed)', () => {
 
   test('exportEncryptionKey and exportEncryptedTokens throw (removed)', async () => {
     const mockKeytar = new MockKeytar();
-    const auth = new AuthService(mockKeytar as any);
+    const auth = new AuthService();
     await auth.waitForReady(5000);
 
     try {

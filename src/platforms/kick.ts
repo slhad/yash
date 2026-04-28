@@ -26,21 +26,22 @@
 
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { client as KickClient, KickNetworkError, KickServerError } from '@nekiro/kick-api';
 import type { OAuthToken } from '@nekiro/kick-api';
+import { client as KickClient, KickNetworkError, KickServerError } from '@nekiro/kick-api';
+type KickClientInstance = InstanceType<typeof KickClient>;
 import { getConfig, reloadConfig } from '../utils/config';
 import { defaultLogger } from '../utils/logger';
 import type {
   AuthResult,
   ChatMessage,
   GetMarkersOptions,
+  MetadataUpdateResult,
   PlatformProvider,
   PlatformStatus,
   StreamMarker,
   StreamMetadata,
   WebhookConfig,
 } from './base';
-import type { MetadataUpdateResult } from './base';
 import { StreamStatus } from './base';
 
 // ---------------------------------------------------------------------------
@@ -67,10 +68,9 @@ export class KickProvider implements PlatformProvider {
   private clientId: string = '';
   private clientSecret: string = '';
   private redirectUri: string = 'http://localhost:3000/api/kick/callback';
-  private streamKey: string = '';
 
   // ---- kick-api client -------------------------------------------------------
-  private client: KickClient | null = null;
+  private client: KickClientInstance | null = null;
 
   // ---- auth state ------------------------------------------------------------
   private isAuthenticatedFlag = false;
@@ -91,8 +91,7 @@ export class KickProvider implements PlatformProvider {
   private messageCallbacks: ((msg: ChatMessage) => void)[] = [];
 
   // ---- token file ------------------------------------------------------------
-  private static dataDir =
-    process.env.YASH_DATA_DIR || path.join(process.env.HOME || '.', '.yash');
+  private static dataDir = process.env.YASH_DATA_DIR || path.join(process.env.HOME || '.', '.yash');
   private static tokenFile = path.join(KickProvider.dataDir, 'kick_tokens.json');
   private static pendingAuthFile = path.join(KickProvider.dataDir, 'kick_pending_auth.json');
 
@@ -104,13 +103,10 @@ export class KickProvider implements PlatformProvider {
     this.clientId = cfg.clientId || process.env.KICK_CLIENT_ID || '';
     this.clientSecret = cfg.clientSecret || process.env.KICK_CLIENT_SECRET || '';
     this.redirectUri =
-      cfg.redirectUri ||
-      process.env.KICK_REDIRECT_URI ||
-      'http://localhost:3000/api/kick/callback';
-    this.streamKey = cfg.streamKey || this.streamKey;
+      cfg.redirectUri || process.env.KICK_REDIRECT_URI || 'http://localhost:3000/api/kick/callback';
   }
 
-  private buildClient(): KickClient {
+  private buildClient(): KickClientInstance {
     return new KickClient({
       clientId: this.clientId,
       clientSecret: this.clientSecret,
@@ -174,7 +170,7 @@ export class KickProvider implements PlatformProvider {
   // auto-refresh (triggered transparently by the library on expired tokens)
   // is immediately persisted back to disk.
   // ---------------------------------------------------------------------------
-  private _watchClientToken(client: KickClient, initialExpiresAt: number): void {
+  private _watchClientToken(client: KickClientInstance, initialExpiresAt: number): void {
     let _token: OAuthToken | null = (client as any).token;
     let lastExpiresAt = initialExpiresAt;
     const provider = this;
@@ -211,10 +207,7 @@ export class KickProvider implements PlatformProvider {
   // ---------------------------------------------------------------------------
   // Wire everything up once we have a valid token + channel info
   // ---------------------------------------------------------------------------
-  private async _initFromToken(
-    token: KickTokenFile,
-    client?: KickClient,
-  ): Promise<void> {
+  private async _initFromToken(token: KickTokenFile, client?: KickClientInstance): Promise<void> {
     this.client = client ?? this.buildClient();
     this.client.setToken(token);
 
@@ -240,7 +233,7 @@ export class KickProvider implements PlatformProvider {
   // ---------------------------------------------------------------------------
   // Fetch the authenticated user's channel to get broadcasterId + slug
   // ---------------------------------------------------------------------------
-  private async _fetchSelfChannel(client: KickClient): Promise<{ id: number; slug: string }> {
+  private async _fetchSelfChannel(client: KickClientInstance): Promise<{ id: number; slug: string }> {
     const channels = await client.channels.getChannels();
     if (!channels.length) throw new Error('No channel found for authenticated user');
     // The type definition says `user_id` but the real API returns `broadcaster_user_id`
@@ -397,9 +390,11 @@ export class KickProvider implements PlatformProvider {
   // .json() returns null → TypeError accessing .data. Real network errors
   // (DNS, timeout) produce TypeError("Failed to fetch") / AbortError.
   // ---------------------------------------------------------------------------
-  private async _doUpdateChannel(
-    update: { stream_title?: string; category_id?: number; custom_tags?: string[] },
-  ): Promise<void> {
+  private async _doUpdateChannel(update: {
+    stream_title?: string;
+    category_id?: number;
+    custom_tags?: string[];
+  }): Promise<void> {
     try {
       await this.client!.channels.updateChannel(update);
     } catch (err) {
@@ -435,9 +430,8 @@ export class KickProvider implements PlatformProvider {
       // Resolve game name → category ID
       if (metadata.game) {
         const results = await this.client.categories.getCategories({ q: metadata.game });
-        const match = results.find(
-          (c) => c.name.toLowerCase() === metadata.game!.toLowerCase(),
-        ) ?? results[0];
+        const match =
+          results.find((c: { name: string; id: number }) => c.name.toLowerCase() === metadata.game!.toLowerCase()) ?? results[0];
         if (match) {
           update.category_id = match.id;
         } else {
@@ -449,14 +443,21 @@ export class KickProvider implements PlatformProvider {
         const raw = metadata.tags as string[] | string;
         update.custom_tags = Array.isArray(raw)
           ? raw
-          : String(raw).split(',').map((t) => t.trim()).filter(Boolean);
+          : String(raw)
+              .split(',')
+              .map((t) => t.trim())
+              .filter(Boolean);
       }
 
       try {
         await this._doUpdateChannel(update);
       } catch (err) {
         // Tags caused a 500 — probe each tag individually to find which are valid.
-        if (update.custom_tags?.length && err instanceof KickServerError && (err as any).status === 500) {
+        if (
+          update.custom_tags?.length &&
+          err instanceof KickServerError &&
+          (err as any).status === 500
+        ) {
           const allTags = update.custom_tags;
           delete update.custom_tags;
 
@@ -570,7 +571,7 @@ export class KickProvider implements PlatformProvider {
       });
       if (streams.length > 0) {
         this.streamStatus = StreamStatus.ONLINE;
-        this.viewerCount = streams[0].viewer_count;
+        this.viewerCount = streams[0]?.viewer_count ?? 0;
       } else {
         this.streamStatus = StreamStatus.OFFLINE;
         this.viewerCount = 0;
@@ -603,11 +604,7 @@ export class KickProvider implements PlatformProvider {
   // Accessors
   // ---------------------------------------------------------------------------
   getStreamKey(): string {
-    return this.streamKey;
-  }
-
-  setStreamKey(key: string): void {
-    this.streamKey = key;
+    return '';
   }
 
   getStreamStatus(): StreamStatus {

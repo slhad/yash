@@ -1,6 +1,6 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { PlatformProvider } from '../platforms/base';
+import type { PlatformProvider } from '../platforms/base';
 import { defaultLogger } from '../utils/logger';
 
 interface TokenData {
@@ -17,6 +17,7 @@ export class AuthService {
   private static TOKENS_FILE = path.join(AuthService.DATA_DIR, 'tokens.json');
 
   private tokens: Map<string, TokenData> = new Map();
+  private refreshInterval: ReturnType<typeof setInterval> | null = null;
 
   // File-backed token store constructor. No OS keyring integration.
   constructor() {

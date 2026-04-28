@@ -6,7 +6,7 @@ describe('defaultLogger', () => {
     const spy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     defaultLogger.info('default logger test');
     expect(spy).toHaveBeenCalled();
-    const calledWith = spy.mock.calls[0][0] as string;
+    const calledWith = spy.mock.calls[0]![0] as string;
     // Ensure the output does NOT include an ISO timestamp (timestamp disabled)
     expect(calledWith).not.toMatch(/\[\d{4}-\d{2}-\d{2}T/);
     spy.mockRestore();
