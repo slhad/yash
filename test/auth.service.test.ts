@@ -1,49 +1,31 @@
 // Basic test for AuthService
-import { beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { AuthService } from './../src/services/auth.service';
 
+const TEST_DATA_DIR = path.join(process.cwd(), 'tmp', 'auth_service_test');
+
 describe('AuthService', () => {
   let authService: AuthService;
+  let origDataDir: string | undefined;
 
   beforeEach(async () => {
-    // Remove only the AuthService tokens file — leave platform token files intact
-    const tokensFile = path.join(process.env.HOME || '.', '.yash', 'tokens.json');
+    origDataDir = process.env.YASH_DATA_DIR;
+    process.env.YASH_DATA_DIR = TEST_DATA_DIR;
     try {
-      await fs.rm(tokensFile, { force: true });
+      await fs.rm(TEST_DATA_DIR, { recursive: true, force: true });
     } catch {
       // ignore
     }
-
-    // Use a simple in-memory MockKeytar so tests are isolated from the OS keyring
-    class MockKeytar {
-      private store: Record<string, string> = {};
-      async getPassword(service: string, account: string) {
-        return this.store[`${service}:${account}`] || null;
-      }
-      async setPassword(service: string, account: string, password: string) {
-        this.store[`${service}:${account}`] = password;
-      }
-      async findCredentials(service: string) {
-        const entries: Array<{ account: string; password: string }> = [];
-        for (const k of Object.keys(this.store)) {
-          if (k.startsWith(`${service}:`)) {
-            const account = k.split(':')[1] ?? '';
-            entries.push({ account, password: this.store[k] ?? '' });
-          }
-        }
-        return entries;
-      }
-      async deletePassword(service: string, account: string) {
-        delete this.store[`${service}:${account}`];
-      }
-    }
-
-    const mockKeytar = new MockKeytar();
     authService = new AuthService();
     // Wait a short time for loadTokens to complete; increase buffer for CI
     await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+
+  afterEach(() => {
+    if (origDataDir === undefined) delete process.env.YASH_DATA_DIR;
+    else process.env.YASH_DATA_DIR = origDataDir;
   });
 
   test('should be instantiable', () => {

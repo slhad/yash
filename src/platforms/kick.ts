@@ -28,7 +28,9 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import type { OAuthToken } from '@nekiro/kick-api';
 import { client as KickClient, KickNetworkError, KickServerError } from '@nekiro/kick-api';
+
 type KickClientInstance = InstanceType<typeof KickClient>;
+
 import { getConfig, reloadConfig } from '../utils/config';
 import { defaultLogger } from '../utils/logger';
 import type {
@@ -233,7 +235,9 @@ export class KickProvider implements PlatformProvider {
   // ---------------------------------------------------------------------------
   // Fetch the authenticated user's channel to get broadcasterId + slug
   // ---------------------------------------------------------------------------
-  private async _fetchSelfChannel(client: KickClientInstance): Promise<{ id: number; slug: string }> {
+  private async _fetchSelfChannel(
+    client: KickClientInstance,
+  ): Promise<{ id: number; slug: string }> {
     const channels = await client.channels.getChannels();
     if (!channels.length) throw new Error('No channel found for authenticated user');
     // The type definition says `user_id` but the real API returns `broadcaster_user_id`
@@ -431,7 +435,10 @@ export class KickProvider implements PlatformProvider {
       if (metadata.game) {
         const results = await this.client.categories.getCategories({ q: metadata.game });
         const match =
-          results.find((c: { name: string; id: number }) => c.name.toLowerCase() === metadata.game!.toLowerCase()) ?? results[0];
+          results.find(
+            (c: { name: string; id: number }) =>
+              c.name.toLowerCase() === metadata.game!.toLowerCase(),
+          ) ?? results[0];
         if (match) {
           update.category_id = match.id;
         } else {

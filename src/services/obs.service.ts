@@ -313,7 +313,9 @@ export class ObsService {
     const secret = createHash('sha256')
       .update((this.password ?? '') + salt)
       .digest('base64');
-    return createHash('sha256').update(secret + challenge).digest('base64');
+    return createHash('sha256')
+      .update(secret + challenge)
+      .digest('base64');
   }
 
   /**

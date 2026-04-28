@@ -44,7 +44,9 @@ export class ChatService {
     // Ensure all required fields are present
     return {
       ...message,
-      id: message.id || `${message.platform}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      id:
+        message.id ||
+        `${message.platform}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       userId: message.userId || `unknown_${Math.random().toString(36).substr(2, 9)}`,
       username: message.username || 'UnknownUser',
       message: message.message || '',

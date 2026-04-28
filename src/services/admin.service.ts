@@ -363,7 +363,13 @@ export class AdminService {
     return null;
   }
 
-  listKeys(): Array<{ id: string; label?: string; createdAt: number; revoked: boolean; roles: string[] }> {
+  listKeys(): Array<{
+    id: string;
+    label?: string;
+    createdAt: number;
+    revoked: boolean;
+    roles: string[];
+  }> {
     return Array.from(this.keys.values()).map((k) => ({
       id: k.id,
       label: k.label,

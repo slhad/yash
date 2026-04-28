@@ -667,7 +667,7 @@ function openKickSetupModal(): void {
   }
 }
 
-function openYouTubeSetupModal(): void {
+function openYouTubeCredentialsModal(): void {
   if (!uiNodes || activeModal) return;
   const { renderer } = uiNodes;
 
@@ -887,9 +887,7 @@ function openObsConnectModal(): void {
       obs: { websocket: { server: host, port: String(port), password: password ?? '' } },
     }).then(async () => {
       obsService.reconfigure(host, port, password);
-      lastMessages.push(
-        `[obs] Saved — ws://${host}:${port}  password: ${password ?? '(none)'}`,
-      );
+      lastMessages.push(`[obs] Saved — ws://${host}:${port}  password: ${password ?? '(none)'}`);
       if (obsService.isConnected()) {
         await obsService.disconnect();
       }
@@ -1930,7 +1928,7 @@ async function handleCommand(trimmed: string): Promise<void> {
         } else if (platform === 'kick' && res?.error === 'Kick credentials not configured') {
           openKickSetupModal();
         } else if (platform === 'youtube' && res?.error === 'YouTube credentials not configured') {
-          openYouTubeSetupModal();
+          openYouTubeCredentialsModal();
         } else {
           lastMessages.push(
             `[system] ${platform} authentication failed: ${res?.error ?? 'unknown error'}`,

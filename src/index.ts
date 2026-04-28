@@ -7,6 +7,8 @@ import commandsJs from './utils/webCommands.bundle.js' with { type: 'text' };
 // only OAuth callbacks and connect/API endpoints are needed.
 const isTuiOnly = process.env.YASH_TUI_ONLY === '1';
 
+import { importKeysHandler, updateRolesHandler } from './handlers/adminKeysHandlers';
+import type { PlatformProvider } from './platforms/base';
 import {
   adminService,
   authService,
@@ -21,8 +23,6 @@ import {
   youtube,
 } from './services';
 import { authorizeAdmin } from './utils/adminAuth';
-import { importKeysHandler, updateRolesHandler } from './handlers/adminKeysHandlers';
-import type { PlatformProvider } from './platforms/base';
 import { getConfig, isDemoMode, saveConfig } from './utils/config';
 import { defaultLogger } from './utils/logger';
 import { apiMetricsHandler, prometheusMetricsHandler } from './utils/metricsHandlers';

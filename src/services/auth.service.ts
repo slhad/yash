@@ -12,9 +12,13 @@ interface TokenData {
 
 export class AuthService {
   // Simple, file-backed token store with no OS keyring or encryption.
-  private static DATA_DIR =
-    process.env.YASH_DATA_DIR || path.join(process.env.HOME || '.', '.yash');
-  private static TOKENS_FILE = path.join(AuthService.DATA_DIR, 'tokens.json');
+  // Use getters so that mutations to process.env.YASH_DATA_DIR (e.g. in tests) take effect.
+  private static get DATA_DIR(): string {
+    return process.env.YASH_DATA_DIR || path.join(process.env.HOME || '.', '.yash');
+  }
+  private static get TOKENS_FILE(): string {
+    return path.join(AuthService.DATA_DIR, 'tokens.json');
+  }
 
   private tokens: Map<string, TokenData> = new Map();
   private refreshInterval: ReturnType<typeof setInterval> | null = null;

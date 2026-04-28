@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
-import { StreamStatus } from '../src/platforms/base';
 import type { StreamMetadata } from '../src/platforms/base';
+import { StreamStatus } from '../src/platforms/base';
 import { KickProvider } from '../src/platforms/kick';
 import { TwitchProvider } from '../src/platforms/twitch';
 import { YouTubeProvider } from '../src/platforms/youtube';
