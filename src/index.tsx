@@ -26,6 +26,7 @@ import {
   twitch,
   youtube,
 } from './services';
+import { YT_CATEGORY_NAMES } from './platforms/youtube';
 import { getConfig, isDemoMode, saveConfig } from './utils/config';
 import logCollector from './utils/logCollector';
 import { defaultLogger } from './utils/logger';
@@ -90,7 +91,6 @@ interface TwitchSetupModal {
 
 interface StreamModal {
   box: BoxRenderable;
-  inputs: InputRenderable[];
   focusIndex: number;
   selectedPlatforms: Set<string>;
   op: 'start' | 'stop' | 'update';
@@ -213,9 +213,7 @@ function initUI(renderer: CliRenderer, messages: string[]): UINodes {
     stickyStart: 'bottom',
   });
   for (const msg of messages.slice(-15)) {
-    const content = typeof msg === 'string' ? msg : msg.content;
-    const fg = typeof msg === 'string' ? 'white' : msg.fg;
-    chatScroll.add(new TextRenderable(renderer, { content, fg }));
+    chatScroll.add(renderChatLine(renderer, msg));
   }
 
   const chatBox = new BoxRenderable(renderer, {
@@ -403,9 +401,7 @@ function updateUI(messages: string[]): void {
   // Chat: clear and refill
   clearScrollBox(chatScroll);
   for (const msg of messages.slice(-15)) {
-    const content = typeof msg === 'string' ? msg : msg.content;
-    const fg = typeof msg === 'string' ? 'white' : msg.fg;
-    chatScroll.add(new TextRenderable(renderer, { content, fg }));
+    chatScroll.add(renderChatLine(renderer, msg));
   }
 
   // Sidebar: clear and refill
@@ -874,8 +870,6 @@ function openObsConnectModal(): void {
     uiNodes?.inputEl.focus();
 
     if (!save) {
-      lastMessages.push('[obs] Cancelled.');
-      updateUI(lastMessages);
       return;
     }
 
@@ -1317,13 +1311,20 @@ function openYouTubeSetupModal(): void {
 
   const saved = youtube.getSetup();
 
-  type ToggleKey = 'defaultPlaylist' | 'subjectPlaylist' | 'chaptering' | 'tags' | 'description';
+  type ToggleKey =
+    | 'defaultPlaylist'
+    | 'subjectPlaylist'
+    | 'chaptering'
+    | 'tags'
+    | 'description'
+    | 'subjectTitle';
   const state: Record<ToggleKey, boolean> = {
     defaultPlaylist: saved.defaultPlaylist.enabled,
     subjectPlaylist: saved.subjectPlaylist.enabled,
     chaptering: saved.chaptering.enabled,
     tags: saved.tags.enabled,
     description: saved.description.enabled,
+    subjectTitle: saved.subjectTitle.enabled,
   };
   let playlistId = saved.defaultPlaylist.playlistId;
 
@@ -1333,6 +1334,7 @@ function openYouTubeSetupModal(): void {
     chaptering: 'Chaptering       ',
     tags: 'Tags             ',
     description: 'Description      ',
+    subjectTitle: 'Subject in Title ',
   };
 
   function badge(key: ToggleKey, focused: boolean): string {
@@ -1340,7 +1342,7 @@ function openYouTubeSetupModal(): void {
     return `${focused ? '▶ ' : '  '}${mark} ${LABELS[key]}`;
   }
 
-  // Toggle nodes (focusable indices 0,2,3,4,6)
+  // Toggle nodes
   const toggleNodes: Record<ToggleKey, TextRenderable> = {
     defaultPlaylist: new TextRenderable(renderer, {
       content: badge('defaultPlaylist', true),
@@ -1354,6 +1356,10 @@ function openYouTubeSetupModal(): void {
     tags: new TextRenderable(renderer, { content: badge('tags', false), fg: 'white' }),
     description: new TextRenderable(renderer, {
       content: badge('description', false),
+      fg: 'white',
+    }),
+    subjectTitle: new TextRenderable(renderer, {
+      content: badge('subjectTitle', false),
       fg: 'white',
     }),
   };
@@ -1384,6 +1390,10 @@ function openYouTubeSetupModal(): void {
     content: '  ↳ adds the description from /stream to the YouTube video description',
     fg: 'gray',
   });
+  const subjectTitleHint = new TextRenderable(renderer, {
+    content: '  ↳ appends " - {subject}" to the YouTube title (e.g. "My Stream - Gaming")',
+    fg: 'gray',
+  });
 
   const hint = new TextRenderable(renderer, {
     content: '  [Tab] navigate  [Space] toggle  [Ctrl+P] pick playlist  [Enter] save  [Esc] cancel',
@@ -1400,6 +1410,7 @@ function openYouTubeSetupModal(): void {
     { kind: 'toggle', key: 'chaptering' }, // 3
     { kind: 'toggle', key: 'tags' }, // 4
     { kind: 'toggle', key: 'description' }, // 5
+    { kind: 'toggle', key: 'subjectTitle' }, // 6
   ];
 
   const box = new BoxRenderable(renderer, {
@@ -1430,6 +1441,8 @@ function openYouTubeSetupModal(): void {
   box.add(tagsHint);
   box.add(toggleNodes.description);
   box.add(descriptionHint);
+  box.add(toggleNodes.subjectTitle);
+  box.add(subjectTitleHint);
   box.add(hint);
 
   renderer.root.add(box);
@@ -1518,6 +1531,7 @@ function openYouTubeSetupModal(): void {
             chaptering: { enabled: state.chaptering },
             tags: { enabled: state.tags },
             description: { enabled: state.description },
+            subjectTitle: { enabled: state.subjectTitle },
           },
         },
       },
@@ -1570,8 +1584,6 @@ function openStreamModal(preselected: string[]): void {
   const { renderer } = uiNodes;
 
   const selectedPlatforms = new Set(preselected.length > 0 ? preselected : [...platforms]);
-
-  // Pre-fill from persisted config
   const savedStream = getConfig().stream ?? {};
 
   function makeLabel(text: string): TextRenderable {
@@ -1579,9 +1591,6 @@ function openStreamModal(preselected: string[]): void {
   }
 
   // ── Platform toggle row ──────────────────────────────────────────
-  // focusIndex === -1 means the platform row itself is focused.
-  // 1/2/3 only toggle platforms when focusIndex === -1, so digits typed
-  // in text fields (e.g. "Destiny 2") are never consumed.
   function platformToggleContent(focused: boolean): string {
     const indicator = focused ? '> ' : '  ';
     return (
@@ -1589,26 +1598,51 @@ function openStreamModal(preselected: string[]): void {
       platforms.map((p) => (selectedPlatforms.has(p) ? `[x] ${p}` : `[ ] ${p}`)).join('   ')
     );
   }
-
-  const platformToggleLabel = makeLabel(' Platforms ([Tab] to focus, Space/Enter to toggle):');
+  const platformToggleLabel = makeLabel(' Platforms ([Tab] to focus, 1/2/3 to toggle):');
   const platformToggleText = new TextRenderable(renderer, {
     content: platformToggleContent(true),
     fg: 'cyan',
   });
 
-  // ── Metadata inputs ──────────────────────────────────────────────
+  // ── Title ────────────────────────────────────────────────────────
   const titleLabel = makeLabel(' Title (all platforms):');
   const titleInput = new InputRenderable(renderer, { placeholder: 'Stream title', width: '100%' });
   titleInput.value = savedStream.title ?? '';
 
-  const gameLabel = makeLabel(' Subject / Category / Game (all platforms):');
-  const gameInput = new InputRenderable(renderer, {
-    placeholder: 'Game or category',
+  // ── YouTube video category selector ─────────────────────────────
+  const YT_CATS = YT_CATEGORY_NAMES as unknown as string[];
+  let ytCatIdx = Math.max(0, YT_CATS.indexOf(savedStream.youtubeCategory ?? 'Gaming'));
+  function ytCatContent(focused: boolean): string {
+    return `${focused ? '▶ ' : '  '}[${YT_CATS[ytCatIdx]}]  ◄/► to change`;
+  }
+  const ytCatLabel = makeLabel(' Video Category (YouTube):');
+  const ytCatText = new TextRenderable(renderer, { content: ytCatContent(false), fg: 'white' });
+
+  // ── YouTube subject (for playlists / title suffix) ───────────────
+  const subjectLabel = makeLabel(' Subject (YouTube — playlist & title suffix):');
+  const subjectInput = new InputRenderable(renderer, {
+    placeholder: 'Stream subject',
     width: '100%',
   });
-  gameInput.value = savedStream.game ?? '';
+  subjectInput.value = savedStream.game ?? '';
 
-  // Twitch tags: no spaces, max 25 chars each. Spaces are stripped on submit.
+  // ── Twitch game ──────────────────────────────────────────────────
+  const twitchGameLabel = makeLabel(' Game (Twitch):');
+  const twitchGameInput = new InputRenderable(renderer, {
+    placeholder: 'Game name',
+    width: '100%',
+  });
+  twitchGameInput.value = savedStream.twitchGame ?? '';
+
+  // ── Kick category ────────────────────────────────────────────────
+  const kickCatLabel = makeLabel(' Category (Kick):');
+  const kickCatInput = new InputRenderable(renderer, {
+    placeholder: 'Category name',
+    width: '100%',
+  });
+  kickCatInput.value = savedStream.kickCategory ?? '';
+
+  // ── Tags ─────────────────────────────────────────────────────────
   const tagsLabel = makeLabel(' Tags — comma-separated (no spaces, Twitch max 25 chars each):');
   const tagsInput = new InputRenderable(renderer, {
     placeholder: 'gaming, fps, variety',
@@ -1618,6 +1652,7 @@ function openStreamModal(preselected: string[]): void {
     ? savedStream.tags.join(', ')
     : (savedStream.tags ?? '');
 
+  // ── YouTube description ──────────────────────────────────────────
   const descLabel = makeLabel(' Description (YouTube):');
   const descInput = new InputRenderable(renderer, {
     placeholder: 'Stream description',
@@ -1625,6 +1660,7 @@ function openStreamModal(preselected: string[]): void {
   });
   descInput.value = savedStream.description ?? '';
 
+  // ── Twitch notification ──────────────────────────────────────────
   const notifLabel = makeLabel(' Notification (Twitch):');
   const notifInput = new InputRenderable(renderer, {
     placeholder: 'Going live notification message',
@@ -1633,7 +1669,7 @@ function openStreamModal(preselected: string[]): void {
   notifInput.value = savedStream.notification ?? '';
 
   const hint = new TextRenderable(renderer, {
-    content: ' [Tab] next field   [Enter] confirm   [Esc] cancel',
+    content: ' [Tab] next field  [◄/►] change YT category  [Enter] confirm  [Esc] cancel',
     fg: 'gray',
   });
 
@@ -1658,8 +1694,14 @@ function openStreamModal(preselected: string[]): void {
   box.add(platformToggleText);
   box.add(titleLabel);
   box.add(titleInput);
-  box.add(gameLabel);
-  box.add(gameInput);
+  box.add(ytCatLabel);
+  box.add(ytCatText);
+  box.add(subjectLabel);
+  box.add(subjectInput);
+  box.add(twitchGameLabel);
+  box.add(twitchGameInput);
+  box.add(kickCatLabel);
+  box.add(kickCatInput);
   box.add(tagsLabel);
   box.add(tagsInput);
   box.add(descLabel);
@@ -1669,43 +1711,90 @@ function openStreamModal(preselected: string[]): void {
   box.add(hint);
   renderer.root.add(box);
 
-  const allInputs = [titleInput, gameInput, tagsInput, descInput, notifInput];
+  // ── Focus management ─────────────────────────────────────────────
+  // FocusItem discriminated union: platforms row, YouTube category selector, or an InputRenderable.
+  type StreamFocusItem =
+    | { kind: 'platforms' }
+    | { kind: 'yt-category' }
+    | { kind: 'input'; node: InputRenderable };
 
-  // focusIndex = -1 → platform row focused; >= 0 → modal.inputs[focusIndex] focused
-  const modal: StreamModal = {
-    box,
-    inputs: allInputs,
-    focusIndex: -1,
-    selectedPlatforms,
-    op: 'update',
-  };
+  let visibleItems: StreamFocusItem[] = [];
+  let focusIdx = 0;
+
+  const modal: StreamModal = { box, focusIndex: 0, selectedPlatforms, op: 'update' };
   activeStreamModal = modal;
 
+  function blurCurrent(): void {
+    const item = visibleItems[focusIdx];
+    if (!item) return;
+    if (item.kind === 'platforms') {
+      platformToggleText.content = platformToggleContent(false);
+      platformToggleText.fg = 'white';
+    } else if (item.kind === 'yt-category') {
+      ytCatText.content = ytCatContent(false);
+      ytCatText.fg = 'white';
+    } else {
+      item.node.blur();
+    }
+  }
+
+  function focusCurrent(): void {
+    const item = visibleItems[focusIdx];
+    if (!item) return;
+    if (item.kind === 'platforms') {
+      platformToggleText.content = platformToggleContent(true);
+      platformToggleText.fg = 'cyan';
+    } else if (item.kind === 'yt-category') {
+      ytCatText.content = ytCatContent(true);
+      ytCatText.fg = 'cyan';
+    } else {
+      item.node.focus();
+    }
+  }
+
   function updateConditionalVisibility(): void {
-    platformToggleText.content = platformToggleContent(modal.focusIndex === -1);
-    const hasYoutube = selectedPlatforms.has('youtube');
+    const hasYT = selectedPlatforms.has('youtube');
     const hasTwitch = selectedPlatforms.has('twitch');
-    descLabel.visible = hasYoutube;
-    descInput.visible = hasYoutube;
+    const hasKick = selectedPlatforms.has('kick');
+
+    ytCatLabel.visible = hasYT;
+    ytCatText.visible = hasYT;
+    subjectLabel.visible = hasYT;
+    subjectInput.visible = hasYT;
+    twitchGameLabel.visible = hasTwitch;
+    twitchGameInput.visible = hasTwitch;
+    kickCatLabel.visible = hasKick;
+    kickCatInput.visible = hasKick;
+    descLabel.visible = hasYT;
+    descInput.visible = hasYT;
     notifLabel.visible = hasTwitch;
     notifInput.visible = hasTwitch;
 
-    const visible = [titleInput, gameInput, tagsInput];
-    if (hasYoutube) visible.push(descInput);
-    if (hasTwitch) visible.push(notifInput);
-    modal.inputs = visible;
-    if (modal.focusIndex >= modal.inputs.length) modal.focusIndex = 0;
+    const items: StreamFocusItem[] = [{ kind: 'platforms' }, { kind: 'input', node: titleInput }];
+    if (hasYT) items.push({ kind: 'yt-category' });
+    if (hasYT) items.push({ kind: 'input', node: subjectInput });
+    if (hasTwitch) items.push({ kind: 'input', node: twitchGameInput });
+    if (hasKick) items.push({ kind: 'input', node: kickCatInput });
+    items.push({ kind: 'input', node: tagsInput });
+    if (hasYT) items.push({ kind: 'input', node: descInput });
+    if (hasTwitch) items.push({ kind: 'input', node: notifInput });
+    visibleItems = items;
+    if (focusIdx >= visibleItems.length) focusIdx = 0;
+    modal.focusIndex = focusIdx;
   }
 
   function togglePlatform(idx: number): void {
     const p = platforms[idx];
     if (!p) return;
+    blurCurrent();
     if (selectedPlatforms.has(p)) selectedPlatforms.delete(p);
     else selectedPlatforms.add(p);
     updateConditionalVisibility();
+    focusCurrent();
   }
 
   updateConditionalVisibility();
+  focusCurrent();
 
   async function closeModal(confirm: boolean): Promise<void> {
     if (!activeStreamModal) return;
@@ -1715,8 +1804,6 @@ function openStreamModal(preselected: string[]): void {
     uiNodes?.inputEl.focus();
 
     if (!confirm) {
-      lastMessages.push('[stream] Cancelled.');
-      updateUI(lastMessages);
       return;
     }
 
@@ -1727,7 +1814,6 @@ function openStreamModal(preselected: string[]): void {
       return;
     }
 
-    // Strip spaces from tags — Twitch forbids spaces in tags
     const rawTags = tagsInput.value
       .split(',')
       .map((t) => t.trim().replace(/\s+/g, ''))
@@ -1735,7 +1821,14 @@ function openStreamModal(preselected: string[]): void {
 
     const newMeta: Record<string, any> = {
       title: titleInput.value.trim() || undefined,
-      game: gameInput.value.trim() || undefined,
+      game: selectedPlatforms.has('youtube') ? subjectInput.value.trim() || undefined : undefined,
+      youtubeCategory: selectedPlatforms.has('youtube') ? YT_CATS[ytCatIdx] : undefined,
+      twitchGame: selectedPlatforms.has('twitch')
+        ? twitchGameInput.value.trim() || undefined
+        : undefined,
+      kickCategory: selectedPlatforms.has('kick')
+        ? kickCatInput.value.trim() || undefined
+        : undefined,
       tags: rawTags.length > 0 ? rawTags : undefined,
       description: selectedPlatforms.has('youtube')
         ? descInput.value.trim() || undefined
@@ -1745,7 +1838,6 @@ function openStreamModal(preselected: string[]): void {
         : undefined,
     };
 
-    // Only apply fields that actually changed
     const changed: Record<string, any> = {};
     for (const key of Object.keys(newMeta)) {
       if (JSON.stringify(newMeta[key]) !== JSON.stringify(savedStream[key])) {
@@ -1780,7 +1872,6 @@ function openStreamModal(preselected: string[]): void {
         if (r.error) {
           lastMessages.push({ content: `[stream] ${r.platform}: ✗ ${r.error}`, fg: 'red' });
         } else {
-          // Build the success line — include accepted tags inline if present.
           const okFields = Object.keys(changed)
             .filter((k) => k !== 'tags' || (!r.skippedTags?.length && !r.appliedTags?.length))
             .filter((k) => !r.skipped?.includes(k))
@@ -1791,7 +1882,6 @@ function openStreamModal(preselected: string[]): void {
             content: `[stream] ${r.platform}: ✓${okFields ? ` ${okFields}` : ''}${appliedTagStr}`,
             fg: hasRejected ? 'yellow' : 'green',
           });
-          // Rejected tags on a separate red line.
           if (hasRejected) {
             lastMessages.push({
               content: `[stream] ${r.platform}:   ✗ tags rejected: ${r.skippedTags!.join(', ')}`,
@@ -1808,55 +1898,42 @@ function openStreamModal(preselected: string[]): void {
 
   const modalKeyHandler = (sequence: string): boolean => {
     if (!activeStreamModal) return false;
+    const current = visibleItems[focusIdx];
 
-    if (modal.focusIndex === -1) {
-      if (sequence === '1') {
-        togglePlatform(0);
+    // Platform digit toggles — only when platform row is focused
+    if (current?.kind === 'platforms') {
+      if (sequence === '1') { togglePlatform(0); return true; }
+      if (sequence === '2') { togglePlatform(1); return true; }
+      if (sequence === '3') { togglePlatform(2); return true; }
+    }
+
+    // YouTube category left/right navigation
+    if (current?.kind === 'yt-category') {
+      if (sequence === '\x1b[D') {
+        ytCatIdx = (ytCatIdx - 1 + YT_CATS.length) % YT_CATS.length;
+        ytCatText.content = ytCatContent(true);
         return true;
       }
-      if (sequence === '2') {
-        togglePlatform(1);
-        return true;
-      }
-      if (sequence === '3') {
-        togglePlatform(2);
+      if (sequence === '\x1b[C') {
+        ytCatIdx = (ytCatIdx + 1) % YT_CATS.length;
+        ytCatText.content = ytCatContent(true);
         return true;
       }
     }
 
     if (sequence === '\t' || sequence === '\x1b[Z') {
       const forward = sequence === '\t';
-      if (modal.focusIndex === -1) {
-        const nextIdx = forward ? 0 : modal.inputs.length - 1;
-        if (modal.inputs.length > 0) {
-          modal.focusIndex = nextIdx;
-          modal.inputs[nextIdx].focus();
-          platformToggleText.content = platformToggleContent(false);
-        }
-      } else {
-        modal.inputs[modal.focusIndex].blur();
-        const total = modal.inputs.length + 1; // +1 for platform row
-        const next = forward
-          ? (modal.focusIndex + 1) % total
-          : (modal.focusIndex - 1 + total) % total;
-        modal.focusIndex = next === modal.inputs.length ? -1 : next;
-        if (modal.focusIndex === -1) {
-          platformToggleText.content = platformToggleContent(true);
-        } else {
-          modal.inputs[modal.focusIndex].focus();
-        }
-      }
+      blurCurrent();
+      focusIdx = forward
+        ? (focusIdx + 1) % visibleItems.length
+        : (focusIdx - 1 + visibleItems.length) % visibleItems.length;
+      modal.focusIndex = focusIdx;
+      focusCurrent();
       return true;
     }
 
-    if (sequence === '\r' || sequence === '\n') {
-      closeModal(true);
-      return true;
-    }
-    if (sequence === '\x1b' || sequence === '\x1b\x1b') {
-      closeModal(false);
-      return true;
-    }
+    if (sequence === '\r' || sequence === '\n') { closeModal(true); return true; }
+    if (sequence === '\x1b' || sequence === '\x1b\x1b') { closeModal(false); return true; }
     if (sequence === '\x1b[A' || sequence === '\x1b[B') return true;
     return false;
   };
@@ -1866,7 +1943,7 @@ function openStreamModal(preselected: string[]): void {
   const escapeViaKeyDown = (key: { name: string }) => {
     if (key.name === 'escape' && activeStreamModal) closeModal(false);
   };
-  for (const input of allInputs) {
+  for (const input of [titleInput, subjectInput, twitchGameInput, kickCatInput, tagsInput, descInput, notifInput]) {
     input.onKeyDown = escapeViaKeyDown as any;
   }
 }
@@ -2110,14 +2187,46 @@ async function handleCommand(trimmed: string): Promise<void> {
 // ─── Main ────────────────────────────────────────────────────────────────────
 
 let isRunning = true;
-type ChatLine = string | { content: string; fg: string };
+type ChatLinePart = { content: string; fg: string };
+type ChatLine = string | ChatLinePart | { parts: ChatLinePart[] };
 const lastMessages: ChatLine[] = [];
 let cliRenderer: Awaited<ReturnType<typeof createCliRenderer>> | null = null;
 const inputHistory: string[] = [];
 let historyIndex = -1;
 
-function transformMessage(msg: { platform: string; username: string; message: string }) {
-  return `[${msg.platform}] ${msg.username}: ${msg.message}`;
+function platformColor(platform: string): string {
+  if (platform === 'youtube') return 'red';
+  if (platform === 'twitch') return '#9146FF';
+  if (platform === 'kick') return 'green';
+  return 'white';
+}
+
+function transformMessage(msg: { platform: string; username: string; message: string; color?: string }) {
+  const platColor = platformColor(msg.platform);
+  const userColor = msg.color ?? platColor;
+  if (userColor === platColor) {
+    return { content: `[${msg.platform}] ${msg.username}: ${msg.message}`, fg: platColor };
+  }
+  return {
+    parts: [
+      { content: `[${msg.platform}] `, fg: platColor },
+      { content: `${msg.username}: ${msg.message}`, fg: userColor },
+    ],
+  };
+}
+
+function renderChatLine(renderer: CliRenderer, msg: ChatLine): TextRenderable | BoxRenderable {
+  if (typeof msg === 'string') {
+    return new TextRenderable(renderer, { content: msg, fg: 'white' });
+  }
+  if ('parts' in msg) {
+    const row = new BoxRenderable(renderer, { flexDirection: 'row' });
+    for (const part of msg.parts) {
+      row.add(new TextRenderable(renderer, { content: part.content, fg: part.fg }));
+    }
+    return row;
+  }
+  return new TextRenderable(renderer, { content: msg.content, fg: msg.fg });
 }
 
 async function main() {
@@ -2216,7 +2325,23 @@ async function main() {
 
   chatService.subscribeToMessages((msg) => {
     lastMessages.push(transformMessage(msg));
-    pushEvent(msg.platform, 'chat', `${msg.username} sent a message`);
+  });
+
+  obsService.subscribeToMessages((event) => {
+    const type = event?.eventType as string | undefined;
+    if (type === 'CurrentProgramSceneChanged') {
+      const scene = (event?.eventData?.sceneName as string) ?? 'unknown';
+      pushEvent('obs', 'scene', scene);
+    } else if (type === 'StreamStateChanged') {
+      const active = event?.eventData?.outputActive as boolean;
+      pushEvent('obs', 'stream', active ? 'started' : 'stopped');
+    } else if (type === 'RecordStateChanged') {
+      const active = event?.eventData?.outputActive as boolean;
+      pushEvent('obs', 'recording', active ? 'started' : 'stopped');
+    } else {
+      return;
+    }
+    updateUI(lastMessages);
   });
 
   await initializeServices();
