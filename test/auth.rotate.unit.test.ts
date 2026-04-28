@@ -11,10 +11,11 @@ describe('AuthService.rotateEncryptionKey (removed)', () => {
   const yashDir = path.join(process.env.HOME || '.', '.yash');
 
   beforeEach(async () => {
-    // Ensure no on-disk .yash dir
+    // Remove only the AuthService tokens file — leave platform token files intact
+    const tokensFile = path.join(yashDir, 'tokens.json');
     try {
-      await fs.rm(yashDir, { recursive: true, force: true });
-    } catch (err) {
+      await fs.rm(tokensFile, { force: true });
+    } catch {
       // ignore
     }
     // Ensure env var not interfering

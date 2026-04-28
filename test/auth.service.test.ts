@@ -8,11 +8,11 @@ describe('AuthService', () => {
   let authService: AuthService;
 
   beforeEach(async () => {
-    // Clear any existing token file and key directory for clean tests
-    const yashDir = path.join(process.env.HOME || '.', '.yash');
+    // Remove only the AuthService tokens file — leave platform token files intact
+    const tokensFile = path.join(process.env.HOME || '.', '.yash', 'tokens.json');
     try {
-      await fs.rm(yashDir, { recursive: true, force: true });
-    } catch (err) {
+      await fs.rm(tokensFile, { force: true });
+    } catch {
       // ignore
     }
 
