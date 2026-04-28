@@ -85,8 +85,6 @@ let uiNodes: UINodes | null = null;
 
 interface TwitchSetupModal {
   box: BoxRenderable;
-  clientIdInput: InputRenderable;
-  clientSecretInput: InputRenderable;
   focusIndex: number;
 }
 
@@ -135,6 +133,7 @@ function initUI(renderer: CliRenderer, messages: string[]): UINodes {
     paddingBottom: 1,
     paddingLeft: 2,
     width: '100%',
+    height: '100%',
     flexDirection: 'column',
   });
 
@@ -204,11 +203,12 @@ function initUI(renderer: CliRenderer, messages: string[]): UINodes {
   const contentRow = new BoxRenderable(renderer, {
     flexDirection: 'row',
     width: '100%',
+    flexGrow: 1,
     marginTop: 1,
   });
 
   const chatScroll = new ScrollBoxRenderable(renderer, {
-    height: 15,
+    height: '100%',
     stickyScroll: true,
     stickyStart: 'bottom',
   });
@@ -230,7 +230,7 @@ function initUI(renderer: CliRenderer, messages: string[]): UINodes {
 
   // Sidebar: events + logs merged into one panel
   const sidebarScroll = new ScrollBoxRenderable(renderer, {
-    height: Math.max(logsHeight, 15),
+    height: '100%',
     stickyScroll: true,
     stickyStart: 'bottom',
   });
@@ -238,11 +238,10 @@ function initUI(renderer: CliRenderer, messages: string[]): UINodes {
 
   const sidebarBox = new BoxRenderable(renderer, {
     borderStyle: 'rounded',
-    border: true,
+    border: ['top', 'right', 'bottom'],
     padding: 1,
     width: sidebarWidth as `${number}%`,
     flexDirection: 'column',
-    marginLeft: 1,
     title: ' Events & Logs ',
   });
   sidebarBox.add(sidebarScroll);
@@ -259,12 +258,10 @@ function initUI(renderer: CliRenderer, messages: string[]): UINodes {
     });
 
   const inputBox = new BoxRenderable(renderer, {
-    marginTop: 1,
     borderStyle: 'rounded',
-    border: true,
+    border: ['left', 'right', 'bottom'],
     padding: 1,
     width: '100%',
-    title: ' Message ',
   });
   inputBox.add(inputEl);
 
@@ -482,13 +479,7 @@ function openTwitchSetupModal(): void {
 
   renderer.root.add(box);
 
-  const modal: TwitchSetupModal = {
-    box,
-    clientIdInput,
-    clientSecretInput,
-    focusIndex: 0,
-  };
-  activeModal = modal;
+  activeModal = { box, focusIndex: 0 };
 
   const inputs = [clientIdInput, clientSecretInput];
   inputs[0].focus();
@@ -539,6 +530,7 @@ function openTwitchSetupModal(): void {
       closeModal(false);
       return true;
     }
+    if (sequence === '\x1b[A' || sequence === '\x1b[B') return true;
     return false;
   };
 
@@ -614,13 +606,7 @@ function openKickSetupModal(): void {
 
   renderer.root.add(box);
 
-  const modal: TwitchSetupModal = {
-    box,
-    clientIdInput,
-    clientSecretInput,
-    focusIndex: 0,
-  };
-  activeModal = modal;
+  activeModal = { box, focusIndex: 0 };
 
   const inputs = [clientIdInput, clientSecretInput];
   inputs[0].focus();
@@ -638,9 +624,7 @@ function openKickSetupModal(): void {
           },
         },
       }).then(() => {
-        lastMessages.push(
-          '[system] Kick credentials saved. Run /connect kick to authenticate.',
-        );
+        lastMessages.push('[system] Kick credentials saved. Run /connect kick to authenticate.');
         updateUI(lastMessages);
       });
     } else {
@@ -669,6 +653,7 @@ function openKickSetupModal(): void {
       closeModal(false);
       return true;
     }
+    if (sequence === '\x1b[A' || sequence === '\x1b[B') return true;
     return false;
   };
 
@@ -680,6 +665,760 @@ function openKickSetupModal(): void {
   for (const input of inputs) {
     input.onKeyDown = escapeViaKeyDown as any;
   }
+}
+
+function openYouTubeSetupModal(): void {
+  if (!uiNodes || activeModal) return;
+  const { renderer } = uiNodes;
+
+  const instructions = new TextRenderable(renderer, {
+    content:
+      ' To connect YouTube:\n' +
+      '  1. Go to console.cloud.google.com and create a project\n' +
+      '  2. Enable the YouTube Data API v3\n' +
+      '  3. Under Credentials, create an OAuth 2.0 Client ID (Web application)\n' +
+      '  4. Add http://localhost:3000/api/youtube/callback as an authorized redirect URI\n' +
+      '  5. Paste the generated Client ID and Client Secret below.\n',
+    fg: 'white',
+  });
+
+  const clientIdLabel = new TextRenderable(renderer, { content: ' Client ID:', fg: 'red' });
+  const clientIdInput = new InputRenderable(renderer, {
+    placeholder: 'paste your Google OAuth Client ID…',
+    width: '100%',
+  });
+
+  const clientSecretLabel = new TextRenderable(renderer, {
+    content: ' Client Secret:',
+    fg: 'red',
+  });
+  const clientSecretInput = new InputRenderable(renderer, {
+    placeholder: 'paste your Google OAuth Client Secret…',
+    width: '100%',
+  });
+
+  const hint = new TextRenderable(renderer, {
+    content: ' [Tab] switch field   [Enter] save   [Esc] cancel',
+    fg: 'gray',
+  });
+
+  const box = new BoxRenderable(renderer, {
+    position: 'absolute',
+    top: '10%',
+    left: '10%',
+    width: '80%',
+    zIndex: 100,
+    border: true,
+    borderStyle: 'rounded',
+    borderColor: 'red',
+    backgroundColor: 'black',
+    shouldFill: true,
+    padding: 1,
+    flexDirection: 'column',
+    gap: 1,
+    title: ' YouTube Setup ',
+  });
+
+  box.add(instructions);
+  box.add(clientIdLabel);
+  box.add(clientIdInput);
+  box.add(clientSecretLabel);
+  box.add(clientSecretInput);
+  box.add(hint);
+
+  renderer.root.add(box);
+
+  activeModal = { box, focusIndex: 0 };
+
+  const inputs = [clientIdInput, clientSecretInput];
+  inputs[0].focus();
+
+  function closeModal(save: boolean): void {
+    if (!activeModal) return;
+    if (save) {
+      const clientId = clientIdInput.value.trim();
+      const clientSecret = clientSecretInput.value.trim();
+      saveConfig({
+        platforms: {
+          youtube: {
+            ...(clientId ? { clientId } : {}),
+            ...(clientSecret ? { clientSecret } : {}),
+          },
+        },
+      }).then(() => {
+        lastMessages.push(
+          '[system] YouTube credentials saved. Run /connect youtube to authenticate.',
+        );
+        updateUI(lastMessages);
+      });
+    } else {
+      lastMessages.push('[system] YouTube setup cancelled.');
+      updateUI(lastMessages);
+    }
+    renderer.removeInputHandler(modalKeyHandler);
+    renderer.root.remove(box.id);
+    activeModal = null;
+    uiNodes?.inputEl.focus();
+  }
+
+  const modalKeyHandler = (sequence: string): boolean => {
+    if (!activeModal) return false;
+    if (sequence === '\t') {
+      inputs[activeModal.focusIndex].blur();
+      activeModal.focusIndex = (activeModal.focusIndex + 1) % inputs.length;
+      inputs[activeModal.focusIndex].focus();
+      return true;
+    }
+    if (sequence === '\r' || sequence === '\n') {
+      closeModal(true);
+      return true;
+    }
+    if (sequence === '\x1b' || sequence === '\x1b\x1b') {
+      closeModal(false);
+      return true;
+    }
+    if (sequence === '\x1b[A' || sequence === '\x1b[B') return true;
+    return false;
+  };
+
+  renderer.prependInputHandler(modalKeyHandler);
+
+  const escapeViaKeyDown = (key: { name: string }) => {
+    if (key.name === 'escape' && activeModal) closeModal(false);
+  };
+  for (const input of inputs) {
+    input.onKeyDown = escapeViaKeyDown as any;
+  }
+}
+
+function openYouTubeStreamKeyModal(onSaved?: () => void): void {
+  if (!uiNodes || activeModal) return;
+  const { renderer } = uiNodes;
+
+  const instructions = new TextRenderable(renderer, {
+    content:
+      ' No stream keys found on your account yet.\n' +
+      ' To create one:\n' +
+      '  1. Go to YouTube Studio (studio.youtube.com)\n' +
+      '  2. Click "Go Live" → "Stream" tab → "Stream settings"\n' +
+      '  3. Copy the Stream Key and paste it below.\n',
+    fg: 'white',
+  });
+
+  const keyLabel = new TextRenderable(renderer, { content: ' Stream Key:', fg: 'red' });
+  const keyInput = new InputRenderable(renderer, {
+    placeholder: 'paste your YouTube stream key…',
+    width: '100%',
+  });
+
+  const hint = new TextRenderable(renderer, {
+    content: ' [Enter] save   [Esc] cancel',
+    fg: 'gray',
+  });
+
+  const box = new BoxRenderable(renderer, {
+    position: 'absolute',
+    top: '10%',
+    left: '10%',
+    width: '80%',
+    zIndex: 100,
+    border: true,
+    borderStyle: 'rounded',
+    borderColor: 'red',
+    backgroundColor: 'black',
+    shouldFill: true,
+    padding: 1,
+    flexDirection: 'column',
+    gap: 1,
+    title: ' YouTube Stream Key ',
+  });
+
+  box.add(instructions);
+  box.add(keyLabel);
+  box.add(keyInput);
+  box.add(hint);
+
+  renderer.root.add(box);
+  activeModal = { box, focusIndex: 0 };
+  keyInput.focus();
+
+  function closeModal(save: boolean): void {
+    if (!activeModal) return;
+    if (save) {
+      const key = keyInput.value.trim();
+      if (key) {
+        saveConfig({ platforms: { youtube: { streamKey: key } } }).then(() => {
+          youtube.setStreamKey(key);
+          lastMessages.push('[system] YouTube stream key saved.');
+          updateUI(lastMessages);
+          onSaved?.();
+        });
+      } else {
+        lastMessages.push('[system] YouTube stream key setup cancelled (empty value).');
+        updateUI(lastMessages);
+      }
+    } else {
+      lastMessages.push('[system] YouTube stream key setup cancelled.');
+      updateUI(lastMessages);
+    }
+    renderer.removeInputHandler(modalKeyHandler);
+    renderer.root.remove(box.id);
+    activeModal = null;
+    uiNodes?.inputEl.focus();
+  }
+
+  const modalKeyHandler = (sequence: string): boolean => {
+    if (!activeModal) return false;
+    if (sequence === '\r' || sequence === '\n') {
+      closeModal(true);
+      return true;
+    }
+    if (sequence === '\x1b' || sequence === '\x1b\x1b') {
+      closeModal(false);
+      return true;
+    }
+    if (sequence === '\x1b[A' || sequence === '\x1b[B') return true;
+    return false;
+  };
+
+  renderer.prependInputHandler(modalKeyHandler);
+
+  keyInput.onKeyDown = ((key: { name: string }) => {
+    if (key.name === 'escape' && activeModal) closeModal(false);
+  }) as any;
+}
+
+function maskStreamKey(key: string): string {
+  const parts = key.split('-');
+  if (parts.length >= 2) {
+    return `${parts[0]}-${'•'.repeat(4)}` + (parts.length > 2 ? `-${'•'.repeat(4)}` : '');
+  }
+  return `${key.slice(0, 4)}••••`;
+}
+
+function openYouTubeStreamPickerModal(onSaved?: () => void): void {
+  if (!uiNodes || activeModal) return;
+  const { renderer } = uiNodes;
+
+  const statusText = new TextRenderable(renderer, {
+    content: ' Fetching your stream keys from YouTube…',
+    fg: 'gray',
+  });
+
+  const hint = new TextRenderable(renderer, {
+    content: ' [↑↓] navigate   [Enter] select   [Esc] cancel',
+    fg: 'gray',
+  });
+
+  const box = new BoxRenderable(renderer, {
+    position: 'absolute',
+    top: '10%',
+    left: '10%',
+    width: '80%',
+    zIndex: 100,
+    border: true,
+    borderStyle: 'rounded',
+    borderColor: 'red',
+    backgroundColor: 'black',
+    shouldFill: true,
+    padding: 1,
+    flexDirection: 'column',
+    gap: 1,
+    title: ' YouTube Stream Key ',
+  });
+
+  box.add(statusText);
+  box.add(hint);
+  renderer.root.add(box);
+  activeModal = { box, focusIndex: 0 };
+
+  type StreamEntry = { title: string; streamKey: string };
+  let streams: StreamEntry[] = [];
+  const itemNodes: TextRenderable[] = [];
+
+  function itemContent(entry: StreamEntry, selected: boolean): string {
+    const prefix = selected ? ' ▶ ' : '   ';
+    const title = entry.title.slice(0, 36).padEnd(36, ' ');
+    return `${prefix}${title}  ${maskStreamKey(entry.streamKey)}`;
+  }
+
+  function updateSelection(newIdx: number): void {
+    if (!activeModal) return;
+    const oldIdx = activeModal.focusIndex;
+    if (itemNodes[oldIdx]) {
+      itemNodes[oldIdx].content = itemContent(streams[oldIdx]!, false);
+      itemNodes[oldIdx].fg = 'white';
+    }
+    activeModal.focusIndex = newIdx;
+    if (itemNodes[newIdx]) {
+      itemNodes[newIdx].content = itemContent(streams[newIdx]!, true);
+      itemNodes[newIdx].fg = 'cyan';
+    }
+  }
+
+  function closeModal(save: boolean): void {
+    if (!activeModal) return;
+    if (save && streams.length > 0) {
+      const selected = streams[activeModal.focusIndex];
+      if (selected) {
+        saveConfig({ platforms: { youtube: { streamKey: selected.streamKey } } }).then(() => {
+          youtube.setStreamKey(selected.streamKey);
+          lastMessages.push(`[system] YouTube stream key set to "${selected.title}".`);
+          updateUI(lastMessages);
+          onSaved?.();
+        });
+      }
+    } else if (!save) {
+      lastMessages.push('[system] YouTube stream key selection cancelled.');
+      updateUI(lastMessages);
+    }
+    renderer.removeInputHandler(modalKeyHandler);
+    renderer.root.remove(box.id);
+    activeModal = null;
+    uiNodes?.inputEl.focus();
+  }
+
+  const modalKeyHandler = (sequence: string): boolean => {
+    if (!activeModal) return false;
+    if (sequence === '\x1b[A') {
+      updateSelection(Math.max(0, activeModal.focusIndex - 1));
+      return true;
+    }
+    if (sequence === '\x1b[B') {
+      updateSelection(Math.min(streams.length - 1, activeModal.focusIndex + 1));
+      return true;
+    }
+    if (sequence === '\r' || sequence === '\n') {
+      closeModal(true);
+      return true;
+    }
+    if (sequence === '\x1b' || sequence === '\x1b\x1b') {
+      closeModal(false);
+      return true;
+    }
+    return true;
+  };
+
+  renderer.prependInputHandler(modalKeyHandler);
+
+  youtube
+    .listStreams()
+    .then((result) => {
+      if (!activeModal) return;
+      box.remove(statusText.id);
+
+      if (result.length === 0) {
+        renderer.removeInputHandler(modalKeyHandler);
+        renderer.root.remove(box.id);
+        activeModal = null;
+        uiNodes?.inputEl.focus();
+        openYouTubeStreamKeyModal(onSaved);
+        return;
+      }
+
+      streams = result;
+      for (let i = 0; i < streams.length; i++) {
+        const node = new TextRenderable(renderer, {
+          content: itemContent(streams[i]!, i === 0),
+          fg: i === 0 ? 'cyan' : 'white',
+        });
+        itemNodes.push(node);
+        box.add(node);
+      }
+    })
+    .catch(() => {
+      if (!activeModal) return;
+      box.remove(statusText.id);
+      const errorText = new TextRenderable(renderer, {
+        content: ' Failed to fetch stream keys. Check your connection and try again.',
+        fg: 'yellow',
+      });
+      box.add(errorText);
+      hint.content = ' [Esc] close';
+    });
+}
+
+function openYouTubePlaylistPickerModal(
+  onSelect: (id: string, title: string) => void,
+  onCancel: () => void,
+): void {
+  if (!uiNodes || activeModal) return;
+  const { renderer } = uiNodes;
+
+  const statusText = new TextRenderable(renderer, {
+    content: ' Fetching your playlists from YouTube…',
+    fg: 'gray',
+  });
+
+  const hint = new TextRenderable(renderer, {
+    content: ' [↑↓] navigate   [Enter] select   [Esc] cancel',
+    fg: 'gray',
+  });
+
+  const box = new BoxRenderable(renderer, {
+    position: 'absolute',
+    top: '10%',
+    left: '10%',
+    width: '80%',
+    zIndex: 101,
+    border: true,
+    borderStyle: 'rounded',
+    borderColor: 'red',
+    backgroundColor: 'black',
+    shouldFill: true,
+    padding: 1,
+    flexDirection: 'column',
+    gap: 1,
+    title: ' Select Playlist ',
+  });
+
+  box.add(statusText);
+  box.add(hint);
+  renderer.root.add(box);
+  activeModal = { box, focusIndex: 0 };
+
+  type PlaylistEntry = { id: string; title: string };
+  let playlists: PlaylistEntry[] = [];
+  const itemNodes: TextRenderable[] = [];
+
+  function itemContent(entry: PlaylistEntry, selected: boolean): string {
+    return `${selected ? ' ▶ ' : '   '}${entry.title}`;
+  }
+
+  function updateSelection(newIdx: number): void {
+    if (!activeModal) return;
+    const oldIdx = activeModal.focusIndex;
+    if (itemNodes[oldIdx]) {
+      itemNodes[oldIdx].content = itemContent(playlists[oldIdx]!, false);
+      itemNodes[oldIdx].fg = 'white';
+    }
+    activeModal.focusIndex = newIdx;
+    if (itemNodes[newIdx]) {
+      itemNodes[newIdx].content = itemContent(playlists[newIdx]!, true);
+      itemNodes[newIdx].fg = 'cyan';
+    }
+  }
+
+  function closeModal(save: boolean): void {
+    if (!activeModal) return;
+    const idx = activeModal.focusIndex;
+    renderer.removeInputHandler(modalKeyHandler);
+    renderer.root.remove(box.id);
+    activeModal = null;
+    if (save && playlists[idx]) onSelect(playlists[idx]!.id, playlists[idx]!.title);
+    else onCancel();
+  }
+
+  const modalKeyHandler = (sequence: string): boolean => {
+    if (!activeModal) return false;
+    if (sequence === '\x1b[A') {
+      updateSelection(Math.max(0, activeModal.focusIndex - 1));
+      return true;
+    }
+    if (sequence === '\x1b[B') {
+      updateSelection(Math.min(playlists.length - 1, activeModal.focusIndex + 1));
+      return true;
+    }
+    if (sequence === '\r' || sequence === '\n') {
+      closeModal(true);
+      return true;
+    }
+    if (sequence === '\x1b' || sequence === '\x1b\x1b') {
+      closeModal(false);
+      return true;
+    }
+    return true;
+  };
+
+  renderer.prependInputHandler(modalKeyHandler);
+
+  youtube
+    .listPlaylists()
+    .then((result) => {
+      if (!activeModal) return;
+      box.remove(statusText.id);
+      if (result.length === 0) {
+        box.add(
+          new TextRenderable(renderer, {
+            content: ' No playlists found. Type a name below to create one.',
+            fg: 'yellow',
+          }),
+        );
+        hint.content = ' [Esc] close';
+        return;
+      }
+      playlists = result;
+      for (let i = 0; i < playlists.length; i++) {
+        const node = new TextRenderable(renderer, {
+          content: itemContent(playlists[i]!, i === 0),
+          fg: i === 0 ? 'cyan' : 'white',
+        });
+        itemNodes.push(node);
+        box.add(node);
+      }
+    })
+    .catch(() => {
+      if (!activeModal) return;
+      box.remove(statusText.id);
+      box.add(
+        new TextRenderable(renderer, { content: ' Failed to fetch playlists.', fg: 'yellow' }),
+      );
+      hint.content = ' [Esc] close';
+    });
+}
+
+function openYouTubeSetupModal(): void {
+  if (!uiNodes || activeModal) return;
+  const { renderer } = uiNodes;
+
+  const saved = youtube.getSetup();
+
+  type ToggleKey = 'defaultPlaylist' | 'subjectPlaylist' | 'chaptering' | 'tags' | 'description';
+  const state: Record<ToggleKey, boolean> = {
+    defaultPlaylist: saved.defaultPlaylist.enabled,
+    subjectPlaylist: saved.subjectPlaylist.enabled,
+    chaptering: saved.chaptering.enabled,
+    tags: saved.tags.enabled,
+    description: saved.description.enabled,
+  };
+  let playlistId = saved.defaultPlaylist.playlistId;
+
+  const LABELS: Record<ToggleKey, string> = {
+    defaultPlaylist: 'Default Playlist ',
+    subjectPlaylist: 'Subject Playlist ',
+    chaptering: 'Chaptering       ',
+    tags: 'Tags             ',
+    description: 'Description      ',
+  };
+
+  function badge(key: ToggleKey, focused: boolean): string {
+    const mark = state[key] ? '[ON ]' : '[OFF]';
+    return `${focused ? '▶ ' : '  '}${mark} ${LABELS[key]}`;
+  }
+
+  // Toggle nodes (focusable indices 0,2,3,4,6)
+  const toggleNodes: Record<ToggleKey, TextRenderable> = {
+    defaultPlaylist: new TextRenderable(renderer, {
+      content: badge('defaultPlaylist', true),
+      fg: 'cyan',
+    }),
+    subjectPlaylist: new TextRenderable(renderer, {
+      content: badge('subjectPlaylist', false),
+      fg: 'white',
+    }),
+    chaptering: new TextRenderable(renderer, { content: badge('chaptering', false), fg: 'white' }),
+    tags: new TextRenderable(renderer, { content: badge('tags', false), fg: 'white' }),
+    description: new TextRenderable(renderer, {
+      content: badge('description', false),
+      fg: 'white',
+    }),
+  };
+
+  const playlistInput = new InputRenderable(renderer, {
+    placeholder: 'playlist name (type to create new)',
+    width: '100%',
+  });
+  playlistInput.value = saved.defaultPlaylist.playlistTitle;
+  const playlistHint = new TextRenderable(renderer, {
+    content:
+      '  ↳ adds every stream to this playlist — type name to create, Ctrl+P to pick existing',
+    fg: 'gray',
+  });
+  const subjectHint = new TextRenderable(renderer, {
+    content: '  ↳ creates a new playlist per stream using the Subject field from /stream',
+    fg: 'gray',
+  });
+  const chapteringHint = new TextRenderable(renderer, {
+    content: '  ↳ appends a Timestamps block to the description when /marker is used',
+    fg: 'gray',
+  });
+  const tagsHint = new TextRenderable(renderer, {
+    content: '  ↳ appends tags from /stream as #hashtags to the description',
+    fg: 'gray',
+  });
+  const descriptionHint = new TextRenderable(renderer, {
+    content: '  ↳ adds the description from /stream to the YouTube video description',
+    fg: 'gray',
+  });
+
+  const hint = new TextRenderable(renderer, {
+    content: '  [Tab] navigate  [Space] toggle  [Ctrl+P] pick playlist  [Enter] save  [Esc] cancel',
+    fg: 'gray',
+  });
+
+  // Focusable item list: toggles and inputs interleaved
+  type FocusItem = { kind: 'toggle'; key: ToggleKey } | { kind: 'input'; node: InputRenderable };
+
+  const items: FocusItem[] = [
+    { kind: 'toggle', key: 'defaultPlaylist' }, // 0
+    { kind: 'input', node: playlistInput }, // 1
+    { kind: 'toggle', key: 'subjectPlaylist' }, // 2
+    { kind: 'toggle', key: 'chaptering' }, // 3
+    { kind: 'toggle', key: 'tags' }, // 4
+    { kind: 'toggle', key: 'description' }, // 5
+  ];
+
+  const box = new BoxRenderable(renderer, {
+    position: 'absolute',
+    top: '5%',
+    left: '5%',
+    width: '90%',
+    zIndex: 100,
+    border: true,
+    borderStyle: 'rounded',
+    borderColor: 'red',
+    backgroundColor: 'black',
+    shouldFill: true,
+    padding: 1,
+    flexDirection: 'column',
+    gap: 1,
+    title: ' YouTube Stream Setup ',
+  });
+
+  box.add(toggleNodes.defaultPlaylist);
+  box.add(playlistHint);
+  box.add(playlistInput);
+  box.add(toggleNodes.subjectPlaylist);
+  box.add(subjectHint);
+  box.add(toggleNodes.chaptering);
+  box.add(chapteringHint);
+  box.add(toggleNodes.tags);
+  box.add(tagsHint);
+  box.add(toggleNodes.description);
+  box.add(descriptionHint);
+  box.add(hint);
+
+  renderer.root.add(box);
+  activeModal = { box, focusIndex: 0 };
+  items[0]; // initial focus already set via badge('defaultPlaylist', true)
+
+  let focusIdx = 0;
+
+  function blurItem(idx: number): void {
+    const item = items[idx]!;
+    if (item.kind === 'toggle') {
+      toggleNodes[item.key].content = badge(item.key, false);
+      toggleNodes[item.key].fg = state[item.key] ? 'white' : 'gray';
+    } else {
+      item.node.blur();
+    }
+  }
+
+  function focusItem(idx: number): void {
+    const item = items[idx]!;
+    if (item.kind === 'toggle') {
+      toggleNodes[item.key].content = badge(item.key, true);
+      toggleNodes[item.key].fg = 'cyan';
+    } else {
+      item.node.focus();
+    }
+  }
+
+  function advanceFocus(delta: number): void {
+    blurItem(focusIdx);
+    focusIdx = (focusIdx + delta + items.length) % items.length;
+    if (activeModal) activeModal.focusIndex = focusIdx;
+    focusItem(focusIdx);
+  }
+
+  function suspendAndPickPlaylist(): void {
+    const savedIdx = focusIdx;
+    renderer.removeInputHandler(modalKeyHandler);
+    renderer.root.remove(box.id);
+    activeModal = null;
+
+    openYouTubePlaylistPickerModal(
+      (id, title) => {
+        playlistId = id;
+        playlistInput.value = title;
+        state.defaultPlaylist = true;
+        renderer.root.add(box);
+        focusIdx = 1;
+        activeModal = { box, focusIndex: focusIdx };
+        renderer.prependInputHandler(modalKeyHandler);
+        focusItem(1);
+      },
+      () => {
+        renderer.root.add(box);
+        focusIdx = savedIdx;
+        activeModal = { box, focusIndex: focusIdx };
+        renderer.prependInputHandler(modalKeyHandler);
+        focusItem(focusIdx);
+      },
+    );
+  }
+
+  async function closeModal(save: boolean): Promise<void> {
+    if (!activeModal) return;
+    renderer.removeInputHandler(modalKeyHandler);
+    renderer.root.remove(box.id);
+    activeModal = null;
+    uiNodes?.inputEl.focus();
+
+    if (!save) {
+      lastMessages.push('[system] YouTube setup cancelled.');
+      updateUI(lastMessages);
+      return;
+    }
+
+    await saveConfig({
+      platforms: {
+        youtube: {
+          setup: {
+            defaultPlaylist: {
+              enabled: state.defaultPlaylist,
+              playlistId,
+              playlistTitle: playlistInput.value.trim(),
+            },
+            subjectPlaylist: { enabled: state.subjectPlaylist },
+            chaptering: { enabled: state.chaptering },
+            tags: { enabled: state.tags },
+            description: { enabled: state.description },
+          },
+        },
+      },
+    });
+    lastMessages.push('[system] YouTube setup saved.');
+    updateUI(lastMessages);
+  }
+
+  const modalKeyHandler = (sequence: string): boolean => {
+    if (!activeModal) return false;
+    if (sequence === '\t') {
+      advanceFocus(1);
+      return true;
+    }
+    if (sequence === '\x1b[Z') {
+      advanceFocus(-1);
+      return true;
+    } // Shift+Tab
+    if (sequence === ' ') {
+      const item = items[focusIdx]!;
+      if (item.kind === 'toggle') {
+        state[item.key] = !state[item.key];
+        toggleNodes[item.key].content = badge(item.key, true);
+        return true;
+      }
+      return false;
+    }
+    if (sequence === '\x10') {
+      // Ctrl+P
+      if (focusIdx === 0 || focusIdx === 1) suspendAndPickPlaylist();
+      return true;
+    }
+    if (sequence === '\r' || sequence === '\n') {
+      closeModal(true);
+      return true;
+    }
+    if (sequence === '\x1b' || sequence === '\x1b\x1b') {
+      closeModal(false);
+      return true;
+    }
+    if (sequence === '\x1b[A' || sequence === '\x1b[B') return true;
+    return false;
+  };
+
+  renderer.prependInputHandler(modalKeyHandler);
 }
 
 function openStreamModal(preselected: string[]): void {
@@ -731,7 +1470,9 @@ function openStreamModal(preselected: string[]): void {
     placeholder: 'gaming, fps, variety',
     width: '100%',
   });
-  tagsInput.value = Array.isArray(savedStream.tags) ? savedStream.tags.join(', ') : (savedStream.tags ?? '');
+  tagsInput.value = Array.isArray(savedStream.tags)
+    ? savedStream.tags.join(', ')
+    : (savedStream.tags ?? '');
 
   const descLabel = makeLabel(' Description (YouTube):');
   const descInput = new InputRenderable(renderer, {
@@ -879,7 +1620,13 @@ function openStreamModal(preselected: string[]): void {
     try {
       const merged = { ...savedStream, ...changed };
       await saveConfig({ stream: merged });
-      let platformResults: { platform: string; skipped?: string[]; skippedTags?: string[]; appliedTags?: string[]; error?: string }[] = [];
+      let platformResults: {
+        platform: string;
+        skipped?: string[];
+        skippedTags?: string[];
+        appliedTags?: string[];
+        error?: string;
+      }[] = [];
       try {
         platformResults = await streamService.setStreamMetadata(targetPlatforms, merged);
       } catch (err: any) {
@@ -919,9 +1666,18 @@ function openStreamModal(preselected: string[]): void {
     if (!activeStreamModal) return false;
 
     if (modal.focusIndex === -1) {
-      if (sequence === '1') { togglePlatform(0); return true; }
-      if (sequence === '2') { togglePlatform(1); return true; }
-      if (sequence === '3') { togglePlatform(2); return true; }
+      if (sequence === '1') {
+        togglePlatform(0);
+        return true;
+      }
+      if (sequence === '2') {
+        togglePlatform(1);
+        return true;
+      }
+      if (sequence === '3') {
+        togglePlatform(2);
+        return true;
+      }
     }
 
     if (sequence === '\t' || sequence === '\x1b[Z') {
@@ -957,6 +1713,7 @@ function openStreamModal(preselected: string[]): void {
       closeModal(false);
       return true;
     }
+    if (sequence === '\x1b[A' || sequence === '\x1b[B') return true;
     return false;
   };
 
@@ -1000,6 +1757,11 @@ async function handleCommand(trimmed: string): Promise<void> {
         const res = await provider.authenticate();
         if (res?.success) {
           lastMessages.push(`[system] ${platform} authentication succeeded`);
+          updateUI(lastMessages);
+          if (platform === 'youtube' && !youtube.getStreamKey()) {
+            openYouTubeStreamPickerModal();
+            return;
+          }
         } else if (res?.error?.startsWith('oauth_required:')) {
           const authUrl = res.error.slice('oauth_required:'.length);
           const fallbackUrl = `http://localhost:3000/api/${platform}/auth`;
@@ -1015,6 +1777,8 @@ async function handleCommand(trimmed: string): Promise<void> {
           openTwitchSetupModal();
         } else if (platform === 'kick' && res?.error === 'Kick credentials not configured') {
           openKickSetupModal();
+        } else if (platform === 'youtube' && res?.error === 'YouTube credentials not configured') {
+          openYouTubeSetupModal();
         } else {
           lastMessages.push(
             `[system] ${platform} authentication failed: ${res?.error ?? 'unknown error'}`,
@@ -1145,7 +1909,19 @@ async function handleCommand(trimmed: string): Promise<void> {
   } else if (cmd === '/stream') {
     // Optional platform filter: /stream [youtube] [twitch] [kick]
     const specified = parts.slice(1).filter((p) => platforms.includes(p));
-    openStreamModal(specified);
+    const youtubeTargeted = specified.length === 0 || specified.includes('youtube');
+    if (youtubeTargeted && youtube.isAuthenticated() && !youtube.getStreamKey()) {
+      openYouTubeStreamPickerModal(() => openStreamModal(specified));
+    } else {
+      openStreamModal(specified);
+    }
+  } else if (cmd === '/setup-youtube') {
+    if (!youtube.isAuthenticated()) {
+      lastMessages.push('[system] YouTube is not authenticated. Run /connect youtube first.');
+      updateUI(lastMessages);
+    } else {
+      openYouTubeSetupModal();
+    }
   } else if (cmd === '/exit') {
     isRunning = false;
     authService.stopAutoRefresh();
@@ -1155,7 +1931,12 @@ async function handleCommand(trimmed: string): Promise<void> {
   } else if (cmd === '/help') {
     lastMessages.push('[help] Available commands:');
     lastMessages.push('[help]   /connect <youtube|twitch|kick>  — authenticate a platform');
-    lastMessages.push('[help]   /stream [platform…]  — edit stream info (opens modal, persists to config)');
+    lastMessages.push(
+      '[help]   /stream [platform…]  — edit stream info (opens modal, persists to config)',
+    );
+    lastMessages.push(
+      '[help]   /setup-youtube  — configure YouTube stream options (playlists, tags, chapters, description)',
+    );
     lastMessages.push('[help]   /msg <all|youtube|twitch|kick> <text>  — send a message');
     lastMessages.push(
       '[help]   /marker [description] [| timestamp_s]  — place a stream marker on all platforms',
@@ -1193,12 +1974,18 @@ async function main() {
       (process.env.YASH_SCREEN_MODE as 'main-screen' | 'alternate-screen') ?? 'main-screen',
     consoleMode: 'disabled',
     useKittyKeyboard: null,
-    useMouse: false,
+    useMouse: true,
     // Intercept Tab/Up/Down at raw sequence level.
     // Tab → autocomplete; Up/Down → history navigation.
     prependInputHandlers: [
       (sequence: string): boolean => {
         if (!uiNodes) return false;
+
+        // Raw mode swallows Ctrl+C — re-raise as SIGINT so one C-c exits cleanly
+        if (sequence === '\x03') {
+          process.kill(process.pid, 'SIGINT');
+          return true;
+        }
 
         if (sequence === '\t') {
           const val = uiNodes.inputEl.value;
@@ -1236,6 +2023,25 @@ async function main() {
             uiNodes.inputEl.value = inputHistory[historyIndex];
           }
           uiNodes.autocompleteHint.visible = false;
+          return true;
+        }
+
+        // Ctrl+L / Ctrl+Shift+L — cycle sidebar visibility
+        // Both send \x0c in this terminal; can't be distinguished without kitty support
+        if (sequence === '\x0c' && !activeModal) {
+          const ev = boolSetting(settings.get('events.visible', true), true);
+          const lg = boolSetting(settings.get('logs.visible', true), true);
+          // Cycle: (T,T)→(F,T)→(F,F)→(T,F)→(T,T)
+          if (ev && lg) {
+            settings.set('events.visible', false);
+          } else if (!ev && lg) {
+            settings.set('logs.visible', false);
+          } else if (!ev && !lg) {
+            settings.set('events.visible', true);
+          } else {
+            settings.set('logs.visible', true);
+          }
+          updateUI(lastMessages);
           return true;
         }
 

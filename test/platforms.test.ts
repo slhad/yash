@@ -47,7 +47,6 @@ describe('Platform Providers', () => {
   });
 });
 
-
 describe('Stream Key Management', () => {
   test('YouTube should store and retrieve stream key', () => {
     const provider = new YouTubeProvider();
@@ -55,5 +54,4 @@ describe('Stream Key Management', () => {
 
     expect(provider.getStreamKey()).toBe('yt_stream_key_123');
   });
-
 });

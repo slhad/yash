@@ -2,7 +2,13 @@ import type { MetadataUpdateResult, PlatformProvider, StreamMetadata } from '../
 import { StreamStatus } from '../platforms/base';
 import { defaultLogger } from '../utils/logger';
 
-export type PlatformMetadataResult = { platform: string; skipped?: string[]; skippedTags?: string[]; appliedTags?: string[]; error?: string };
+export type PlatformMetadataResult = {
+  platform: string;
+  skipped?: string[];
+  skippedTags?: string[];
+  appliedTags?: string[];
+  error?: string;
+};
 
 export class StreamService {
   private providers: Map<string, PlatformProvider> = new Map();

@@ -61,7 +61,7 @@ describe('TwitchProvider — instantiation', () => {
 describe('TwitchProvider — mock authenticate', () => {
   test('returns success with mock tokens when no credentials are set', async () => {
     const p = makeProvider() as any;
-    p.loadCfg = () => {};  // prevent reading real credentials from config
+    p.loadCfg = () => {}; // prevent reading real credentials from config
     const result = await p.authenticate();
     expect(result.success).toBe(true);
     expect(result.accessToken).toBeDefined();

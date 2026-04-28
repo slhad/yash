@@ -62,7 +62,10 @@ describe('KickProvider — instantiation', () => {
 describe('KickProvider — mock authenticate', () => {
   test('returns success with mock tokens when no credentials are set', async () => {
     const p = makeProvider() as any;
-    p.loadCfg = () => { p.clientId = ''; p.clientSecret = ''; };
+    p.loadCfg = () => {
+      p.clientId = '';
+      p.clientSecret = '';
+    };
     const result = await p.authenticate();
     expect(result.success).toBe(true);
     expect(result.accessToken).toBeDefined();
@@ -71,7 +74,10 @@ describe('KickProvider — mock authenticate', () => {
 
   test('isAuthenticated() is true after mock authenticate', async () => {
     const p = makeProvider() as any;
-    p.loadCfg = () => { p.clientId = ''; p.clientSecret = ''; };
+    p.loadCfg = () => {
+      p.clientId = '';
+      p.clientSecret = '';
+    };
     await p.authenticate();
     expect(p.isAuthenticated()).toBe(true);
   });

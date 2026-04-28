@@ -35,13 +35,13 @@ import type {
   AuthResult,
   ChatMessage,
   GetMarkersOptions,
+  MetadataUpdateResult,
   PlatformProvider,
   PlatformStatus,
   StreamMarker,
   StreamMetadata,
   WebhookConfig,
 } from './base';
-import type { MetadataUpdateResult } from './base';
 import { StreamStatus } from './base';
 
 // ---------------------------------------------------------------------------
@@ -74,7 +74,6 @@ export class TwitchProvider implements PlatformProvider {
   private clientId: string = '';
   private clientSecret: string = '';
   private redirectUri: string = 'http://localhost:3000/api/twitch/callback';
-  private streamKey: string = '';
 
   // ---- auth state ------------------------------------------------------------
   private authProvider: RefreshingAuthProvider | null = null;
@@ -109,7 +108,6 @@ export class TwitchProvider implements PlatformProvider {
     this.clientId = cfg.clientId || '';
     this.clientSecret = cfg.clientSecret || '';
     this.redirectUri = cfg.redirectUri || 'http://localhost:3000/api/twitch/callback';
-    this.streamKey = cfg.streamKey || this.streamKey;
   }
 
   private async readTokenFile(): Promise<TwitchTokenFile | null> {
@@ -400,10 +398,12 @@ export class TwitchProvider implements PlatformProvider {
 
       if (metadata.tags != null) {
         const raw = metadata.tags as string[] | string;
-        update.tags = (Array.isArray(raw)
+        update.tags = Array.isArray(raw)
           ? raw
-          : String(raw).split(',').map((t) => t.trim().replace(/\s+/g, '')).filter(Boolean)
-        );
+          : String(raw)
+              .split(',')
+              .map((t) => t.trim().replace(/\s+/g, ''))
+              .filter(Boolean);
       }
 
       await this.apiClient.channels.updateChannelInfo(this.userId, update);
@@ -705,11 +705,7 @@ export class TwitchProvider implements PlatformProvider {
   // Stream key
   // ---------------------------------------------------------------------------
   getStreamKey(): string {
-    return this.streamKey;
-  }
-
-  setStreamKey(key: string): void {
-    this.streamKey = key;
+    return '';
   }
 
   getStreamStatus(): StreamStatus {

@@ -134,7 +134,9 @@ export class Logger {
 // ---------------------------------------------------------------------------
 // File transport — appends to ~/.yash/yash.log, rotates at 10 MB
 // ---------------------------------------------------------------------------
-const LOG_DIR = isServer ? (process.env.YASH_DATA_DIR || path.join(process.env.HOME || '.', '.yash')) : '';
+const LOG_DIR = isServer
+  ? process.env.YASH_DATA_DIR || path.join(process.env.HOME || '.', '.yash')
+  : '';
 const LOG_FILE = isServer ? path.join(LOG_DIR, 'yash.log') : '';
 const LOG_MAX_BYTES = 10 * 1024 * 1024; // 10 MB
 
@@ -178,7 +180,12 @@ try {
     if (typeof fn === 'function') {
       (defaultLogger as any)[l] = function (msg: string, ...args: unknown[]) {
         try {
-          collector.append(l.toUpperCase(), [msg, ...args.map((a) => (typeof a === 'object' ? JSON.stringify(a) : String(a)))].join(' '));
+          collector.append(
+            l.toUpperCase(),
+            [msg, ...args.map((a) => (typeof a === 'object' ? JSON.stringify(a) : String(a)))].join(
+              ' ',
+            ),
+          );
         } catch (_) {}
         return fn.call(this, msg, ...args);
       };

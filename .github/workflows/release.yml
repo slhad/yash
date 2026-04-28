@@ -2,15 +2,47 @@ name: Release
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches: [main, master]
+    paths:
+      - package.json
 
 permissions:
   contents: write
 
 jobs:
+  check-version:
+    name: Check version bump
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.read.outputs.version }}
+      tag: ${{ steps.read.outputs.tag }}
+      exists: ${{ steps.check.outputs.exists }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read version from package.json
+        id: read
+        run: |
+          VERSION=$(jq -r '.version' package.json)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Check if tag already exists
+        id: check
+        run: |
+          if git tag --list "${{ steps.read.outputs.tag }}" | grep -q .; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
   build-appimage:
     name: Build AppImage (Linux x86_64)
+    needs: check-version
+    if: needs.check-version.outputs.exists == 'false'
     runs-on: ubuntu-latest
 
     steps:
@@ -30,6 +62,8 @@ jobs:
         run: bun build --compile --target=bun-linux-x64 src/index.tsx --outfile dist/yash
 
       - name: Create AppDir
+        env:
+          VERSION: ${{ needs.check-version.outputs.version }}
         run: |
           mkdir -p AppDir/usr/bin AppDir/usr/share/icons/hicolor/256x256/apps
 
@@ -53,7 +87,6 @@ jobs:
           Terminal=true
           DESKTOP
 
-          # Generate a simple icon using ImageMagick (available on ubuntu-latest)
           convert -size 256x256 xc:'#1a1a2e' \
             -fill '#e94560' -draw "roundrectangle 32,32 224,224 20,20" \
             -fill white -pointsize 100 -gravity center -annotate 0 "Y" \
@@ -68,14 +101,15 @@ jobs:
 
       - name: Build AppImage
         env:
-          VERSION: ${{ github.ref_name }}
+          VERSION: ${{ needs.check-version.outputs.version }}
           ARCH: x86_64
-          # Avoid FUSE dependency by extracting appimagetool before running
           APPIMAGE_EXTRACT_AND_RUN: "1"
-        run: ./appimagetool AppDir "yash-${VERSION}-x86_64.AppImage"
+        run: ./appimagetool AppDir "yash-v${VERSION}-x86_64.AppImage"
 
-      - name: Create GitHub release
+      - name: Tag and release
         uses: softprops/action-gh-release@v2
         with:
-          files: yash-*-x86_64.AppImage
+          tag_name: ${{ needs.check-version.outputs.tag }}
+          name: ${{ needs.check-version.outputs.tag }}
+          files: yash-v*-x86_64.AppImage
           generate_release_notes: true

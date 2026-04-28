@@ -32,13 +32,13 @@ import type {
   AuthResult,
   ChatMessage,
   GetMarkersOptions,
+  MetadataUpdateResult,
   PlatformProvider,
   PlatformStatus,
   StreamMarker,
   StreamMetadata,
   WebhookConfig,
 } from './base';
-import type { MetadataUpdateResult } from './base';
 import { StreamStatus } from './base';
 
 // ---------------------------------------------------------------------------
@@ -124,8 +124,7 @@ export class YouTubeProvider implements PlatformProvider {
   private playlistsAppliedForBroadcast: string | null = null;
 
   // ---- token file ------------------------------------------------------------
-  private static dataDir =
-    process.env.YASH_DATA_DIR || path.join(process.env.HOME || '.', '.yash');
+  private static dataDir = process.env.YASH_DATA_DIR || path.join(process.env.HOME || '.', '.yash');
   private static tokenFile = path.join(YouTubeProvider.dataDir, 'youtube_tokens.json');
 
   // ---------------------------------------------------------------------------
@@ -227,9 +226,7 @@ export class YouTubeProvider implements PlatformProvider {
       const data = (await resp.json()) as {
         items?: Array<{ id: string; cdn?: { ingestionInfo?: { streamName?: string } } }>;
       };
-      return (
-        data.items?.find((s) => s.cdn?.ingestionInfo?.streamName === streamKey)?.id ?? null
-      );
+      return data.items?.find((s) => s.cdn?.ingestionInfo?.streamName === streamKey)?.id ?? null;
     } catch {
       return null;
     }
@@ -913,7 +910,9 @@ export class YouTubeProvider implements PlatformProvider {
     if (setup.defaultPlaylist.enabled && setup.defaultPlaylist.playlistId) {
       try {
         await this.addVideoToPlaylist(this.broadcastId, setup.defaultPlaylist.playlistId);
-        defaultLogger.info(`[YouTube] added to default playlist "${setup.defaultPlaylist.playlistTitle}"`);
+        defaultLogger.info(
+          `[YouTube] added to default playlist "${setup.defaultPlaylist.playlistTitle}"`,
+        );
       } catch (err) {
         defaultLogger.error('[YouTube] failed to add to default playlist:', err);
       }
@@ -942,7 +941,12 @@ export class YouTubeProvider implements PlatformProvider {
   // Channel info (for /api/youtube/channel endpoint)
   // ---------------------------------------------------------------------------
 
-  getChannelInfo(): { channelId: string; channelTitle: string; broadcastId: string | null; liveChatId: string | null } {
+  getChannelInfo(): {
+    channelId: string;
+    channelTitle: string;
+    broadcastId: string | null;
+    liveChatId: string | null;
+  } {
     return {
       channelId: this.tokenData?.channelId ?? '',
       channelTitle: this.tokenData?.channelTitle ?? '',

@@ -84,18 +84,14 @@ function applyEnvOverrides(cfg: any): any {
   if (process.env.YASH_OBS_CONNECT_DELAY_MS)
     config.obs.websocket.connectDelayMs = process.env.YASH_OBS_CONNECT_DELAY_MS;
 
-  // Platform stream key overrides (env names: YASH_PLATFORM_<PLATFORM>_STREAMKEY)
+  // YouTube stream key override (used to match the correct broadcast)
   config.platforms = config.platforms || {};
-  ['youtube', 'twitch', 'kick'].forEach((p) => {
-    const envName = `YASH_PLATFORM_${p.toUpperCase()}_STREAMKEY`;
-    const v = process.env[envName];
-    if (v) {
-      config.platforms[p] = config.platforms[p] || {};
-      config.platforms[p].streamKey = v;
-      // If a stream key is provided via env, ensure platform is enabled
-      config.platforms[p].enabled = true;
-    }
-  });
+  const ytStreamKey = process.env.YASH_PLATFORM_YOUTUBE_STREAMKEY;
+  if (ytStreamKey) {
+    config.platforms.youtube = config.platforms.youtube || {};
+    config.platforms.youtube.streamKey = ytStreamKey;
+    config.platforms.youtube.enabled = true;
+  }
 
   // Twitch OAuth overrides
   config.platforms.twitch = config.platforms.twitch || {};
