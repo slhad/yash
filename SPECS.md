@@ -118,7 +118,7 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
     * `getMarkers(options?)` — returns last N markers (default limit 20), filterable by `videoId`
     * `clearMarkers()` resets the chapter store (e.g. at stream end)
     * `getChannelInfo()` — returns `{ channelId, channelTitle, broadcastId, liveChatId }`
-- Twitch: Single stream key implementation
+- Twitch: OAuth2-only integration (no RTMP stream key)
     * Real OAuth2 Authorization Code flow; tokens auto-refreshed and persisted to `~/.yash/twitch_tokens.json`
     * Helix API: update channel title, game/category (resolved by name → ID), tags
     * Stream markers via Helix `POST /helix/streams/markers` (requires channel live); returns position in seconds and marker ID
@@ -161,7 +161,6 @@ Configuration is stored in `[root]/config.json`. Environment variables take prec
     },
     "twitch": {
       "enabled": true,
-      "streamKey": "",
       "clientId": "",
       "clientSecret": "",
       "redirectUri": "http://localhost:3000/api/twitch/callback",
@@ -169,7 +168,6 @@ Configuration is stored in `[root]/config.json`. Environment variables take prec
     },
     "kick": {
       "enabled": true,
-      "streamKey": "",
       "clientId": "",
       "clientSecret": "",
       "redirectUri": "http://localhost:3000/api/kick/callback",
@@ -193,8 +191,6 @@ Configuration is stored in `[root]/config.json`. Environment variables take prec
 | `YASH_OBS_RECONNECT_MAX_ATTEMPTS` | `obs.websocket.reconnectMaxAttempts` |
 | `YASH_OBS_CONNECT_DELAY_MS` | `obs.websocket.connectDelayMs` |
 | `YASH_PLATFORM_YOUTUBE_STREAMKEY` | `platforms.youtube.streamKey` |
-| `YASH_PLATFORM_TWITCH_STREAMKEY` | `platforms.twitch.streamKey` |
-| `YASH_PLATFORM_KICK_STREAMKEY` | `platforms.kick.streamKey` |
 | `TWITCH_CLIENT_ID` | `platforms.twitch.clientId` |
 | `TWITCH_CLIENT_SECRET` | `platforms.twitch.clientSecret` |
 | `TWITCH_REDIRECT_URI` | `platforms.twitch.redirectUri` |
@@ -234,9 +230,8 @@ Configuration is stored in `[root]/config.json`. Environment variables take prec
 | GET | `/api/status` | Platform + stream status for all platforms |
 | GET | `/api/chat/history` | Full chat message history |
 | POST | `/api/chat/send` | Send message: `{ message, platforms? }` |
-| POST | `/api/stream/start` | Start stream: `{ platforms?, metadata? }` |
-| POST | `/api/stream/stop` | Stop stream: `{ platforms? }` |
-| POST | `/api/stream/update` | Update metadata: `{ platforms?, metadata? }` |
+| GET | `/api/stream` | Read persisted stream metadata from config |
+| POST | `/api/stream` | Update metadata on platforms: `{ platforms?, metadata? }` — also persists to `config.json` |
 | POST | `/api/stream/marker` | Cross-platform marker: `{ platforms?, description?, timestamp? }` |
 | GET | `/api/help` | List all available / commands (for WebUI consumption) |
 | GET | `/api/settings` | Read all settings or `?key=<k>` for a single key |
@@ -255,6 +250,9 @@ Configuration is stored in `[root]/config.json`. Environment variables take prec
 | GET | `/api/youtube/callback` | YouTube OAuth callback (exchanges code for tokens) |
 | GET | `/api/youtube/channel` | Channel info: `{ channelId, channelTitle, broadcastId, liveChatId }` |
 | GET | `/api/youtube/markers` | Read YouTube chapters: `{ markers, descriptionBlock }` |
+| GET | `/api/youtube/setup` | Read YouTube stream setup config (playlists, chapters, tags, description) |
+| POST | `/api/youtube/setup` | Write YouTube stream setup config |
+| GET | `/api/youtube/playlists` | List channel playlists |
 | GET | `/api/kick/auth` | Redirect to Kick OAuth consent screen |
 | GET | `/api/kick/callback` | Kick OAuth callback (exchanges code for tokens via PKCE) |
 | GET | `/api/kick/channel` | Kick channel info: `{ title, slug, category, categoryId, followers, verified }` |
@@ -320,11 +318,8 @@ interface PlatformProvider {
   authenticate(): Promise<AuthResult>;
   isAuthenticated(): boolean;
   logout(): Promise<void>;
-  startStream(metadata: StreamMetadata): Promise<void>;
-  stopStream(): Promise<void>;
-  updateStreamMetadata(metadata: StreamMetadata): Promise<void>;
+  updateStreamMetadata(metadata: StreamMetadata): Promise<MetadataUpdateResult>;
   getStreamKey(): string;
-  setStreamKey(key: string): void;
   getStreamStatus(): StreamStatus;
   sendMessage(message: string): Promise<void>;
   onMessage(callback: (msg: ChatMessage) => void): () => void;
@@ -335,6 +330,9 @@ interface PlatformProvider {
   createMarker(description?: string, timestamp?: number): Promise<StreamMarker | null>;
   getMarkers(options?: GetMarkersOptions): Promise<StreamMarker[]>;
 }
+
+// Note: setStreamKey / startStream / stopStream are YouTube-specific or removed.
+// YouTube exposes setStreamKey(); Twitch and Kick use OAuth only (no RTMP key needed).
 ```
 
 ### Runtime dependencies
@@ -359,5 +357,7 @@ interface PlatformProvider {
 - `bun run src/index.tsx` - Launch the TUI application
 - `bun run src/index.ts` - Launch the web server only
 - `bun run start` - Launch both TUI and web server concurrently
-- `bun test` - Run all tests
+- `bun test` - Run unit tests only (fast, skips lint/typecheck)
+- `bun run test` - Full check: lint → typecheck → tests
+- `bun typecheck` - Type-check only (`bun --bun tsc --noEmit`)
 - `biome check --write` - Lint and format code
