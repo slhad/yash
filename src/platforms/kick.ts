@@ -33,6 +33,7 @@ type KickClientInstance = InstanceType<typeof KickClient>;
 
 import { getConfig, reloadConfig } from '../utils/config';
 import { defaultLogger } from '../utils/logger';
+import { SmeeRelay } from '../utils/smee';
 import type {
   AuthResult,
   ChatMessage,
@@ -87,10 +88,15 @@ export class KickProvider implements PlatformProvider {
   private connectionStatus: 'connected' | 'disconnected' | 'connecting' = 'disconnected';
   private lastError: string | null = null;
   private viewerCount = 0;
+  private streamStartTime: Date | null = null;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
 
   // ---- chat ------------------------------------------------------------------
   private messageCallbacks: ((msg: ChatMessage) => void)[] = [];
+
+  // ---- smee webhook relay ----------------------------------------------------
+  private smeeRelay: SmeeRelay | null = null;
+  private webhookUrl: string | null = null;
 
   // ---- token file ------------------------------------------------------------
   private static dataDir = process.env.YASH_DATA_DIR || path.join(process.env.HOME || '.', '.yash');
@@ -375,6 +381,7 @@ export class KickProvider implements PlatformProvider {
 
   async logout(): Promise<void> {
     this._stopPoll();
+    this.smeeRelay?.stop();
     this.client = null;
     this.isAuthenticatedFlag = false;
     this.broadcasterId = null;
@@ -382,6 +389,7 @@ export class KickProvider implements PlatformProvider {
     this.streamStatus = StreamStatus.OFFLINE;
     this.connectionStatus = 'disconnected';
     this.viewerCount = 0;
+    this.webhookUrl = null;
     await this.deleteTokenFile();
     await this.deletePendingAuth();
   }
@@ -431,18 +439,18 @@ export class KickProvider implements PlatformProvider {
 
       if (metadata.title) update.stream_title = metadata.title;
 
-      // Resolve game name → category ID
-      if (metadata.game) {
-        const results = await this.client.categories.getCategories({ q: metadata.game });
+      // Resolve category name → ID (kickCategory takes priority over shared game field)
+      const kickCat = metadata.kickCategory ?? metadata.game;
+      if (kickCat) {
+        const results = await this.client.categories.getCategories({ q: kickCat });
         const match =
           results.find(
-            (c: { name: string; id: number }) =>
-              c.name.toLowerCase() === metadata.game!.toLowerCase(),
+            (c: { name: string; id: number }) => c.name.toLowerCase() === kickCat.toLowerCase(),
           ) ?? results[0];
         if (match) {
           update.category_id = match.id;
         } else {
-          defaultLogger.warn(`[Kick] Category not found: "${metadata.game}"`);
+          defaultLogger.warn(`[Kick] Category not found: "${kickCat}"`);
         }
       }
 
@@ -505,6 +513,18 @@ export class KickProvider implements PlatformProvider {
   }
 
   // ---------------------------------------------------------------------------
+  // searchCategories — live category search via Kick categories API
+  async searchCategories(query: string, limit = 8): Promise<string[]> {
+    if (!this.client || !query.trim()) return [];
+    try {
+      const results = await this.client.categories.getCategories({ q: query });
+      return results.slice(0, limit).map((c: { name: string }) => c.name);
+    } catch {
+      return [];
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // Chat — send (user message to own channel)
   // ---------------------------------------------------------------------------
   async sendMessage(message: string): Promise<void> {
@@ -541,8 +561,8 @@ export class KickProvider implements PlatformProvider {
   }
 
   // ---------------------------------------------------------------------------
-  // setupWebhooks — starts the stream status / viewer count poll
-  // Kick has no real-time webhook/WebSocket API in this library; we poll instead.
+  // setupWebhooks — starts the stream status / viewer count poll AND the
+  // smee.io webhook relay so Kick can push real-time chat events.
   // ---------------------------------------------------------------------------
   async setupWebhooks(_config: WebhookConfig): Promise<void> {
     if (!this.client || !this.broadcasterId) {
@@ -551,6 +571,23 @@ export class KickProvider implements PlatformProvider {
     }
     this._startPoll();
     defaultLogger.info('[Kick] stream status polling started (60s interval)');
+    await this._startSmeeRelay();
+  }
+
+  private async _startSmeeRelay(): Promise<void> {
+    try {
+      if (!this.smeeRelay) {
+        this.smeeRelay = new SmeeRelay(KickProvider.dataDir);
+      }
+      const url = await this.smeeRelay.getOrCreateChannelUrl();
+      this.webhookUrl = url;
+      this.smeeRelay.start((payload) => this.handleWebhookEvent(payload));
+      defaultLogger.info(
+        `[Kick] Smee relay active — register this URL in your Kick app settings: ${url}`,
+      );
+    } catch (err) {
+      defaultLogger.warn('[Kick] Failed to start smee relay (non-fatal):', err);
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -579,9 +616,11 @@ export class KickProvider implements PlatformProvider {
       if (streams.length > 0) {
         this.streamStatus = StreamStatus.ONLINE;
         this.viewerCount = streams[0]?.viewer_count ?? 0;
+        this.streamStartTime ??= new Date();
       } else {
         this.streamStatus = StreamStatus.OFFLINE;
         this.viewerCount = 0;
+        this.streamStartTime = null;
       }
     } catch {
       /* ignore poll errors — connection issues shouldn't crash the app */
@@ -590,6 +629,10 @@ export class KickProvider implements PlatformProvider {
 
   getViewerCount(): number {
     return this.viewerCount;
+  }
+
+  getStreamStartTime(): Date | null {
+    return this.streamStartTime;
   }
 
   // ---------------------------------------------------------------------------
@@ -629,6 +672,54 @@ export class KickProvider implements PlatformProvider {
       lastError: this.lastError,
       connectionStatus: this.connectionStatus,
     };
+  }
+
+  // ---------------------------------------------------------------------------
+  // handleWebhookEvent — processes an incoming Kick webhook payload.
+  //
+  // Accepts two payload shapes:
+  //   • Direct POST (ngrok / public server):
+  //       { message_id, sender, content, created_at, ... }
+  //   • smee.io relay format — original body nested under `body`, with the
+  //       Kick-Event-Type header promoted to a top-level key:
+  //       { body: { message_id, sender, content, ... }, "Kick-Event-Type": "chat.message.sent" }
+  //
+  // Events other than chat.message.sent are silently ignored.
+  // ---------------------------------------------------------------------------
+  handleWebhookEvent(payload: unknown): void {
+    if (!payload || typeof payload !== 'object') return;
+
+    const p = payload as Record<string, unknown>;
+
+    // smee.io relay: the original POST body lives in `p.body`; when it is
+    // absent or not an object, assume the payload IS the body directly.
+    const body: Record<string, unknown> =
+      p.body && typeof p.body === 'object' ? (p.body as Record<string, unknown>) : p;
+
+    // Event type can come from a smee-forwarded header or from the body itself.
+    const eventType = String(
+      p['Kick-Event-Type'] ?? p['kick-event-type'] ?? p['x-kick-event-type'] ?? body['event'] ?? '',
+    );
+
+    if (eventType !== 'chat.message.sent') return;
+
+    const sender = body['sender'];
+    if (!sender || typeof sender !== 'object') return;
+    const s = sender as Record<string, unknown>;
+
+    this._dispatch({
+      id: String(body['message_id'] ?? `kick_wh_${Date.now()}`),
+      platform: 'kick',
+      userId: String(s['user_id'] ?? ''),
+      username: String(s['username'] ?? 'Unknown'),
+      message: String(body['content'] ?? ''),
+      timestamp: body['created_at'] ? new Date(body['created_at'] as string).getTime() : Date.now(),
+    });
+  }
+
+  /** Returns the smee.io webhook URL to register in Kick app settings, or null if not started. */
+  getWebhookUrl(): string | null {
+    return this.webhookUrl;
   }
 
   // ---------------------------------------------------------------------------

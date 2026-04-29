@@ -157,7 +157,11 @@ export class ObsService {
 
               if (msg.op === 0) {
                 // Hello — respond with Identify (with auth if required)
-                const identifyData: Record<string, unknown> = { rpcVersion: 1 };
+                // eventSubscriptions bitmask: General(1) + Scenes(4) + Outputs(64) = 69
+                const identifyData: Record<string, unknown> = {
+                  rpcVersion: 1,
+                  eventSubscriptions: 69,
+                };
                 if (msg.d?.authentication && this.password) {
                   identifyData.authentication = this.computeObsAuth(
                     msg.d.authentication.challenge,
@@ -174,6 +178,9 @@ export class ObsService {
                 this.setupReconnection();
                 defaultLogger.info('Connected to OBS');
                 resolve();
+              } else if (msg.op === 5) {
+                // Event
+                this.notifyMessages(msg.d);
               } else if (msg.op === 7) {
                 // RequestResponse
                 const reqId = msg.d?.requestId;
@@ -203,9 +210,9 @@ export class ObsService {
             }
           };
 
-          ws.onerror = (err: any) => {
+          ws.onerror = (_err: any) => {
             // onclose fires after onerror and handles cleanup/rejection
-            defaultLogger.error('OBS WebSocket error', err);
+            defaultLogger.error(`OBS WebSocket error: ws://${this.host}:${this.port} unreachable`);
           };
         } catch (error) {
           defaultLogger.error('Failed to create WebSocket to OBS:', error);
@@ -402,11 +409,12 @@ export class ObsService {
     };
   }
 
-  /**
-   * Notify all subscribers of a status change
-   */
   private notifyStatusChange(connected: boolean): void {
     this.statusCallbacks.forEach((callback) => callback(connected));
+  }
+
+  private notifyMessages(event: any): void {
+    this.messageCallbacks.forEach((callback) => callback(event));
   }
 
   /**

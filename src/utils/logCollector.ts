@@ -1,7 +1,10 @@
 // Simple in-memory log collector for TUI display. Keeps a bounded list of
 // recent log entries and exposes helpers to retrieve them. This module is
 // intentionally minimal to avoid adding runtime dependencies.
-const MAX_LOGS = parseInt(process.env.TUI_LOG_MAX || '200', 10);
+const MAX_LOGS = parseInt(
+  (typeof process !== 'undefined' ? process.env?.TUI_LOG_MAX : undefined) || '200',
+  10,
+);
 
 type LogEntry = { level: string; text: string; ts: number };
 

@@ -199,6 +199,26 @@ Bun.serve({
     },
 
     // ------------------------------------------------------------------
+    // Twitch category search — GET /api/twitch/categories?q=...
+    // Returns up to 8 matching category names from the Helix search API.
+    // ------------------------------------------------------------------
+    '/api/twitch/categories': {
+      GET: async (req) => {
+        const url = new URL(req.url);
+        const q = url.searchParams.get('q') ?? '';
+        if (!twitch.isAuthenticated() || !q.trim()) {
+          return new Response(JSON.stringify({ categories: [] }), {
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        const categories = await twitch.searchCategories(q);
+        return new Response(JSON.stringify({ categories }), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      },
+    },
+
+    // ------------------------------------------------------------------
     // YouTube OAuth — GET /api/youtube/auth  →  redirect to Google
     // ------------------------------------------------------------------
     '/api/youtube/auth': {
@@ -649,6 +669,28 @@ Bun.serve({
             headers: { 'Content-Type': 'application/json' },
           });
         }
+      },
+    },
+
+    // ------------------------------------------------------------------
+    // Kick webhook relay — GET /api/kick/webhook
+    // Returns the smee.io URL to paste into Kick app settings.
+    // POST /api/kick/webhook
+    // Receives direct Kick webhook events (for non-smee tunnels, e.g. ngrok).
+    // ------------------------------------------------------------------
+    '/api/kick/webhook': {
+      GET: () => {
+        const url = (kick as any).getWebhookUrl?.() ?? null;
+        return new Response(JSON.stringify({ url }), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      },
+      POST: async (req) => {
+        const payload = await req.json().catch(() => null);
+        if (payload) (kick as any).handleWebhookEvent(payload);
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: { 'Content-Type': 'application/json' },
+        });
       },
     },
 

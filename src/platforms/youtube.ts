@@ -9,7 +9,7 @@
  *  - authenticate()            OAuth2 code flow + token persistence + auto-refresh
  *  - logout()                  revokes token, clears state + token file
  *  - updateStreamMetadata()    title / description via liveBroadcasts API
- *  - sendMessage()             POST to live chat via liveChatMessages API
+ *  - sendMessage()             POST to live chat via liveChat/messages API
  *  - onMessage()               polling live chat (YouTube has no WebSocket)
  *  - setupWebhooks()           polls broadcast status + viewer count (60s)
  *  - getViewerCount()          from videos.liveStreamingDetails.concurrentViewers
@@ -75,6 +75,7 @@ export interface YouTubeStreamSetup {
   chaptering: { enabled: boolean };
   tags: { enabled: boolean };
   description: { enabled: boolean };
+  subjectTitle: { enabled: boolean };
 }
 
 const DEFAULT_SETUP: YouTubeStreamSetup = {
@@ -83,6 +84,44 @@ const DEFAULT_SETUP: YouTubeStreamSetup = {
   chaptering: { enabled: true },
   tags: { enabled: false },
   description: { enabled: false },
+  subjectTitle: { enabled: false },
+};
+
+// YouTube video categories (snippet.categoryId) — US region, commonly assignable
+export const YT_CATEGORY_NAMES = [
+  'Film & Animation',
+  'Autos & Vehicles',
+  'Music',
+  'Pets & Animals',
+  'Sports',
+  'Travel & Events',
+  'Gaming',
+  'People & Blogs',
+  'Comedy',
+  'Entertainment',
+  'News & Politics',
+  'Howto & Style',
+  'Education',
+  'Science & Technology',
+  'Nonprofits & Activism',
+] as const;
+
+const YT_CATEGORY_IDS: Record<string, string> = {
+  'Film & Animation': '1',
+  'Autos & Vehicles': '2',
+  Music: '10',
+  'Pets & Animals': '15',
+  Sports: '17',
+  'Travel & Events': '19',
+  Gaming: '20',
+  'People & Blogs': '22',
+  Comedy: '23',
+  Entertainment: '24',
+  'News & Politics': '25',
+  'Howto & Style': '26',
+  Education: '27',
+  'Science & Technology': '28',
+  'Nonprofits & Activism': '29',
 };
 
 export class YouTubeProvider implements PlatformProvider {
@@ -103,6 +142,7 @@ export class YouTubeProvider implements PlatformProvider {
   private connectionStatus: 'connected' | 'disconnected' | 'connecting' = 'disconnected';
   private lastError: string | null = null;
   private viewerCount = 0;
+  private streamStartTime: Date | null = null;
 
   // ---- polling ---------------------------------------------------------------
   private statusPollTimer: ReturnType<typeof setInterval> | null = null;
@@ -232,47 +272,49 @@ export class YouTubeProvider implements PlatformProvider {
     }
   }
 
-  private async _findActiveBroadcast(): Promise<{ id: string; liveChatId: string } | null> {
+  private async _findActiveBroadcast(): Promise<{ id: string; liveChatId: string | null } | null> {
     if (!this.isAuthenticated() || !this.tokenData) return null;
 
     const streamId = this.streamKey ? await this._findStreamIdByKey(this.streamKey) : null;
 
-    // Check active (live) first, then upcoming (ready = set up but not yet live)
-    for (const broadcastStatus of ['active', 'upcoming'] as const) {
-      try {
-        const resp = await this._request(
-          `${YT_API}/liveBroadcasts?part=id,snippet,status,contentDetails&broadcastStatus=${broadcastStatus}&mine=true&maxResults=50`,
-        );
-        if (!resp.ok) continue;
-
-        const data = (await resp.json()) as {
-          items?: Array<{
-            id: string;
-            snippet: { liveChatId?: string };
-            status: { lifeCycleStatus: string };
-            contentDetails?: { boundStreamId?: string };
-          }>;
-        };
-
-        let items = data.items ?? [];
-
-        // Narrow to the exact stream if we resolved a stream ID
-        if (streamId) {
-          items = items.filter((b) => b.contentDetails?.boundStreamId === streamId);
-        }
-
-        // For upcoming, only accept broadcasts that are fully ready
-        if (broadcastStatus === 'upcoming') {
-          items = items.filter((b) => b.status.lifeCycleStatus === 'ready');
-        }
-
-        const broadcast = items[0];
-        if (broadcast?.snippet?.liveChatId) {
-          return { id: broadcast.id, liveChatId: broadcast.snippet.liveChatId };
-        }
-      } catch (err) {
-        defaultLogger.error(`[YouTube] _findActiveBroadcast (${broadcastStatus}) error:`, err);
+    // The YouTube API no longer accepts mine+broadcastStatus together.
+    // Fetch all user broadcasts and filter client-side by lifeCycleStatus.
+    try {
+      const resp = await this._request(
+        `${YT_API}/liveBroadcasts?part=id,snippet,status,contentDetails&mine=true&maxResults=50`,
+      );
+      if (!resp.ok) {
+        const errBody = await resp.text().catch(() => '');
+        defaultLogger.warn(`[YouTube] _findActiveBroadcast: HTTP ${resp.status} — ${errBody}`);
+        return null;
       }
+
+      const data = (await resp.json()) as {
+        items?: Array<{
+          id: string;
+          snippet: { liveChatId?: string };
+          status: { lifeCycleStatus: string };
+          contentDetails?: { boundStreamId?: string };
+        }>;
+      };
+
+      let items = data.items ?? [];
+
+      // Narrow to the exact stream if we resolved a stream ID
+      if (streamId) {
+        items = items.filter((b) => b.contentDetails?.boundStreamId === streamId);
+      }
+
+      // Prefer live, then ready (set up but not yet live)
+      const live = items.find((b) => b.status.lifeCycleStatus === 'live');
+      const ready = items.find((b) => b.status.lifeCycleStatus === 'ready');
+      const broadcast = live ?? ready ?? null;
+
+      if (broadcast) {
+        return { id: broadcast.id, liveChatId: broadcast.snippet.liveChatId ?? null };
+      }
+    } catch (err) {
+      defaultLogger.error('[YouTube] _findActiveBroadcast error:', err);
     }
 
     return null;
@@ -471,9 +513,15 @@ export class YouTubeProvider implements PlatformProvider {
         ? this.buildFinalDescription(metadata.description ?? '', metadata.tags)
         : undefined;
 
+      // Apply subjectTitle: append " - {subject}" to the title when enabled
+      let finalTitle = metadata.title;
+      if (setup.subjectTitle.enabled && metadata.game && metadata.title) {
+        finalTitle = `${metadata.title} - ${metadata.game}`;
+      }
+
       const updatedSnippet = {
         ...current.snippet,
-        ...(metadata.title !== undefined && { title: metadata.title }),
+        ...(finalTitle !== undefined && { title: finalTitle }),
         ...(finalDescription !== undefined && { description: finalDescription }),
       };
 
@@ -484,6 +532,39 @@ export class YouTubeProvider implements PlatformProvider {
       if (!putResp.ok) throw new Error(`Failed to update broadcast: ${await putResp.text()}`);
 
       defaultLogger.info('[YouTube] broadcast metadata updated');
+
+      // Update video category if provided (videos.update, separate resource from liveBroadcast)
+      if (metadata.youtubeCategory) {
+        const catId = YT_CATEGORY_IDS[metadata.youtubeCategory];
+        if (catId) {
+          const videoGetResp = await this._request(
+            `${YT_API}/videos?part=snippet&id=${this.broadcastId}`,
+          );
+          if (videoGetResp.ok) {
+            const videoData = (await videoGetResp.json()) as {
+              items?: Array<{ id: string; snippet: Record<string, unknown> }>;
+            };
+            const video = videoData.items?.[0];
+            if (video) {
+              const videoResp = await this._request(`${YT_API}/videos?part=snippet`, {
+                method: 'PUT',
+                body: JSON.stringify({
+                  id: this.broadcastId,
+                  snippet: { ...video.snippet, categoryId: catId },
+                }),
+              });
+              if (!videoResp.ok) {
+                defaultLogger.warn(
+                  '[YouTube] videos.update category failed:',
+                  await videoResp.text(),
+                );
+              } else {
+                defaultLogger.info(`[YouTube] video category set to ${metadata.youtubeCategory}`);
+              }
+            }
+          }
+        }
+      }
 
       // Apply playlist memberships once per broadcast (fire-and-forget)
       this.applySetupPlaylists(metadata.game).catch((err) =>
@@ -511,7 +592,7 @@ export class YouTubeProvider implements PlatformProvider {
   }
 
   // ---------------------------------------------------------------------------
-  // Chat — send (POST /youtube/v3/liveChatMessages)
+  // Chat — send (POST /youtube/v3/liveChat/messages)
   // ---------------------------------------------------------------------------
 
   async sendMessage(message: string): Promise<void> {
@@ -529,7 +610,7 @@ export class YouTubeProvider implements PlatformProvider {
     }
 
     try {
-      const resp = await this._request(`${YT_API}/liveChatMessages?part=snippet`, {
+      const resp = await this._request(`${YT_API}/liveChat/messages?part=snippet`, {
         method: 'POST',
         body: JSON.stringify({
           snippet: {
@@ -580,7 +661,7 @@ export class YouTubeProvider implements PlatformProvider {
       this.broadcastId = broadcast.id;
       this.liveChatId = broadcast.liveChatId;
       this.streamStatus = StreamStatus.ONLINE;
-      this._startChatPoll();
+      if (this.liveChatId) this._startChatPoll();
     }
 
     this.statusPollTimer = setInterval(() => this._pollStatus(), 60_000);
@@ -601,7 +682,7 @@ export class YouTubeProvider implements PlatformProvider {
         this.liveChatId = broadcast.liveChatId;
         this.streamStatus = StreamStatus.ONLINE;
 
-        if (broadcastChanged) this._startChatPoll();
+        if (broadcastChanged && broadcast.liveChatId) this._startChatPoll();
 
         // Viewer count from liveStreamingDetails
         const videoResp = await this._request(
@@ -609,16 +690,23 @@ export class YouTubeProvider implements PlatformProvider {
         );
         if (videoResp.ok) {
           const videoData = (await videoResp.json()) as {
-            items?: Array<{ liveStreamingDetails?: { concurrentViewers?: string } }>;
+            items?: Array<{
+              liveStreamingDetails?: { concurrentViewers?: string; actualStartTime?: string };
+            }>;
           };
-          const viewers = videoData.items?.[0]?.liveStreamingDetails?.concurrentViewers;
+          const details = videoData.items?.[0]?.liveStreamingDetails;
+          const viewers = details?.concurrentViewers;
           this.viewerCount = viewers ? Number.parseInt(viewers, 10) : 0;
+          if (details?.actualStartTime && !this.streamStartTime) {
+            this.streamStartTime = new Date(details.actualStartTime);
+          }
         }
       } else if (this.streamStatus === StreamStatus.ONLINE) {
         this.streamStatus = StreamStatus.OFFLINE;
         this.broadcastId = null;
         this.liveChatId = null;
         this.viewerCount = 0;
+        this.streamStartTime = null;
         this._stopChatPoll();
       }
     } catch (err) {
@@ -656,14 +744,15 @@ export class YouTubeProvider implements PlatformProvider {
     if (!this.liveChatId || !this.isAuthenticated() || !this.tokenData) return;
 
     try {
-      const url = new URL(`${YT_API}/liveChatMessages`);
+      const url = new URL(`${YT_API}/liveChat/messages`);
       url.searchParams.set('part', 'id,snippet,authorDetails');
       url.searchParams.set('liveChatId', this.liveChatId);
       if (this.chatNextPageToken) url.searchParams.set('pageToken', this.chatNextPageToken);
 
       const resp = await this._request(url.toString());
       if (!resp.ok) {
-        defaultLogger.error('[YouTube] chat poll failed:', await resp.text());
+        const errBody = await resp.text().catch(() => '');
+        defaultLogger.error(`[YouTube] chat poll failed: HTTP ${resp.status} — ${errBody}`);
         this.chatPollTimer = setTimeout(() => this._doChatPoll(), 10_000);
         return;
       }
@@ -720,6 +809,10 @@ export class YouTubeProvider implements PlatformProvider {
 
   getViewerCount(): number {
     return this.viewerCount;
+  }
+
+  getStreamStartTime(): Date | null {
+    return this.streamStartTime;
   }
 
   // ---------------------------------------------------------------------------
@@ -818,6 +911,7 @@ export class YouTubeProvider implements PlatformProvider {
       chaptering: { ...DEFAULT_SETUP.chaptering, ...(cfg.chaptering ?? {}) },
       tags: { ...DEFAULT_SETUP.tags, ...(cfg.tags ?? {}) },
       description: { ...DEFAULT_SETUP.description, ...(cfg.description ?? {}) },
+      subjectTitle: { ...DEFAULT_SETUP.subjectTitle, ...(cfg.subjectTitle ?? {}) },
     };
   }
 

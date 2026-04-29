@@ -6,187 +6,187 @@
   <title>YASH - Side by Side Chat</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-                                                            body {
-                                                              background: #0f0f1a;
-                                                              color: #e0e0e0;
-                                                              font-family: 'Courier New', Courier, monospace;
-                                                              font-size: 14px;
-                                                              height: 100vh;
-                                                              display: flex;
-                                                              flex-direction: column;
-                                                            }
-                                                            header {
-                                                              background: #1a1a2e;
-                                                              border-bottom: 1px solid #2a2a4a;
-                                                              padding: 8px 12px;
-                                                              display: flex;
-                                                              align-items: center;
-                                                              gap: 12px;
-                                                              flex-shrink: 0;
-                                                              flex-wrap: wrap;
-                                                            }
-                                                            header h1 {
-                                                              color: #00c8ff;
-                                                              font-size: 15px;
-                                                              font-weight: bold;
-                                                              margin-right: 4px;
-                                                            }
-                                                            .toggle-btn {
-                                                              background: #2a2a4a;
-                                                              border: 1px solid #3a3a6a;
-                                                              color: #a0a0c0;
-                                                              padding: 4px 10px;
-                                                              border-radius: 4px;
-                                                              cursor: pointer;
-                                                              font-family: inherit;
-                                                              font-size: 13px;
-                                                              transition: background 0.15s, color 0.15s;
-                                                            }
-                                                            .toggle-btn:hover { background: #3a3a5a; color: #e0e0e0; }
-                                                            .toggle-btn.active-youtube { background: #cc0000; border-color: #ff2222; color: #fff; }
-                                                            .toggle-btn.active-twitch  { background: #6441a5; border-color: #8855cc; color: #fff; }
-                                                            .toggle-btn.active-kick    { background: #1a7a00; border-color: #53fc18; color: #53fc18; }
-                                                            #columns {
-                                                              flex: 1;
-                                                              display: flex;
-                                                              overflow: hidden;
-                                                            }
-                                                            .column {
-                                                              flex: 1;
-                                                              display: flex;
-                                                              flex-direction: column;
-                                                              border-right: 1px solid #2a2a4a;
-                                                              min-width: 0;
-                                                              transition: flex 0.2s;
-                                                            }
-                                                            .column:last-child { border-right: none; }
-                                                            .column.hidden {
-                                                              flex: 0;
-                                                              overflow: hidden;
-                                                              border-right: none;
-                                                            }
-                                                            .col-header {
-                                                              background: #1a1a2e;
-                                                              border-bottom: 1px solid #2a2a4a;
-                                                              padding: 6px 10px;
-                                                              font-weight: bold;
-                                                              font-size: 13px;
-                                                              text-align: center;
-                                                              flex-shrink: 0;
-                                                            }
-                                                            .col-header.youtube { color: #ff4444; }
-                                                            .col-header.twitch  { color: #a970ff; }
-                                                            .col-header.kick    { color: #53fc18; }
-                                                            .col-messages {
-                                                              flex: 1;
-                                                              overflow-y: auto;
-                                                              padding: 6px 8px;
-                                                              display: flex;
-                                                              flex-direction: column;
-                                                              gap: 3px;
-                                                            }
-                                                            .col-messages::-webkit-scrollbar { width: 6px; }
-                                                            .col-messages::-webkit-scrollbar-track { background: #1a1a2e; }
-                                                            .col-messages::-webkit-scrollbar-thumb { background: #3a3a6a; border-radius: 3px; }
-                                                            .msg {
-                                                              line-height: 1.4;
-                                                              word-break: break-word;
-                                                            }
-                                                            .msg .username { color: #00c8ff; margin-right: 4px; }
-                                                            .msg .text { color: #e0e0e0; }
-                                                            .no-msgs {
-                                                              color: #444;
-                                                              font-size: 12px;
-                                                              text-align: center;
-                                                              margin-top: 12px;
-                                                            }
-                                                            #msgbox {
-                                                              background: #1a1a2e;
-                                                              border-top: 1px solid #2a2a4a;
-                                                              padding: 8px 12px;
-                                                              display: flex;
-                                                              gap: 6px;
-                                                              align-items: flex-end;
-                                                              flex-shrink: 0;
-                                                            }
-                                                            #msgbox.position-top {
-                                                              order: -1;
-                                                              border-top: none;
-                                                              border-bottom: 1px solid #2a2a4a;
-                                                            }
-                                                            #platform-select {
-                                                              background: #2a2a4a;
-                                                              border: 1px solid #3a3a6a;
-                                                              color: #e0e0e0;
-                                                              padding: 6px 8px;
-                                                              border-radius: 4px;
-                                                              font-family: inherit;
-                                                              font-size: 13px;
-                                                              flex-shrink: 0;
-                                                            }
-                                                            #message-input {
-                                                              flex: 1;
-                                                              background: #2a2a4a;
-                                                              border: 1px solid #3a3a6a;
-                                                              color: #e0e0e0;
-                                                              padding: 6px 8px;
-                                                              border-radius: 4px;
-                                                              font-family: inherit;
-                                                              font-size: 13px;
-                                                              resize: none;
-                                                              min-height: 34px;
-                                                              max-height: 80px;
-                                                            }
-                                                            #message-input:focus, #platform-select:focus {
-                                                              outline: none;
-                                                              border-color: #00c8ff;
-                                                            }
-                                                            #autocomplete-hint {
-                                                              font-size: 11px;
-                                                              color: #5a7a9a;
-                                                              font-family: 'Courier New', Courier, monospace;
-                                                              padding: 2px 4px;
-                                                              min-height: 16px;
-                                                            }
-                                                            #send-btn {
-                                                              background: #00c8ff;
-                                                              border: none;
-                                                              color: #0f0f1a;
-                                                              padding: 6px 14px;
-                                                              border-radius: 4px;
-                                                              font-family: inherit;
-                                                              font-size: 13px;
-                                                              font-weight: bold;
-                                                              cursor: pointer;
-                                                              flex-shrink: 0;
-                                                              height: 34px;
-                                                            }
-                                                            #send-btn:hover { background: #00a8df; }
-                                                            #send-btn:disabled { background: #3a3a5a; color: #666; cursor: not-allowed; }
-                                                            #position-btn {
-                                                              background: #2a2a4a;
-                                                              border: 1px solid #3a3a6a;
-                                                              color: #a0a0c0;
-                                                              padding: 4px 10px;
-                                                              border-radius: 4px;
-                                                              cursor: pointer;
-                                                              font-family: inherit;
-                                                              font-size: 13px;
-                                                            }
-                                                            #position-btn:hover { background: #3a3a5a; color: #e0e0e0; }
-                                                            #system-feed {
-                                                              background: #0f0f1a;
-                                                              border-top: 1px solid #2a2a4a;
-                                                              padding: 4px 12px;
-                                                              font-size: 12px;
-                                                              color: #888;
-                                                              max-height: 80px;
-                                                              overflow-y: auto;
-                                                              flex-shrink: 0;
-                                                              display: none;
-                                                            }
-                                                            #system-feed.visible { display: block; }
-                                                            #system-feed .sys-line { padding: 1px 0; }
+                                                                    body {
+                                                                      background: #0f0f1a;
+                                                                      color: #e0e0e0;
+                                                                      font-family: 'Courier New', Courier, monospace;
+                                                                      font-size: 14px;
+                                                                      height: 100vh;
+                                                                      display: flex;
+                                                                      flex-direction: column;
+                                                                    }
+                                                                    header {
+                                                                      background: #1a1a2e;
+                                                                      border-bottom: 1px solid #2a2a4a;
+                                                                      padding: 8px 12px;
+                                                                      display: flex;
+                                                                      align-items: center;
+                                                                      gap: 12px;
+                                                                      flex-shrink: 0;
+                                                                      flex-wrap: wrap;
+                                                                    }
+                                                                    header h1 {
+                                                                      color: #00c8ff;
+                                                                      font-size: 15px;
+                                                                      font-weight: bold;
+                                                                      margin-right: 4px;
+                                                                    }
+                                                                    .toggle-btn {
+                                                                      background: #2a2a4a;
+                                                                      border: 1px solid #3a3a6a;
+                                                                      color: #a0a0c0;
+                                                                      padding: 4px 10px;
+                                                                      border-radius: 4px;
+                                                                      cursor: pointer;
+                                                                      font-family: inherit;
+                                                                      font-size: 13px;
+                                                                      transition: background 0.15s, color 0.15s;
+                                                                    }
+                                                                    .toggle-btn:hover { background: #3a3a5a; color: #e0e0e0; }
+                                                                    .toggle-btn.active-youtube { background: #cc0000; border-color: #ff2222; color: #fff; }
+                                                                    .toggle-btn.active-twitch  { background: #6441a5; border-color: #8855cc; color: #fff; }
+                                                                    .toggle-btn.active-kick    { background: #1a7a00; border-color: #53fc18; color: #53fc18; }
+                                                                    #columns {
+                                                                      flex: 1;
+                                                                      display: flex;
+                                                                      overflow: hidden;
+                                                                    }
+                                                                    .column {
+                                                                      flex: 1;
+                                                                      display: flex;
+                                                                      flex-direction: column;
+                                                                      border-right: 1px solid #2a2a4a;
+                                                                      min-width: 0;
+                                                                      transition: flex 0.2s;
+                                                                    }
+                                                                    .column:last-child { border-right: none; }
+                                                                    .column.hidden {
+                                                                      flex: 0;
+                                                                      overflow: hidden;
+                                                                      border-right: none;
+                                                                    }
+                                                                    .col-header {
+                                                                      background: #1a1a2e;
+                                                                      border-bottom: 1px solid #2a2a4a;
+                                                                      padding: 6px 10px;
+                                                                      font-weight: bold;
+                                                                      font-size: 13px;
+                                                                      text-align: center;
+                                                                      flex-shrink: 0;
+                                                                    }
+                                                                    .col-header.youtube { color: #ff4444; }
+                                                                    .col-header.twitch  { color: #a970ff; }
+                                                                    .col-header.kick    { color: #53fc18; }
+                                                                    .col-messages {
+                                                                      flex: 1;
+                                                                      overflow-y: auto;
+                                                                      padding: 6px 8px;
+                                                                      display: flex;
+                                                                      flex-direction: column;
+                                                                      gap: 3px;
+                                                                    }
+                                                                    .col-messages::-webkit-scrollbar { width: 6px; }
+                                                                    .col-messages::-webkit-scrollbar-track { background: #1a1a2e; }
+                                                                    .col-messages::-webkit-scrollbar-thumb { background: #3a3a6a; border-radius: 3px; }
+                                                                    .msg {
+                                                                      line-height: 1.4;
+                                                                      word-break: break-word;
+                                                                    }
+                                                                    .msg .username { color: #00c8ff; margin-right: 4px; }
+                                                                    .msg .text { color: #e0e0e0; }
+                                                                    .no-msgs {
+                                                                      color: #444;
+                                                                      font-size: 12px;
+                                                                      text-align: center;
+                                                                      margin-top: 12px;
+                                                                    }
+                                                                    #msgbox {
+                                                                      background: #1a1a2e;
+                                                                      border-top: 1px solid #2a2a4a;
+                                                                      padding: 8px 12px;
+                                                                      display: flex;
+                                                                      gap: 6px;
+                                                                      align-items: flex-end;
+                                                                      flex-shrink: 0;
+                                                                    }
+                                                                    #msgbox.position-top {
+                                                                      order: -1;
+                                                                      border-top: none;
+                                                                      border-bottom: 1px solid #2a2a4a;
+                                                                    }
+                                                                    #platform-select {
+                                                                      background: #2a2a4a;
+                                                                      border: 1px solid #3a3a6a;
+                                                                      color: #e0e0e0;
+                                                                      padding: 6px 8px;
+                                                                      border-radius: 4px;
+                                                                      font-family: inherit;
+                                                                      font-size: 13px;
+                                                                      flex-shrink: 0;
+                                                                    }
+                                                                    #message-input {
+                                                                      flex: 1;
+                                                                      background: #2a2a4a;
+                                                                      border: 1px solid #3a3a6a;
+                                                                      color: #e0e0e0;
+                                                                      padding: 6px 8px;
+                                                                      border-radius: 4px;
+                                                                      font-family: inherit;
+                                                                      font-size: 13px;
+                                                                      resize: none;
+                                                                      min-height: 34px;
+                                                                      max-height: 80px;
+                                                                    }
+                                                                    #message-input:focus, #platform-select:focus {
+                                                                      outline: none;
+                                                                      border-color: #00c8ff;
+                                                                    }
+                                                                    #autocomplete-hint {
+                                                                      font-size: 11px;
+                                                                      color: #5a7a9a;
+                                                                      font-family: 'Courier New', Courier, monospace;
+                                                                      padding: 2px 4px;
+                                                                      min-height: 16px;
+                                                                    }
+                                                                    #send-btn {
+                                                                      background: #00c8ff;
+                                                                      border: none;
+                                                                      color: #0f0f1a;
+                                                                      padding: 6px 14px;
+                                                                      border-radius: 4px;
+                                                                      font-family: inherit;
+                                                                      font-size: 13px;
+                                                                      font-weight: bold;
+                                                                      cursor: pointer;
+                                                                      flex-shrink: 0;
+                                                                      height: 34px;
+                                                                    }
+                                                                    #send-btn:hover { background: #00a8df; }
+                                                                    #send-btn:disabled { background: #3a3a5a; color: #666; cursor: not-allowed; }
+                                                                    #position-btn {
+                                                                      background: #2a2a4a;
+                                                                      border: 1px solid #3a3a6a;
+                                                                      color: #a0a0c0;
+                                                                      padding: 4px 10px;
+                                                                      border-radius: 4px;
+                                                                      cursor: pointer;
+                                                                      font-family: inherit;
+                                                                      font-size: 13px;
+                                                                    }
+                                                                    #position-btn:hover { background: #3a3a5a; color: #e0e0e0; }
+                                                                    #system-feed {
+                                                                      background: #0f0f1a;
+                                                                      border-top: 1px solid #2a2a4a;
+                                                                      padding: 4px 12px;
+                                                                      font-size: 12px;
+                                                                      color: #888;
+                                                                      max-height: 80px;
+                                                                      overflow-y: auto;
+                                                                      flex-shrink: 0;
+                                                                      display: none;
+                                                                    }
+                                                                    #system-feed.visible { display: block; }
+                                                                    #system-feed .sys-line { padding: 1px 0; }
   </style>
 </head>
 <body>
@@ -232,226 +232,226 @@
   <script type="module">
     import { getWebAutocomplete, handleWebCommand } from '/api/js/commands.js';
 
-                                                    const PLATFORMS = ['youtube', 'twitch', 'kick'];
-                                                            const STORAGE_KEYS = {
-                                                              youtube: 'yash_sbs_youtube',
-                                                              twitch:  'yash_sbs_twitch',
-                                                              kick:    'yash_sbs_kick',
-                                                            };
+                                                            const PLATFORMS = ['youtube', 'twitch', 'kick'];
+                                                                    const STORAGE_KEYS = {
+                                                                      youtube: 'yash_sbs_youtube',
+                                                                      twitch:  'yash_sbs_twitch',
+                                                                      kick:    'yash_sbs_kick',
+                                                                    };
 
-                                                            // Per-platform state
-                                                            const enabled = {};
-                                                            const knownIds = { youtube: new Set(), twitch: new Set(), kick: new Set() };
-                                                            const atBottom = { youtube: true, twitch: true, kick: true };
+                                                                    // Per-platform state
+                                                                    const enabled = {};
+                                                                    const knownIds = { youtube: new Set(), twitch: new Set(), kick: new Set() };
+                                                                    const atBottom = { youtube: true, twitch: true, kick: true };
 
-                                                            function loadEnabled(platform) {
-                                                              const stored = localStorage.getItem(STORAGE_KEYS[platform]);
-                                                              return stored === null ? true : stored === 'true';
-                                                            }
+                                                                    function loadEnabled(platform) {
+                                                                      const stored = localStorage.getItem(STORAGE_KEYS[platform]);
+                                                                      return stored === null ? true : stored === 'true';
+                                                                    }
 
-                                                            function applyToggle(platform) {
-                                                              const col = document.getElementById('col-' + platform);
-                                                              const btn = document.getElementById('toggle-' + platform);
-                                                              if (enabled[platform]) {
-                                                                col.classList.remove('hidden');
-                                                                btn.textContent = { youtube: 'YouTube', twitch: 'Twitch', kick: 'Kick' }[platform] + ' ✓';
-                                                                btn.className = 'toggle-btn active-' + platform;
-                                                              } else {
-                                                                col.classList.add('hidden');
-                                                                btn.textContent = { youtube: 'YouTube', twitch: 'Twitch', kick: 'Kick' }[platform] + ' ✗';
-                                                                btn.className = 'toggle-btn';
-                                                              }
-                                                            }
+                                                                    function applyToggle(platform) {
+                                                                      const col = document.getElementById('col-' + platform);
+                                                                      const btn = document.getElementById('toggle-' + platform);
+                                                                      if (enabled[platform]) {
+                                                                        col.classList.remove('hidden');
+                                                                        btn.textContent = { youtube: 'YouTube', twitch: 'Twitch', kick: 'Kick' }[platform] + ' ✓';
+                                                                        btn.className = 'toggle-btn active-' + platform;
+                                                                      } else {
+                                                                        col.classList.add('hidden');
+                                                                        btn.textContent = { youtube: 'YouTube', twitch: 'Twitch', kick: 'Kick' }[platform] + ' ✗';
+                                                                        btn.className = 'toggle-btn';
+                                                                      }
+                                                                    }
 
-                                                            // Init toggles
-                                                            for (const p of PLATFORMS) {
-                                                              enabled[p] = loadEnabled(p);
-                                                              applyToggle(p);
+                                                                    // Init toggles
+                                                                    for (const p of PLATFORMS) {
+                                                                      enabled[p] = loadEnabled(p);
+                                                                      applyToggle(p);
 
-                                                              document.getElementById('toggle-' + p).addEventListener('click', () => {
-                                                                enabled[p] = !enabled[p];
-                                                                localStorage.setItem(STORAGE_KEYS[p], String(enabled[p]));
-                                                                applyToggle(p);
-                                                              });
+                                                                      document.getElementById('toggle-' + p).addEventListener('click', () => {
+                                                                        enabled[p] = !enabled[p];
+                                                                        localStorage.setItem(STORAGE_KEYS[p], String(enabled[p]));
+                                                                        applyToggle(p);
+                                                                      });
 
-                                                              document.getElementById('msgs-' + p).addEventListener('scroll', () => {
-                                                                const el = document.getElementById('msgs-' + p);
-                                                                atBottom[p] = el.scrollHeight - el.scrollTop - el.clientHeight < 32;
-                                                              });
-                                                            }
+                                                                      document.getElementById('msgs-' + p).addEventListener('scroll', () => {
+                                                                        const el = document.getElementById('msgs-' + p);
+                                                                        atBottom[p] = el.scrollHeight - el.scrollTop - el.clientHeight < 32;
+                                                                      });
+                                                                    }
 
-                                                            function escapeHtml(str) {
-                                                              return String(str)
-                                                                .replace(/&/g, '&amp;')
-                                                                .replace(/</g, '&lt;')
-                                                                .replace(/>/g, '&gt;')
-                                                                .replace(/"/g, '&quot;');
-                                                            }
+                                                                    function escapeHtml(str) {
+                                                                      return String(str)
+                                                                        .replace(/&/g, '&amp;')
+                                                                        .replace(/</g, '&lt;')
+                                                                        .replace(/>/g, '&gt;')
+                                                                        .replace(/"/g, '&quot;');
+                                                                    }
 
-                                                            function appendMessages(msgs) {
-                                                              for (const p of PLATFORMS) {
-                                                                const el = document.getElementById('msgs-' + p);
-                                                                let added = false;
-                                                                for (const msg of msgs) {
-                                                                  if (msg.platform !== p) continue;
-                                                                  if (knownIds[p].has(msg.id)) continue;
-                                                                  knownIds[p].add(msg.id);
-                                                                  const div = document.createElement('div');
-                                                                  div.className = 'msg';
-                                                                  div.innerHTML =
-                                                                    `<span class="username">${escapeHtml(msg.username)}:</span>` +
-                                                                    `<span class="text">${escapeHtml(msg.message)}</span>`;
-                                                                  el.appendChild(div);
-                                                                  added = true;
-                                                                }
-                                                                if (added && atBottom[p]) {
-                                                                  el.scrollTop = el.scrollHeight;
-                                                                }
-                                                              }
-                                                            }
+                                                                    function appendMessages(msgs) {
+                                                                      for (const p of PLATFORMS) {
+                                                                        const el = document.getElementById('msgs-' + p);
+                                                                        let added = false;
+                                                                        for (const msg of msgs) {
+                                                                          if (msg.platform !== p) continue;
+                                                                          if (knownIds[p].has(msg.id)) continue;
+                                                                          knownIds[p].add(msg.id);
+                                                                          const div = document.createElement('div');
+                                                                          div.className = 'msg';
+                                                                          div.innerHTML =
+                                                                            `<span class="username">${escapeHtml(msg.username)}:</span>` +
+                                                                            `<span class="text">${escapeHtml(msg.message)}</span>`;
+                                                                          el.appendChild(div);
+                                                                          added = true;
+                                                                        }
+                                                                        if (added && atBottom[p]) {
+                                                                          el.scrollTop = el.scrollHeight;
+                                                                        }
+                                                                      }
+                                                                    }
 
-                                                            async function fetchHistory() {
-                                                              try {
-                                                                const res = await fetch('/api/chat/history');
-                                                                if (!res.ok) return;
-                                                                const msgs = await res.json();
-                                                                appendMessages(msgs);
-                                                              } catch (_) {}
-                                                            }
+                                                                    async function fetchHistory() {
+                                                                      try {
+                                                                        const res = await fetch('/api/chat/history');
+                                                                        if (!res.ok) return;
+                                                                        const msgs = await res.json();
+                                                                        appendMessages(msgs);
+                                                                      } catch (_) {}
+                                                                    }
 
-                                                            fetchHistory();
-                                                            setInterval(fetchHistory, 2000);
+                                                                    fetchHistory();
+                                                                    setInterval(fetchHistory, 2000);
 
-                                                            // ── Message box ──────────────────────────────────────────────
-                                                            const STORAGE_KEY_POS = 'yash_sbs_msgbox_position';
-                                                            const POSITIONS = ['bottom', 'top', 'hide'];
+                                                                    // ── Message box ──────────────────────────────────────────────
+                                                                    const STORAGE_KEY_POS = 'yash_sbs_msgbox_position';
+                                                                    const POSITIONS = ['bottom', 'top', 'hide'];
 
-                                                            const msgboxEl = document.getElementById('msgbox');
-                                                            const positionBtn = document.getElementById('position-btn');
-                                                            const platformSelect = document.getElementById('platform-select');
-                                                            const messageInput = document.getElementById('message-input');
-                                                            const sendBtn = document.getElementById('send-btn');
-                                                            const systemFeedEl = document.getElementById('system-feed');
-                                                            const autocompleteHint = document.getElementById('autocomplete-hint');
+                                                                    const msgboxEl = document.getElementById('msgbox');
+                                                                    const positionBtn = document.getElementById('position-btn');
+                                                                    const platformSelect = document.getElementById('platform-select');
+                                                                    const messageInput = document.getElementById('message-input');
+                                                                    const sendBtn = document.getElementById('send-btn');
+                                                                    const systemFeedEl = document.getElementById('system-feed');
+                                                                    const autocompleteHint = document.getElementById('autocomplete-hint');
 
-                                                            const inputHistory = [];
-                                                            let historyIdx = -1;
+                                                                    const inputHistory = [];
+                                                                    let historyIdx = -1;
 
-                                                            let currentPosition = localStorage.getItem(STORAGE_KEY_POS) || 'bottom';
+                                                                    let currentPosition = localStorage.getItem(STORAGE_KEY_POS) || 'bottom';
 
-                                                            function applyPosition(pos) {
-                                                              currentPosition = pos;
-                                                              localStorage.setItem(STORAGE_KEY_POS, pos);
-                                                              msgboxEl.classList.remove('position-top');
-                                                              if (pos === 'hide') {
-                                                                msgboxEl.style.display = 'none';
-                                                                positionBtn.textContent = 'msgbox: hide ●';
-                                                              } else if (pos === 'top') {
-                                                                msgboxEl.style.display = 'flex';
-                                                                msgboxEl.classList.add('position-top');
-                                                                positionBtn.textContent = 'msgbox: top ▲';
-                                                              } else {
-                                                                msgboxEl.style.display = 'flex';
-                                                                positionBtn.textContent = 'msgbox: bottom ▼';
-                                                              }
-                                                            }
+                                                                    function applyPosition(pos) {
+                                                                      currentPosition = pos;
+                                                                      localStorage.setItem(STORAGE_KEY_POS, pos);
+                                                                      msgboxEl.classList.remove('position-top');
+                                                                      if (pos === 'hide') {
+                                                                        msgboxEl.style.display = 'none';
+                                                                        positionBtn.textContent = 'msgbox: hide ●';
+                                                                      } else if (pos === 'top') {
+                                                                        msgboxEl.style.display = 'flex';
+                                                                        msgboxEl.classList.add('position-top');
+                                                                        positionBtn.textContent = 'msgbox: top ▲';
+                                                                      } else {
+                                                                        msgboxEl.style.display = 'flex';
+                                                                        positionBtn.textContent = 'msgbox: bottom ▼';
+                                                                      }
+                                                                    }
 
-                                                            positionBtn.addEventListener('click', () => {
-                                                              const idx = POSITIONS.indexOf(currentPosition);
-                                                              applyPosition(POSITIONS[(idx + 1) % POSITIONS.length]);
-                                                            });
+                                                                    positionBtn.addEventListener('click', () => {
+                                                                      const idx = POSITIONS.indexOf(currentPosition);
+                                                                      applyPosition(POSITIONS[(idx + 1) % POSITIONS.length]);
+                                                                    });
 
-                                                            applyPosition(currentPosition);
+                                                                    applyPosition(currentPosition);
 
-                                                            // Auto-resize textarea + live autocomplete hint
-                                                            messageInput.addEventListener('input', () => {
-                                                              historyIdx = -1;
-                                                              messageInput.style.height = 'auto';
-                                                              messageInput.style.height = Math.min(messageInput.scrollHeight, 80) + 'px';
-                                                              const hint = getWebAutocomplete(messageInput.value);
-                                                              autocompleteHint.textContent = hint ?? '';
-                                                            });
+                                                                    // Auto-resize textarea + live autocomplete hint
+                                                                    messageInput.addEventListener('input', () => {
+                                                                      historyIdx = -1;
+                                                                      messageInput.style.height = 'auto';
+                                                                      messageInput.style.height = Math.min(messageInput.scrollHeight, 80) + 'px';
+                                                                      const hint = getWebAutocomplete(messageInput.value);
+                                                                      autocompleteHint.textContent = hint ?? '';
+                                                                    });
 
-                                                            // System feedback strip (UI-only, stays local)
-                                                            function appendSys(label, text) {
-                                                              systemFeedEl.classList.add('visible');
-                                                              const line = document.createElement('div');
-                                                              line.className = 'sys-line';
-                                                              line.textContent = `[${label}] ${text}`;
-                                                              systemFeedEl.appendChild(line);
-                                                              systemFeedEl.scrollTop = systemFeedEl.scrollHeight;
-                                                            }
+                                                                    // System feedback strip (UI-only, stays local)
+                                                                    function appendSys(label, text) {
+                                                                      systemFeedEl.classList.add('visible');
+                                                                      const line = document.createElement('div');
+                                                                      line.className = 'sys-line';
+                                                                      line.textContent = `[${label}] ${text}`;
+                                                                      systemFeedEl.appendChild(line);
+                                                                      systemFeedEl.scrollTop = systemFeedEl.scrollHeight;
+                                                                    }
 
-                                                            async function sendMessage() {
-                                                              const text = messageInput.value.trim();
-                                                              if (!text) return;
+                                                                    async function sendMessage() {
+                                                                      const text = messageInput.value.trim();
+                                                                      if (!text) return;
 
-                                                              const platform = platformSelect.value;
-                                                              const platforms = platform === 'all' ? [] : [platform];
+                                                                      const platform = platformSelect.value;
+                                                                      const platforms = platform === 'all' ? [] : [platform];
 
-                                                              inputHistory.push(text);
-                                                              historyIdx = -1;
+                                                                      inputHistory.push(text);
+                                                                      historyIdx = -1;
 
-                                                              sendBtn.disabled = true;
+                                                                      sendBtn.disabled = true;
 
-                                                              // Delegate / commands to the shared handler from /api/js/commands.js
-                                                              const handled = await handleWebCommand(text, { platforms, feedback: appendSys });
-                                                              if (handled) {
-                                                                messageInput.value = '';
-                                                                messageInput.style.height = 'auto';
-                                                                autocompleteHint.textContent = '';
-                                                                sendBtn.disabled = false;
-                                                                messageInput.focus();
-                                                                return;
-                                                              }
+                                                                      // Delegate / commands to the shared handler from /api/js/commands.js
+                                                                      const handled = await handleWebCommand(text, { platforms, feedback: appendSys });
+                                                                      if (handled) {
+                                                                        messageInput.value = '';
+                                                                        messageInput.style.height = 'auto';
+                                                                        autocompleteHint.textContent = '';
+                                                                        sendBtn.disabled = false;
+                                                                        messageInput.focus();
+                                                                        return;
+                                                                      }
 
-                                                              try {
-                                                                const res = await fetch('/api/chat/send', {
-                                                                  method: 'POST',
-                                                                  headers: { 'Content-Type': 'application/json' },
-                                                                  body: JSON.stringify({ message: text, platforms }),
-                                                                });
-                                                                if (res.ok) {
-                                                                  messageInput.value = '';
-                                                                  messageInput.style.height = 'auto';
-                                                                  autocompleteHint.textContent = '';
-                                                                }
-                                                              } catch (_) {}
-                                                              sendBtn.disabled = false;
-                                                              messageInput.focus();
-                                                            }
+                                                                      try {
+                                                                        const res = await fetch('/api/chat/send', {
+                                                                          method: 'POST',
+                                                                          headers: { 'Content-Type': 'application/json' },
+                                                                          body: JSON.stringify({ message: text, platforms }),
+                                                                        });
+                                                                        if (res.ok) {
+                                                                          messageInput.value = '';
+                                                                          messageInput.style.height = 'auto';
+                                                                          autocompleteHint.textContent = '';
+                                                                        }
+                                                                      } catch (_) {}
+                                                                      sendBtn.disabled = false;
+                                                                      messageInput.focus();
+                                                                    }
 
-                                                            sendBtn.addEventListener('click', sendMessage);
-                                                            messageInput.addEventListener('keydown', (e) => {
-                                                              if (e.key === 'ArrowUp') {
-                                                                e.preventDefault();
-                                                                if (inputHistory.length === 0) return;
-                                                                if (historyIdx === -1) historyIdx = inputHistory.length - 1;
-                                                                else if (historyIdx > 0) historyIdx--;
-                                                                messageInput.value = inputHistory[historyIdx];
-                                                                messageInput.style.height = 'auto';
-                                                                messageInput.style.height = Math.min(messageInput.scrollHeight, 80) + 'px';
-                                                                return;
-                                                              }
-                                                              if (e.key === 'ArrowDown') {
-                                                                e.preventDefault();
-                                                                if (historyIdx === -1) return;
-                                                                historyIdx++;
-                                                                if (historyIdx >= inputHistory.length) {
-                                                                  historyIdx = -1;
-                                                                  messageInput.value = '';
-                                                                } else {
-                                                                  messageInput.value = inputHistory[historyIdx];
-                                                                }
-                                                                messageInput.style.height = 'auto';
-                                                                messageInput.style.height = Math.min(messageInput.scrollHeight, 80) + 'px';
-                                                                return;
-                                                              }
-                                                              if (e.key === 'Enter' && !e.shiftKey) {
-                                                                e.preventDefault();
-                                                                sendMessage();
-                                                              }
-                                                            });
+                                                                    sendBtn.addEventListener('click', sendMessage);
+                                                                    messageInput.addEventListener('keydown', (e) => {
+                                                                      if (e.key === 'ArrowUp') {
+                                                                        e.preventDefault();
+                                                                        if (inputHistory.length === 0) return;
+                                                                        if (historyIdx === -1) historyIdx = inputHistory.length - 1;
+                                                                        else if (historyIdx > 0) historyIdx--;
+                                                                        messageInput.value = inputHistory[historyIdx];
+                                                                        messageInput.style.height = 'auto';
+                                                                        messageInput.style.height = Math.min(messageInput.scrollHeight, 80) + 'px';
+                                                                        return;
+                                                                      }
+                                                                      if (e.key === 'ArrowDown') {
+                                                                        e.preventDefault();
+                                                                        if (historyIdx === -1) return;
+                                                                        historyIdx++;
+                                                                        if (historyIdx >= inputHistory.length) {
+                                                                          historyIdx = -1;
+                                                                          messageInput.value = '';
+                                                                        } else {
+                                                                          messageInput.value = inputHistory[historyIdx];
+                                                                        }
+                                                                        messageInput.style.height = 'auto';
+                                                                        messageInput.style.height = Math.min(messageInput.scrollHeight, 80) + 'px';
+                                                                        return;
+                                                                      }
+                                                                      if (e.key === 'Enter' && !e.shiftKey) {
+                                                                        e.preventDefault();
+                                                                        sendMessage();
+                                                                      }
+                                                                    });
   </script>
 </body>
 </html>

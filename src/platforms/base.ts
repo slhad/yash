@@ -1,6 +1,9 @@
 export interface StreamMetadata {
   title?: string;
-  game?: string;
+  game?: string; // YouTube subject (playlists / title suffix)
+  twitchGame?: string; // game name for Twitch lookup (overrides game)
+  kickCategory?: string; // category name for Kick lookup (overrides game)
+  youtubeCategory?: string; // YouTube video category name (e.g. 'Gaming')
   description?: string;
   scheduleId?: string;
   tags?: string[];
@@ -90,6 +93,7 @@ export interface PlatformProvider {
   getPlatformName(): string;
   getStatus(): PlatformStatus;
   getViewerCount(): number;
+  getStreamStartTime(): Date | null;
   /**
    * Place a stream marker / chapter point at the current live position.
    * @param description Optional label (max 140 chars on Twitch).

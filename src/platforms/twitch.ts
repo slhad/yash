@@ -87,6 +87,7 @@ export class TwitchProvider implements PlatformProvider {
   private connectionStatus: 'connected' | 'disconnected' | 'connecting' = 'disconnected';
   private lastError: string | null = null;
   private viewerCount = 0;
+  private streamStartTime: Date | null = null;
   private viewerPollTimer: ReturnType<typeof setInterval> | null = null;
 
   // ---- chat ------------------------------------------------------------------
@@ -386,13 +387,14 @@ export class TwitchProvider implements PlatformProvider {
 
       if (metadata.title) update.title = metadata.title;
 
-      // Resolve game name → ID
-      if (metadata.game) {
-        const game = await this.apiClient.games.getGameByName(metadata.game);
+      // Resolve game name → ID (twitchGame takes priority over shared game field)
+      const twitchGame = metadata.twitchGame ?? metadata.game;
+      if (twitchGame) {
+        const game = await this.apiClient.games.getGameByName(twitchGame);
         if (game) {
           update.gameId = game.id;
         } else {
-          defaultLogger.warn(`[Twitch] Game not found: "${metadata.game}"`);
+          defaultLogger.warn(`[Twitch] Game not found: "${twitchGame}"`);
         }
       }
 
@@ -417,6 +419,18 @@ export class TwitchProvider implements PlatformProvider {
   }
 
   // ---------------------------------------------------------------------------
+  // searchCategories — live category search via Helix /search/categories
+  async searchCategories(query: string, limit = 8): Promise<string[]> {
+    if (!this.apiClient || !query.trim()) return [];
+    try {
+      const req = this.apiClient.search.searchCategoriesPaginated(query);
+      const results = await req.getNext();
+      return results.slice(0, limit).map((g) => g.name);
+    } catch {
+      return [];
+    }
+  }
+
   // Stream markers  (POST /helix/streams/markers)
   // Only works while the channel is live; Twitch returns 404 otherwise.
   // ---------------------------------------------------------------------------
@@ -654,6 +668,7 @@ export class TwitchProvider implements PlatformProvider {
     try {
       const stream = await this.apiClient.streams.getStreamByUserId(this.userId);
       this.streamStatus = stream ? StreamStatus.ONLINE : StreamStatus.OFFLINE;
+      this.streamStartTime = stream ? stream.startDate : null;
     } catch {
       /* ignore — events will correct state when they arrive */
     }
@@ -669,6 +684,12 @@ export class TwitchProvider implements PlatformProvider {
       try {
         const stream = await this.apiClient.streams.getStreamByUserId(this.userId);
         this.viewerCount = stream?.viewers ?? 0;
+        this.streamStatus = stream ? StreamStatus.ONLINE : StreamStatus.OFFLINE;
+        if (stream) {
+          this.streamStartTime ??= stream.startDate;
+        } else {
+          this.streamStartTime = null;
+        }
       } catch {
         /* ignore poll errors */
       }
@@ -684,6 +705,10 @@ export class TwitchProvider implements PlatformProvider {
 
   getViewerCount(): number {
     return this.viewerCount;
+  }
+
+  getStreamStartTime(): Date | null {
+    return this.streamStartTime;
   }
 
   // ---------------------------------------------------------------------------

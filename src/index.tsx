@@ -15,6 +15,7 @@ import {
   TextAttributes,
   TextRenderable,
 } from '@opentui/core';
+import { YT_CATEGORY_NAMES } from './platforms/youtube';
 import {
   authService,
   chatService,
@@ -26,7 +27,6 @@ import {
   twitch,
   youtube,
 } from './services';
-import { YT_CATEGORY_NAMES } from './platforms/youtube';
 import { getConfig, isDemoMode, saveConfig } from './utils/config';
 import logCollector from './utils/logCollector';
 import { defaultLogger } from './utils/logger';
@@ -55,6 +55,14 @@ function numSetting(value: unknown, def: number): number {
   if (value === null || value === undefined) return def;
   if (typeof value === 'number') return value;
   return parseInt(String(value), 10) || def;
+}
+
+function formatElapsed(start: Date): string {
+  const secs = Math.floor((Date.now() - start.getTime()) / 1000);
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  const s = secs % 60;
+  return h > 0 ? `${h}h${m}m${s}s` : `${m}m${s}s`;
 }
 
 function clearScrollBox(scroll: ScrollBoxRenderable): void {
@@ -168,7 +176,14 @@ function initUI(renderer: CliRenderer, messages: string[]): UINodes {
     totalViewers += viewerCount;
     const showViewers = getConfig()?.platforms?.[platform]?.showViewers !== false;
     const isOnline = status.streamStatus === 'ONLINE';
-    const viewers = isOnline && showViewers && viewersVisible ? ` (${viewerCount})` : '';
+    const startTime = provider.getStreamStartTime();
+    const elapsed = isOnline && startTime ? formatElapsed(startTime) : null;
+    const viewers =
+      isOnline && showViewers && viewersVisible
+        ? elapsed
+          ? ` (${elapsed}/${viewerCount})`
+          : ` (${viewerCount})`
+        : '';
     const t = new TextRenderable(renderer, {
       content: `${platform}: ${status.streamStatus}${viewers}  `,
       fg: status.authenticated ? 'green' : 'red',
@@ -385,7 +400,14 @@ function updateUI(messages: string[]): void {
     if (node) {
       const showViewers = getConfig()?.platforms?.[platform]?.showViewers !== false;
       const isOnline = status.streamStatus === 'ONLINE';
-      const viewers = isOnline && showViewers && viewersVisible ? ` (${viewerCount})` : '';
+      const startTime = provider.getStreamStartTime();
+      const elapsed = isOnline && startTime ? formatElapsed(startTime) : null;
+      const viewers =
+        isOnline && showViewers && viewersVisible
+          ? elapsed
+            ? ` (${elapsed}/${viewerCount})`
+            : ` (${viewerCount})`
+          : '';
       node.content = `${platform}: ${status.streamStatus}${viewers}  `;
       node.fg = status.authenticated ? 'green' : 'red';
     }
@@ -1626,13 +1648,18 @@ function openStreamModal(preselected: string[]): void {
   });
   subjectInput.value = savedStream.game ?? '';
 
-  // ── Twitch game ──────────────────────────────────────────────────
-  const twitchGameLabel = makeLabel(' Game (Twitch):');
+  // ── Twitch category ──────────────────────────────────────────────
+  const twitchGameLabel = makeLabel(' Category (Twitch):');
   const twitchGameInput = new InputRenderable(renderer, {
-    placeholder: 'Game name',
+    placeholder: 'Category name',
     width: '100%',
   });
   twitchGameInput.value = savedStream.twitchGame ?? '';
+  const twitchCatHint = new TextRenderable(renderer, { content: '', fg: 'gray' });
+  twitchCatHint.visible = false;
+  let catSuggestions: string[] = [];
+  let catSelectedIdx = -1;
+  let catFetchTimer: ReturnType<typeof setTimeout> | null = null;
 
   // ── Kick category ────────────────────────────────────────────────
   const kickCatLabel = makeLabel(' Category (Kick):');
@@ -1641,6 +1668,11 @@ function openStreamModal(preselected: string[]): void {
     width: '100%',
   });
   kickCatInput.value = savedStream.kickCategory ?? '';
+  const kickCatHint = new TextRenderable(renderer, { content: '', fg: 'gray' });
+  kickCatHint.visible = false;
+  let kickCatSuggestions: string[] = [];
+  let kickCatSelectedIdx = -1;
+  let kickCatFetchTimer: ReturnType<typeof setTimeout> | null = null;
 
   // ── Tags ─────────────────────────────────────────────────────────
   const tagsLabel = makeLabel(' Tags — comma-separated (no spaces, Twitch max 25 chars each):');
@@ -1700,8 +1732,10 @@ function openStreamModal(preselected: string[]): void {
   box.add(subjectInput);
   box.add(twitchGameLabel);
   box.add(twitchGameInput);
+  box.add(twitchCatHint);
   box.add(kickCatLabel);
   box.add(kickCatInput);
+  box.add(kickCatHint);
   box.add(tagsLabel);
   box.add(tagsInput);
   box.add(descLabel);
@@ -1763,8 +1797,10 @@ function openStreamModal(preselected: string[]): void {
     subjectInput.visible = hasYT;
     twitchGameLabel.visible = hasTwitch;
     twitchGameInput.visible = hasTwitch;
+    twitchCatHint.visible = hasTwitch && catSuggestions.length > 0;
     kickCatLabel.visible = hasKick;
     kickCatInput.visible = hasKick;
+    kickCatHint.visible = hasKick && kickCatSuggestions.length > 0;
     descLabel.visible = hasYT;
     descInput.visible = hasYT;
     notifLabel.visible = hasTwitch;
@@ -1801,6 +1837,14 @@ function openStreamModal(preselected: string[]): void {
     renderer.removeInputHandler(modalKeyHandler);
     renderer.root.remove(box.id);
     activeStreamModal = null;
+    if (catFetchTimer) {
+      clearTimeout(catFetchTimer);
+      catFetchTimer = null;
+    }
+    if (kickCatFetchTimer) {
+      clearTimeout(kickCatFetchTimer);
+      kickCatFetchTimer = null;
+    }
     uiNodes?.inputEl.focus();
 
     if (!confirm) {
@@ -1902,9 +1946,18 @@ function openStreamModal(preselected: string[]): void {
 
     // Platform digit toggles — only when platform row is focused
     if (current?.kind === 'platforms') {
-      if (sequence === '1') { togglePlatform(0); return true; }
-      if (sequence === '2') { togglePlatform(1); return true; }
-      if (sequence === '3') { togglePlatform(2); return true; }
+      if (sequence === '1') {
+        togglePlatform(0);
+        return true;
+      }
+      if (sequence === '2') {
+        togglePlatform(1);
+        return true;
+      }
+      if (sequence === '3') {
+        togglePlatform(2);
+        return true;
+      }
     }
 
     // YouTube category left/right navigation
@@ -1932,9 +1985,39 @@ function openStreamModal(preselected: string[]): void {
       return true;
     }
 
-    if (sequence === '\r' || sequence === '\n') { closeModal(true); return true; }
-    if (sequence === '\x1b' || sequence === '\x1b\x1b') { closeModal(false); return true; }
-    if (sequence === '\x1b[A' || sequence === '\x1b[B') return true;
+    if (sequence === '\r' || sequence === '\n') {
+      closeModal(true);
+      return true;
+    }
+    if (sequence === '\x1b' || sequence === '\x1b\x1b') {
+      closeModal(false);
+      return true;
+    }
+    if (sequence === '\x1b[A' || sequence === '\x1b[B') {
+      if (
+        current?.kind === 'input' &&
+        current.node === twitchGameInput &&
+        catSuggestions.length > 0
+      ) {
+        catSelectedIdx =
+          sequence === '\x1b[B'
+            ? (catSelectedIdx + 1) % catSuggestions.length
+            : (catSelectedIdx - 1 + catSuggestions.length) % catSuggestions.length;
+        twitchGameInput.value = catSuggestions[catSelectedIdx] ?? '';
+      }
+      if (
+        current?.kind === 'input' &&
+        current.node === kickCatInput &&
+        kickCatSuggestions.length > 0
+      ) {
+        kickCatSelectedIdx =
+          sequence === '\x1b[B'
+            ? (kickCatSelectedIdx + 1) % kickCatSuggestions.length
+            : (kickCatSelectedIdx - 1 + kickCatSuggestions.length) % kickCatSuggestions.length;
+        kickCatInput.value = kickCatSuggestions[kickCatSelectedIdx] ?? '';
+      }
+      return true;
+    }
     return false;
   };
 
@@ -1943,9 +2026,63 @@ function openStreamModal(preselected: string[]): void {
   const escapeViaKeyDown = (key: { name: string }) => {
     if (key.name === 'escape' && activeStreamModal) closeModal(false);
   };
-  for (const input of [titleInput, subjectInput, twitchGameInput, kickCatInput, tagsInput, descInput, notifInput]) {
+  for (const input of [
+    titleInput,
+    subjectInput,
+    twitchGameInput,
+    kickCatInput,
+    tagsInput,
+    descInput,
+    notifInput,
+  ]) {
     input.onKeyDown = escapeViaKeyDown as any;
   }
+
+  twitchGameInput.on(InputRenderableEvents.INPUT, () => {
+    const q = twitchGameInput.value.trim();
+    catSuggestions = [];
+    catSelectedIdx = -1;
+    if (catFetchTimer) {
+      clearTimeout(catFetchTimer);
+      catFetchTimer = null;
+    }
+    if (q.length < 2) {
+      twitchCatHint.content = '';
+      twitchCatHint.visible = false;
+      return;
+    }
+    catFetchTimer = setTimeout(async () => {
+      const results = await twitch.searchCategories(q);
+      catSuggestions = results;
+      twitchCatHint.content =
+        catSuggestions.length > 0 ? `  ${catSuggestions.join('  ·  ')}  [↑/↓ to select]` : '';
+      twitchCatHint.visible = catSuggestions.length > 0 && selectedPlatforms.has('twitch');
+    }, 300);
+  });
+
+  kickCatInput.on(InputRenderableEvents.INPUT, () => {
+    const q = kickCatInput.value.trim();
+    kickCatSuggestions = [];
+    kickCatSelectedIdx = -1;
+    if (kickCatFetchTimer) {
+      clearTimeout(kickCatFetchTimer);
+      kickCatFetchTimer = null;
+    }
+    if (q.length < 2) {
+      kickCatHint.content = '';
+      kickCatHint.visible = false;
+      return;
+    }
+    kickCatFetchTimer = setTimeout(async () => {
+      const results = await kick.searchCategories(q);
+      kickCatSuggestions = results;
+      kickCatHint.content =
+        kickCatSuggestions.length > 0
+          ? `  ${kickCatSuggestions.join('  ·  ')}  [↑/↓ to select]`
+          : '';
+      kickCatHint.visible = kickCatSuggestions.length > 0 && selectedPlatforms.has('kick');
+    }, 300);
+  });
 }
 
 async function handleCommand(trimmed: string): Promise<void> {
@@ -2201,7 +2338,12 @@ function platformColor(platform: string): string {
   return 'white';
 }
 
-function transformMessage(msg: { platform: string; username: string; message: string; color?: string }) {
+function transformMessage(msg: {
+  platform: string;
+  username: string;
+  message: string;
+  color?: string;
+}) {
   const platColor = platformColor(msg.platform);
   const userColor = msg.color ?? platColor;
   if (userColor === platColor) {
