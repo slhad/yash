@@ -23,6 +23,8 @@ This project reads configuration from `config.json` in the repository root durin
    - `cp config.example.json config.json`
 2. Add `config.json` to `.gitignore` if it's not already ignored (this repository's .gitignore already includes `config.json`).
 
+Stream modal category autocomplete: the `/stream` modal (TUI) and stream form (WebUI) have per-platform category fields. Twitch and Kick fields autocomplete live as you type (300 ms debounce); YouTube uses a static dropdown. All three are sent as separate metadata fields (`twitchGame`, `kickCategory`, `youtubeCategory`).
+
 OBS Reconnection & Backoff
 --------------------------
 You can tune the OBS websocket reconnection and backoff behaviour via environment variables or `config.json` (under `obs.websocket`). Environment variables take precedence and are useful for CI/runtime overrides.
@@ -120,6 +122,12 @@ audit log is stored under the data directory (default `~/.yash/audit.log`) and
 is tamper-evident via a chained HMAC scheme. Do not expose the audit file over
 untrusted channels; use the `audit/verify` endpoint to verify integrity.
 
+
+Kick Webhook Relay
+------------------
+When the Kick platform provider calls `setupWebhooks()`, the app starts a smee.io relay channel and logs the public relay URL to the console. Register that URL in your Kick developer app settings (under "Webhook URL") so Kick can deliver real-time chat events to your local instance.
+
+The relay URL is also available at runtime via `GET /api/kick/webhook` (returns `{ url: string | null }`), and the `unified` web view displays it with a copy button for convenience.
 
 Metrics & Prometheus
 --------------------

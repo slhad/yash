@@ -12,7 +12,7 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
         * Window (as sidebar) showing events/triggers/stuff with platform prefix (if more than one)
         * Window showing messages with platform as header (if more than one)
         * Window showing all messages with platform as prefix (if more than one)
-        * Element : Platform connected as Status bar — single borderless line starting with "Status" label, each platform shown as `platform: STATUS (viewers)` in green (authenticated) or red (not authenticated); viewer count `(x)` only shown when platform is ONLINE, `viewers.visible` setting is true (default), and per-platform `showViewers` is not false in `config.json`
+        * Element : Platform connected as Status bar — single borderless line starting with "Status" label, each platform shown as `platform: STATUS (Xh Xm Xs/viewers)` in green (authenticated) or red (not authenticated); elapsed time and viewer count `(Xh Xm Xs/x)` only shown when platform is ONLINE, `viewers.visible` setting is true (default), and per-platform `showViewers` is not false in `config.json`
         * Message box
             * position : top/bottom/hide
         * Element : Title (YASH heading)
@@ -27,6 +27,7 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
         * Optional pipe-delimited timestamp in seconds from stream start (used by YouTube for chapter generation; ignored by Twitch which sets position server-side; Kick does not support markers)
         * Examples: `/marker Intro | 0`, `/marker Q&A | 3723`, `/marker` (unnamed, no timestamp)
     * Command /settings [get <key>|set <key> <value>] - get or set UI settings
+    * `/stream` modal: per-platform category autocomplete with ↑/↓ navigation — Twitch field (`twitchGame`) calls `/api/twitch/categories` with 300 ms debounce; Kick field (`kickCategory`) calls `/api/kick/categories` with 300 ms debounce; YouTube field uses a static `<select>` dropdown from `/api/youtube/categories`
     * Message box to send message to [all|youtube|twitch|kick] platform and receive command "/" (without sending to platforms)
         * Input history: Up/Down arrow keys navigate previously-sent messages (like a shell history)
         * Command parameter autocomplete: after typing a command + space, Tab completes available parameters
@@ -47,8 +48,12 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
         * Notification (twitch)
         * Tags (youtube,twitch,kick)
         * Subject/Category/Game (youtube,twitch,kick)
+        * Platform-specific category fields: `twitchGame` with datalist autocomplete (calls `/api/twitch/categories`); `kickCategory` with datalist autocomplete (calls `/api/kick/categories`); YouTube category `<select>` dropdown (populated from `/api/youtube/categories`)
+        * Status bar shows per-platform elapsed time + viewer counts, auto-refreshes every second
     * Route /unified to show unified view of all chats
         * Message box supports all applicable / commands: `/help`, `/msg`, `/marker`, `/connect`, `/settings`
+        * Status bar shows per-platform elapsed time + viewer counts
+        * Kick webhook URL displayed with copy button (fetched from `/api/kick/webhook`)
     * Route /sidebyside to show view of chats side by side with config options to enable any platform (saved in browser)
         * Message box supports all applicable / commands: `/help`, `/msg`, `/marker`, `/connect`, `/settings`
     * All chats view must have a message box to send messages like TUI, display top/bottom/hide (saved in browser individually)
@@ -127,6 +132,7 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
     * EventSub WebSocket: `stream.online`, `stream.offline`, `channel.update`, `channel.chat.message`
     * Stream status seeded from Helix on EventSub connect (handles case where stream was already live when app started)
     * Viewer count polled from Helix every 60 seconds
+    * `searchCategories(query, limit?)` — calls Helix `/search/categories` paginated
 - Kick: Real OAuth 2.1 PKCE integration via `@nekiro/kick-api`
     * OAuth 2.1 PKCE flow (code verifier/challenge generated locally); tokens persisted to `~/.yash/kick_tokens.json`; pending PKCE verifier persisted to `~/.yash/kick_pending_auth.json` (10-minute TTL, survives restarts)
     * `getAuthUrl()` / `handleOAuthCallback(code)` — browser-based consent flow; callback at `GET /api/kick/callback`
@@ -136,6 +142,9 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
     * Status polling (60 s interval) — viewer count from livestreams endpoint
     * `createMarker()` returns `null`, `getMarkers()` returns `[]` — Kick has no marker API
     * Required OAuth scopes: `user:read`, `channel:read`, `channel:write`, `chat:write`, `events:subscribe`
+    * `searchCategories(query, limit?)` — live search via Kick categories API
+    * `setupWebhooks()` starts a smee.io relay; the public relay URL is logged at startup and available via `getWebhookUrl()` — register this URL in Kick's developer app settings
+    * `handleWebhookEvent(payload)` — dispatches incoming Kick chat webhook events into the chat stream
 
 ### Configuration
 Configuration is stored in `[root]/config.json`. Environment variables take precedence over file values.
@@ -227,7 +236,7 @@ Configuration is stored in `[root]/config.json`. Environment variables take prec
 | GET | `/` | React webview (stream controls + chat) |
 | GET | `/unified` | Unified chat view (all platforms) |
 | GET | `/sidebyside` | Side-by-side chat view |
-| GET | `/api/status` | Platform + stream status for all platforms |
+| GET | `/api/status` | Platform + stream status for all platforms; each platform entry includes `viewerCount: number` and `streamStartTime: string\|null` |
 | GET | `/api/chat/history` | Full chat message history |
 | POST | `/api/chat/send` | Send message: `{ message, platforms? }` |
 | GET | `/api/stream` | Read persisted stream metadata from config |
@@ -257,6 +266,10 @@ Configuration is stored in `[root]/config.json`. Environment variables take prec
 | GET | `/api/kick/callback` | Kick OAuth callback (exchanges code for tokens via PKCE) |
 | GET | `/api/kick/channel` | Kick channel info: `{ title, slug, category, categoryId, followers, verified }` |
 | PATCH | `/api/kick/channel` | Update Kick channel: `{ title?, game?, tags? }` — also persists to `config.json` |
+| GET | `/api/kick/categories` | Search Kick categories: `?q=<query>` → `{ categories: string[] }` |
+| GET | `/api/kick/webhook` | Returns smee.io relay URL: `{ url: string \| null }` |
+| POST | `/api/kick/webhook` | Receives direct Kick webhook events (non-smee tunnels) |
+| GET | `/api/youtube/categories` | List YouTube video category names: `{ categories: string[] }` |
 | GET | `/api/obs/status` | OBS connection status + metrics |
 | GET | `/api/metrics` | JSON metrics snapshot |
 | GET | `/metrics` | Prometheus text format metrics |
@@ -297,6 +310,9 @@ interface StreamMetadata {
   description?: string;
   scheduleId?: string;
   tags?: string[];
+  twitchGame?: string;      // Twitch-specific category (overrides game)
+  kickCategory?: string;    // Kick-specific category (overrides game)
+  youtubeCategory?: string; // YouTube video category name
 }
 
 interface StreamMarker {
@@ -329,6 +345,7 @@ interface PlatformProvider {
   getViewerCount(): number;
   createMarker(description?: string, timestamp?: number): Promise<StreamMarker | null>;
   getMarkers(options?: GetMarkersOptions): Promise<StreamMarker[]>;
+  getStreamStartTime(): Date | null;
 }
 
 // Note: setStreamKey / startStream / stopStream are YouTube-specific or removed.

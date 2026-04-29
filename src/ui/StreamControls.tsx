@@ -1,5 +1,5 @@
 /** @jsxImportSource react */
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { defaultLogger } from '../utils/logger';
 
 const btnStyle: React.CSSProperties = {
@@ -33,6 +33,9 @@ export interface StreamMetadata {
   tags: string;
   game: string;
   notification: string;
+  twitchGame: string;
+  kickCategory: string;
+  youtubeCategory: string;
 }
 
 interface StreamControlsProps {
@@ -55,8 +58,18 @@ export const StreamControls: React.FC<StreamControlsProps> = ({
   const [streamDescription, setStreamDescription] = useState('');
   const [streamTags, setStreamTags] = useState('');
   const [streamNotification, setStreamNotification] = useState('');
+  const [twitchGame, setTwitchGame] = useState('');
+  const [kickCategory, setKickCategory] = useState('');
+  const [youtubeCategory, setYoutubeCategory] = useState('');
   const [savedMeta, setSavedMeta] = useState<Record<string, any>>({});
   const [isProcessing, setIsProcessing] = useState(false);
+
+  const [twitchCatSuggestions, setTwitchCatSuggestions] = useState<string[]>([]);
+  const [kickCatSuggestions, setKickCatSuggestions] = useState<string[]>([]);
+  const [ytCategories, setYtCategories] = useState<string[]>([]);
+
+  const twitchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const kickDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Load persisted stream info on mount
   useEffect(() => {
@@ -69,9 +82,52 @@ export const StreamControls: React.FC<StreamControlsProps> = ({
         setStreamDescription(meta.description ?? '');
         setStreamTags(Array.isArray(meta.tags) ? meta.tags.join(', ') : (meta.tags ?? ''));
         setStreamNotification(meta.notification ?? '');
+        setTwitchGame(meta.twitchGame ?? '');
+        setKickCategory(meta.kickCategory ?? '');
+        setYoutubeCategory(meta.youtubeCategory ?? '');
       })
       .catch(() => {});
   }, []);
+
+  // Fetch YouTube categories on mount
+  useEffect(() => {
+    fetch('/api/youtube/categories')
+      .then((r) => r.json())
+      .then((data) => {
+        if (Array.isArray(data.categories)) {
+          setYtCategories(data.categories);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const fetchTwitchSuggestions = (q: string) => {
+    if (twitchDebounceRef.current) clearTimeout(twitchDebounceRef.current);
+    twitchDebounceRef.current = setTimeout(() => {
+      fetch(`/api/twitch/categories?q=${encodeURIComponent(q)}`)
+        .then((r) => r.json())
+        .then((data) => {
+          if (Array.isArray(data.categories)) {
+            setTwitchCatSuggestions(data.categories);
+          }
+        })
+        .catch(() => {});
+    }, 300);
+  };
+
+  const fetchKickSuggestions = (q: string) => {
+    if (kickDebounceRef.current) clearTimeout(kickDebounceRef.current);
+    kickDebounceRef.current = setTimeout(() => {
+      fetch(`/api/kick/categories?q=${encodeURIComponent(q)}`)
+        .then((r) => r.json())
+        .then((data) => {
+          if (Array.isArray(data.categories)) {
+            setKickCatSuggestions(data.categories);
+          }
+        })
+        .catch(() => {});
+    }, 300);
+  };
 
   const currentMetadata = (): StreamMetadata => ({
     title: streamTitle,
@@ -79,6 +135,9 @@ export const StreamControls: React.FC<StreamControlsProps> = ({
     tags: streamTags,
     game: streamGame,
     notification: streamNotification,
+    twitchGame,
+    kickCategory,
+    youtubeCategory,
   });
 
   const hasChanges = (): boolean => {
@@ -98,6 +157,9 @@ export const StreamControls: React.FC<StreamControlsProps> = ({
       cur.game !== (savedMeta.game ?? '') ||
       cur.description !== (savedMeta.description ?? '') ||
       cur.notification !== (savedMeta.notification ?? '') ||
+      cur.twitchGame !== (savedMeta.twitchGame ?? '') ||
+      cur.kickCategory !== (savedMeta.kickCategory ?? '') ||
+      cur.youtubeCategory !== (savedMeta.youtubeCategory ?? '') ||
       JSON.stringify(curTags) !== JSON.stringify(savedTags)
     );
   };
@@ -131,6 +193,11 @@ export const StreamControls: React.FC<StreamControlsProps> = ({
       setIsProcessing(false);
     }
   };
+
+  const hasPlatformSpecificCat =
+    selectedPlatforms.includes('twitch') ||
+    selectedPlatforms.includes('kick') ||
+    selectedPlatforms.includes('youtube');
 
   return (
     <div
@@ -194,16 +261,95 @@ export const StreamControls: React.FC<StreamControlsProps> = ({
             style={inputStyle}
           />
         </div>
-        <div>
-          <label style={labelStyle}>Subject / Category / Game</label>
-          <input
-            type="text"
-            value={streamGame}
-            onChange={(e) => setStreamGame(e.target.value)}
-            placeholder="Game or category (all platforms)"
-            style={inputStyle}
-          />
-        </div>
+
+        {selectedPlatforms.includes('twitch') && (
+          <div>
+            <label style={labelStyle}>Category (Twitch)</label>
+            <input
+              type="text"
+              value={twitchGame}
+              onChange={(e) => {
+                setTwitchGame(e.target.value);
+                fetchTwitchSuggestions(e.target.value);
+              }}
+              placeholder="Game or category"
+              list="twitch-cats"
+              style={inputStyle}
+            />
+            <datalist id="twitch-cats">
+              {twitchCatSuggestions.map((s) => (
+                <option key={s} value={s} />
+              ))}
+            </datalist>
+          </div>
+        )}
+
+        {selectedPlatforms.includes('kick') && (
+          <div>
+            <label style={labelStyle}>Category (Kick)</label>
+            <input
+              type="text"
+              value={kickCategory}
+              onChange={(e) => {
+                setKickCategory(e.target.value);
+                fetchKickSuggestions(e.target.value);
+              }}
+              placeholder="Game or category"
+              list="kick-cats"
+              style={inputStyle}
+            />
+            <datalist id="kick-cats">
+              {kickCatSuggestions.map((s) => (
+                <option key={s} value={s} />
+              ))}
+            </datalist>
+          </div>
+        )}
+
+        {selectedPlatforms.includes('youtube') && (
+          <div>
+            <label style={labelStyle}>Category (YouTube)</label>
+            <select
+              value={youtubeCategory}
+              onChange={(e) => setYoutubeCategory(e.target.value)}
+              style={{ ...inputStyle }}
+            >
+              <option value="">-- Select category --</option>
+              {ytCategories.map((cat) => (
+                <option key={cat} value={cat}>
+                  {cat}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {!hasPlatformSpecificCat && (
+          <div>
+            <label style={labelStyle}>Subject / Category / Game</label>
+            <input
+              type="text"
+              value={streamGame}
+              onChange={(e) => setStreamGame(e.target.value)}
+              placeholder="Game or category (all platforms)"
+              style={inputStyle}
+            />
+          </div>
+        )}
+
+        {hasPlatformSpecificCat && (
+          <div>
+            <label style={labelStyle}>Title Suffix / Subject</label>
+            <input
+              type="text"
+              value={streamGame}
+              onChange={(e) => setStreamGame(e.target.value)}
+              placeholder="Shared subject / fallback category"
+              style={inputStyle}
+            />
+          </div>
+        )}
+
         <div>
           <label style={labelStyle}>Tags (comma-separated)</label>
           <input

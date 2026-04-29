@@ -9,6 +9,7 @@ const isTuiOnly = process.env.YASH_TUI_ONLY === '1';
 
 import { importKeysHandler, updateRolesHandler } from './handlers/adminKeysHandlers';
 import type { PlatformProvider } from './platforms/base';
+import { YT_CATEGORY_NAMES } from './platforms/youtube';
 import {
   adminService,
   authService,
@@ -56,8 +57,16 @@ Bun.serve({
       GET: () => {
         const status = platforms.reduce(
           (acc, platform) => {
-            const provider = { youtube, twitch, kick }[platform];
-            acc[platform] = provider ? provider.getStatus() : null;
+            const provider = { youtube, twitch, kick }[platform] as any;
+            if (!provider) {
+              acc[platform] = null;
+              return acc;
+            }
+            acc[platform] = {
+              ...provider.getStatus(),
+              viewerCount: provider.getViewerCount(),
+              streamStartTime: provider.getStreamStartTime?.() ?? null,
+            };
             return acc;
           },
           {} as Record<string, any>,
@@ -219,6 +228,26 @@ Bun.serve({
     },
 
     // ------------------------------------------------------------------
+    // Kick category search — GET /api/kick/categories?q=...
+    // Returns matching category names from the Kick search API.
+    // ------------------------------------------------------------------
+    '/api/kick/categories': {
+      GET: async (req) => {
+        const url = new URL(req.url);
+        const q = url.searchParams.get('q') ?? '';
+        if (!kick.isAuthenticated() || !q.trim()) {
+          return new Response(JSON.stringify({ categories: [] }), {
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        const categories = await kick.searchCategories(q);
+        return new Response(JSON.stringify({ categories }), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      },
+    },
+
+    // ------------------------------------------------------------------
     // YouTube OAuth — GET /api/youtube/auth  →  redirect to Google
     // ------------------------------------------------------------------
     '/api/youtube/auth': {
@@ -227,6 +256,18 @@ Bun.serve({
         return new Response(null, {
           status: 302,
           headers: { Location: url },
+        });
+      },
+    },
+
+    // ------------------------------------------------------------------
+    // YouTube categories — GET /api/youtube/categories
+    // Returns the static list of YouTube video category names.
+    // ------------------------------------------------------------------
+    '/api/youtube/categories': {
+      GET: () => {
+        return new Response(JSON.stringify({ categories: [...YT_CATEGORY_NAMES] }), {
+          headers: { 'Content-Type': 'application/json' },
         });
       },
     },
