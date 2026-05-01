@@ -98,8 +98,13 @@ export class TwitchProvider implements PlatformProvider {
   private eventSubListener: EventSubWsListener | null = null;
 
   // ---- token file ------------------------------------------------------------
-  private static dataDir = process.env.YASH_DATA_DIR || path.join(process.env.HOME || '.', '.yash');
-  private static tokenFile = path.join(TwitchProvider.dataDir, 'twitch_tokens.json');
+  private static getDataDir(): string {
+    return process.env.YASH_DATA_DIR || path.join(process.env.HOME || '.', '.yash');
+  }
+
+  private static getTokenFile(): string {
+    return path.join(TwitchProvider.getDataDir(), 'twitch_tokens.json');
+  }
 
   // ---------------------------------------------------------------------------
   // Helpers
@@ -113,7 +118,7 @@ export class TwitchProvider implements PlatformProvider {
 
   private async readTokenFile(): Promise<TwitchTokenFile | null> {
     try {
-      const raw = await fs.readFile(TwitchProvider.tokenFile, 'utf8');
+      const raw = await fs.readFile(TwitchProvider.getTokenFile(), 'utf8');
       return JSON.parse(raw) as TwitchTokenFile;
     } catch {
       return null;
@@ -121,13 +126,13 @@ export class TwitchProvider implements PlatformProvider {
   }
 
   private async writeTokenFile(data: TwitchTokenFile): Promise<void> {
-    await fs.mkdir(TwitchProvider.dataDir, { recursive: true });
-    await fs.writeFile(TwitchProvider.tokenFile, JSON.stringify(data, null, 2));
+    await fs.mkdir(TwitchProvider.getDataDir(), { recursive: true });
+    await fs.writeFile(TwitchProvider.getTokenFile(), JSON.stringify(data, null, 2));
   }
 
   private async deleteTokenFile(): Promise<void> {
     try {
-      await fs.unlink(TwitchProvider.tokenFile);
+      await fs.unlink(TwitchProvider.getTokenFile());
     } catch {
       /* already gone */
     }

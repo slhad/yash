@@ -5,9 +5,28 @@
  * The provider falls back to mock behaviour when clientId/clientSecret
  * are absent from the config (which is the case in CI).
  */
-import { describe, expect, test } from 'bun:test';
+import { afterAll, beforeAll, describe, expect, mock, test } from 'bun:test';
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { StreamStatus } from '../src/platforms/base';
 import { KickProvider } from '../src/platforms/kick';
+
+const originalYashDataDir = process.env.YASH_DATA_DIR;
+let testDataDir: string;
+
+beforeAll(async () => {
+  testDataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'yash-kick-provider-'));
+  process.env.YASH_DATA_DIR = testDataDir;
+});
+
+afterAll(async () => {
+  if (originalYashDataDir === undefined) delete process.env.YASH_DATA_DIR;
+  else process.env.YASH_DATA_DIR = originalYashDataDir;
+  if (testDataDir) {
+    await fs.rm(testDataDir, { recursive: true, force: true });
+  }
+});
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -235,6 +254,33 @@ describe('KickProvider — getViewerCount', () => {
   });
 });
 
+describe('KickProvider — getEventSubscriptions', () => {
+  test('returns parsed event names from subscriptions API', async () => {
+    const p = makeProvider() as any;
+    p.isAuthenticatedFlag = true;
+    p.client = { token: { accessToken: 'kick-token' } };
+
+    const origFetch = global.fetch;
+    global.fetch = mock(async () => {
+      return {
+        ok: true,
+        json: async () => ({
+          data: [{ event: 'chat.message.sent' }, { name: 'livestream.status.updated' }],
+        }),
+      } as any;
+    }) as any;
+
+    try {
+      await expect(p.getEventSubscriptions()).resolves.toEqual([
+        'chat.message.sent',
+        'livestream.status.updated',
+      ]);
+    } finally {
+      global.fetch = origFetch;
+    }
+  });
+});
+
 // ---------------------------------------------------------------------------
 // getStatus
 // ---------------------------------------------------------------------------
@@ -348,6 +394,71 @@ describe('KickProvider — setupWebhooks', () => {
     await expect(
       p.setupWebhooks({ url: 'http://localhost', topics: ['stream.online'] }),
     ).resolves.toBeUndefined();
+  });
+
+  test('creates chat.message.sent subscription when missing', async () => {
+    const p = makeProvider() as any;
+    p.client = { token: { accessToken: 'kick-token' } };
+    p.broadcasterId = 123;
+    p._startPoll = () => {};
+    p._startSmeeRelay = async () => {};
+
+    const calls: Array<{ method: string; body?: string }> = [];
+    const origFetch = global.fetch;
+    global.fetch = mock(async (_url: string, init?: RequestInit) => {
+      calls.push({
+        method: init?.method ?? 'GET',
+        body: typeof init?.body === 'string' ? init.body : undefined,
+      });
+      if ((init?.method ?? 'GET') === 'GET') {
+        return {
+          ok: true,
+          json: async () => ({ data: [] }),
+        } as any;
+      }
+      return {
+        ok: true,
+        json: async () => ({ data: [{ name: 'chat.message.sent', subscription_id: 'sub-1' }] }),
+      } as any;
+    }) as any;
+
+    try {
+      await p.setupWebhooks({ url: 'http://localhost', topics: ['stream.online'] });
+      expect(calls).toHaveLength(2);
+      expect(calls[0]?.method).toBe('GET');
+      expect(calls[1]?.method).toBe('POST');
+      expect(calls[1]?.body).toContain('"name":"chat.message.sent"');
+      expect(calls[1]?.body).toContain('"method":"webhook"');
+    } finally {
+      global.fetch = origFetch;
+    }
+  });
+
+  test('does not create subscription when chat.message.sent already exists', async () => {
+    const p = makeProvider() as any;
+    p.client = { token: { accessToken: 'kick-token' } };
+    p.broadcasterId = 123;
+    p._startPoll = () => {};
+    p._startSmeeRelay = async () => {};
+
+    let postCount = 0;
+    const origFetch = global.fetch;
+    global.fetch = mock(async (_url: string, init?: RequestInit) => {
+      if ((init?.method ?? 'GET') === 'POST') {
+        postCount++;
+      }
+      return {
+        ok: true,
+        json: async () => ({ data: [{ event: 'chat.message.sent' }] }),
+      } as any;
+    }) as any;
+
+    try {
+      await p.setupWebhooks({ url: 'http://localhost', topics: ['stream.online'] });
+      expect(postCount).toBe(0);
+    } finally {
+      global.fetch = origFetch;
+    }
   });
 });
 

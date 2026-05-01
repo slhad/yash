@@ -18,7 +18,13 @@ When beginning work in this repository:
 3. All implementation should adhere to the requirements in SPECS.md
 4. **When adding new functionality**, update SPECS.md to document it (under the relevant section, e.g. Features, Goals, or Development Commands)
 5. **When testing TUI components**: Must use OpenCode pty_spawn/pty_write tools for proper terminal interaction
-6. **ALWAYS Write** ongoing work/parts in `[tmp]/ONGOING.md` to keep track of everything and clean it up when parts are done
+6. **ALWAYS Write** ongoing work/parts in `[tmp]/ONGOING.md` to keep track of everything
+7. **Clean `[tmp]/ONGOING.md` immediately after completion is verified** — remove each item as soon as the work is confirmed done by tests, runtime checks, or explicit user verification; do not leave completed items in the file
+
+## External References
+
+- Kick event subscription docs: `https://docs.kick.com/events/subscribe-to-events`
+- Kick webhook payload docs: `https://docs.kick.com/events/event-types`
 
 ## Working with Bun
 Default to using Bun instead of Node.js.

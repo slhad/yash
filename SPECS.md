@@ -12,7 +12,7 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
         * Window (as sidebar) showing events/triggers/stuff with platform prefix (if more than one)
         * Window showing messages with platform as header (if more than one)
         * Window showing all messages with platform as prefix (if more than one)
-        * Element : Platform connected as Status bar — single borderless line starting with "Status" label, each platform shown as `platform: STATUS (Xh Xm Xs/viewers)` in green (authenticated) or red (not authenticated); elapsed time and viewer count `(Xh Xm Xs/x)` only shown when platform is ONLINE, `viewers.visible` setting is true (default), and per-platform `showViewers` is not false in `config.json`
+        * Element : Platform connected as Status bar — single borderless line starting with "Status" label, each platform shown as `platform: STATUS (Xh Xm Xs/viewers)` in green (authenticated) or red (not authenticated); unauthenticated providers display `LOGGED OUT` instead of `OFFLINE`; elapsed time and viewer count `(Xh Xm Xs/x)` only shown when platform is ONLINE, `viewers.visible` setting is true (default), and per-platform `showViewers` is not false in `config.json`
         * Message box
             * position : top/bottom/hide
         * Element : Title (YASH heading)
@@ -20,7 +20,7 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
     * Command /connect [youtube|twitch|kick] to launch connection to platform with auth+save secrets in config
     * Command /exit - exits the application cleanly (TUI only)
     * Command /help - lists all available commands
-    * Command /info - fetches current stream/channel info from all providers and prints one `[system] <platform>: …` line per provider in the TUI chat
+        * Command /info - fetches current stream/channel info from all providers and prints one `[system] <platform>: …` line per provider in the TUI chat; Kick output also includes current event subscriptions
     * Command /logs [clear|tail <n>|visible <true|false>] - manage log display (TUI only)
     * Command /msg <all|youtube|twitch|kick> <text> - sends a message to the specified platform(s)
     * Command /marker [description] [| timestamp_s] - places a stream marker on all platforms
@@ -31,6 +31,7 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
     * `/stream` modal: per-platform category autocomplete with ↑/↓ navigation — Twitch field (`twitchGame`) calls `/api/twitch/categories` with 300 ms debounce; Kick field (`kickCategory`) calls `/api/kick/categories` with 300 ms debounce; YouTube field uses a static `<select>` dropdown from `/api/youtube/categories`
     * Message box to send message to [all|youtube|twitch|kick] platform and receive command "/" (without sending to platforms)
         * Input history: Up/Down arrow keys navigate previously-sent messages (like a shell history)
+        * Plain messages (input not starting with `/`) show a target preview `all|youtube|twitch|kick > message`; `Tab` cycles between `all` and currently connected providers before sending
         * Command parameter autocomplete: after typing a command + space, Tab completes available parameters
             * `/connect ` → `youtube | twitch | kick`
             * `/msg ` → `all | youtube | twitch | kick`
@@ -144,7 +145,7 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
     * `createMarker()` returns `null`, `getMarkers()` returns `[]` — Kick has no marker API
     * Required OAuth scopes: `user:read`, `channel:read`, `channel:write`, `chat:write`, `events:subscribe`
     * `searchCategories(query, limit?)` — live search via Kick categories API
-    * `setupWebhooks()` starts a smee.io relay; the public relay URL is logged at startup and available via `getWebhookUrl()` — register this URL in Kick's developer app settings
+    * `setupWebhooks()` starts a smee.io relay, then ensures the app is subscribed to `chat.message.sent` via `GET/POST /public/v1/events/subscriptions`; the public relay URL is logged at startup and available via `getWebhookUrl()` — register this URL in Kick's developer app settings
     * `handleWebhookEvent(payload)` — dispatches incoming Kick chat webhook events into the chat stream
 
 ### Configuration

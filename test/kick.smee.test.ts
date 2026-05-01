@@ -7,12 +7,28 @@
  * No real network calls are made. fetch and fs are stubbed in-process.
  */
 
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, mock, test } from 'bun:test';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { KickProvider } from '../src/platforms/kick';
 import { SmeeRelay } from '../src/utils/smee';
+
+const originalYashDataDir = process.env.YASH_DATA_DIR;
+let testDataDir: string;
+
+beforeAll(async () => {
+  testDataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'yash-kick-smee-provider-'));
+  process.env.YASH_DATA_DIR = testDataDir;
+});
+
+afterAll(async () => {
+  if (originalYashDataDir === undefined) delete process.env.YASH_DATA_DIR;
+  else process.env.YASH_DATA_DIR = originalYashDataDir;
+  if (testDataDir) {
+    await fs.rm(testDataDir, { recursive: true, force: true });
+  }
+});
 
 // ---------------------------------------------------------------------------
 // SmeeRelay — getOrCreateChannelUrl
