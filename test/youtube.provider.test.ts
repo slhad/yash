@@ -1,6 +1,27 @@
-import { describe, expect, test } from 'bun:test';
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { StreamStatus } from '../src/platforms/base';
 import { YouTubeProvider } from '../src/platforms/youtube';
+
+const originalNodeEnv = process.env.NODE_ENV;
+const originalYashDataDir = process.env.YASH_DATA_DIR;
+const testDataDir = mkdtempSync(join(tmpdir(), 'yash-youtube-test-'));
+
+beforeAll(() => {
+  process.env.YASH_DATA_DIR = testDataDir;
+});
+
+afterAll(() => {
+  if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
+  else process.env.NODE_ENV = originalNodeEnv;
+
+  if (originalYashDataDir === undefined) delete process.env.YASH_DATA_DIR;
+  else process.env.YASH_DATA_DIR = originalYashDataDir;
+
+  rmSync(testDataDir, { recursive: true, force: true });
+});
 
 function makeProvider() {
   return new YouTubeProvider();
@@ -313,5 +334,225 @@ describe('YouTubeProvider — getChannelInfo', () => {
     expect(info.channelTitle).toBe('');
     expect(info.broadcastId).toBeNull();
     expect(info.liveChatId).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Metadata target resolution
+// ---------------------------------------------------------------------------
+
+describe('YouTubeProvider — updateStreamMetadata target selection', () => {
+  test('prefers the broadcast bound to the saved stream key even before going live', async () => {
+    const p = makeProvider() as any;
+    p.isAuthenticatedFlag = true;
+    p.tokenData = {
+      accessToken: 'token',
+      refreshToken: 'refresh',
+      expiresIn: 3600,
+      obtainmentTimestamp: Date.now(),
+      channelId: 'chan',
+      channelTitle: 'title',
+    };
+    p.streamKey = 'saved_stream_key';
+    p.broadcastId = 'stale-broadcast-id';
+    p.getSetup = () => ({
+      defaultPlaylist: { enabled: false, playlistId: '', playlistTitle: '' },
+      subjectPlaylist: { enabled: false },
+      chaptering: { enabled: false },
+      tags: { enabled: false },
+      description: { enabled: false },
+      subjectTitle: { enabled: false },
+    });
+    p._findStreamIdByKey = async () => 'stream-saved';
+
+    const putBodies: any[] = [];
+    const videoPutBodies: any[] = [];
+    p._request = async (url: string, options: RequestInit = {}) => {
+      if (url.includes('/liveBroadcasts?part=id,snippet,status,contentDetails&mine=true')) {
+        return new Response(
+          JSON.stringify({
+            items: [
+              {
+                id: 'other-live-broadcast',
+                snippet: { liveChatId: 'chat-live', scheduledStartTime: '2026-05-01T11:00:00Z' },
+                status: { lifeCycleStatus: 'live' },
+                contentDetails: { boundStreamId: 'stream-other' },
+              },
+              {
+                id: 'saved-created-broadcast',
+                snippet: {
+                  liveChatId: 'chat-saved',
+                  scheduledStartTime: '2026-05-02T11:00:00Z',
+                },
+                status: { lifeCycleStatus: 'created' },
+                contentDetails: { boundStreamId: 'stream-saved' },
+              },
+            ],
+          }),
+        );
+      }
+
+      if (url.includes('/liveBroadcasts?part=id,snippet&id=saved-created-broadcast')) {
+        return new Response(
+          JSON.stringify({
+            items: [{ id: 'saved-created-broadcast', snippet: { title: 'Old title' } }],
+          }),
+        );
+      }
+
+      if (url.includes('/liveBroadcasts?part=snippet') && options.method === 'PUT') {
+        putBodies.push(JSON.parse(String(options.body)));
+        return new Response(JSON.stringify({ ok: true }));
+      }
+
+      if (url.includes('/videos?part=snippet&id=saved-created-broadcast')) {
+        return new Response(
+          JSON.stringify({
+            items: [
+              {
+                id: 'saved-created-broadcast',
+                snippet: {
+                  title: 'Old video title',
+                  description: 'Old description',
+                  categoryId: '20',
+                },
+              },
+            ],
+          }),
+        );
+      }
+
+      if (url.includes('/videos?part=snippet') && options.method === 'PUT') {
+        videoPutBodies.push(JSON.parse(String(options.body)));
+        return new Response(JSON.stringify({ ok: true }));
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    };
+
+    await p.updateStreamMetadata({ title: 'New title' });
+
+    expect(putBodies).toHaveLength(1);
+    expect(putBodies[0].id).toBe('saved-created-broadcast');
+    expect(putBodies[0].snippet.title).toBe('New title');
+    expect(videoPutBodies).toHaveLength(1);
+    expect(videoPutBodies[0].id).toBe('saved-created-broadcast');
+    expect(videoPutBodies[0].snippet.title).toBe('New title');
+    expect(p.broadcastId).toBe('saved-created-broadcast');
+  });
+
+  test('updates the video snippet title so readback reflects /stream changes', async () => {
+    const p = makeProvider() as any;
+    p.isAuthenticatedFlag = true;
+    p.tokenData = {
+      accessToken: 'token',
+      refreshToken: 'refresh',
+      expiresIn: 3600,
+      obtainmentTimestamp: Date.now(),
+      channelId: 'chan',
+      channelTitle: 'title',
+    };
+    p.streamKey = 'saved_stream_key';
+    p.getSetup = () => ({
+      defaultPlaylist: { enabled: false, playlistId: '', playlistTitle: '' },
+      subjectPlaylist: { enabled: false },
+      chaptering: { enabled: false },
+      tags: { enabled: false },
+      description: { enabled: false },
+      subjectTitle: { enabled: false },
+    });
+    p._findStreamIdByKey = async () => 'stream-saved';
+
+    const videoPutBodies: any[] = [];
+    p._request = async (url: string, options: RequestInit = {}) => {
+      if (url.includes('/liveBroadcasts?part=id,snippet,status,contentDetails&mine=true')) {
+        return new Response(
+          JSON.stringify({
+            items: [
+              {
+                id: 'saved-created-broadcast',
+                snippet: { liveChatId: 'chat-saved' },
+                status: { lifeCycleStatus: 'created' },
+                contentDetails: { boundStreamId: 'stream-saved' },
+              },
+            ],
+          }),
+        );
+      }
+
+      if (url.includes('/liveBroadcasts?part=id,snippet&id=saved-created-broadcast')) {
+        return new Response(
+          JSON.stringify({
+            items: [{ id: 'saved-created-broadcast', snippet: { title: 'Old broadcast title' } }],
+          }),
+        );
+      }
+
+      if (url.includes('/liveBroadcasts?part=snippet') && options.method === 'PUT') {
+        return new Response(JSON.stringify({ ok: true }));
+      }
+
+      if (url.includes('/videos?part=snippet&id=saved-created-broadcast')) {
+        return new Response(
+          JSON.stringify({
+            items: [
+              {
+                id: 'saved-created-broadcast',
+                snippet: {
+                  title: 'Old video title',
+                  description: 'Old description',
+                  categoryId: '20',
+                },
+              },
+            ],
+          }),
+        );
+      }
+
+      if (url.includes('/videos?part=snippet') && options.method === 'PUT') {
+        videoPutBodies.push(JSON.parse(String(options.body)));
+        return new Response(JSON.stringify({ ok: true }));
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    };
+
+    await p.updateStreamMetadata({ title: 'New title' });
+
+    expect(videoPutBodies).toHaveLength(1);
+    expect(videoPutBodies[0].id).toBe('saved-created-broadcast');
+    expect(videoPutBodies[0].snippet.title).toBe('New title');
+  });
+});
+
+describe('YouTubeProvider — playlists', () => {
+  test('createPlaylist requests snippet and status parts', async () => {
+    const p = makeProvider() as any;
+    p.isAuthenticatedFlag = true;
+    p.tokenData = {
+      accessToken: 'token',
+      refreshToken: 'refresh',
+      expiresIn: 3600,
+      obtainmentTimestamp: Date.now(),
+      channelId: 'chan',
+      channelTitle: 'title',
+    };
+
+    let seenUrl = '';
+    let seenBody: any = null;
+    p._request = async (url: string, options: RequestInit = {}) => {
+      seenUrl = url;
+      seenBody = JSON.parse(String(options.body));
+      return new Response(JSON.stringify({ id: 'playlist-1', snippet: { title: 'Subject A' } }));
+    };
+
+    const created = await p.createPlaylist('Subject A');
+
+    expect(seenUrl).toContain('/playlists?part=id,snippet,status');
+    expect(seenBody).toEqual({
+      snippet: { title: 'Subject A' },
+      status: { privacyStatus: 'public' },
+    });
+    expect(created).toEqual({ id: 'playlist-1', title: 'Subject A' });
   });
 });

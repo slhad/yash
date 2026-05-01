@@ -10,6 +10,7 @@ export const TUI_COMMANDS = [
   '/connect',
   '/exit',
   '/help',
+  '/info',
   '/logs',
   '/marker',
   '/msg',

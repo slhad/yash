@@ -20,6 +20,7 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
     * Command /connect [youtube|twitch|kick] to launch connection to platform with auth+save secrets in config
     * Command /exit - exits the application cleanly (TUI only)
     * Command /help - lists all available commands
+    * Command /info - fetches current stream/channel info from all providers and prints one `[system] <platform>: …` line per provider in the TUI chat
     * Command /logs [clear|tail <n>|visible <true|false>] - manage log display (TUI only)
     * Command /msg <all|youtube|twitch|kick> <text> - sends a message to the specified platform(s)
     * Command /marker [description] [| timestamp_s] - places a stream marker on all platforms
@@ -66,7 +67,7 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
         * `/connect <youtube|twitch|kick>` — authenticate a platform (all three redirect to real OAuth flows)
         * `/settings get <key>` — read a persistent setting via `/api/settings`
         * `/settings set <key> <value>` — write a persistent setting via `/api/settings`
-    * TUI-only commands (not available in WebUI): `/exit`, `/logs`
+    * TUI-only commands (not available in WebUI): `/exit`, `/logs`, `/info`
 
 ## Out of scope (do not touch)
 - Contributing

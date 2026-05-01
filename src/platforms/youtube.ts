@@ -53,6 +53,18 @@ interface YouTubeTokenFile {
   channelTitle: string;
 }
 
+interface YouTubeBroadcastSummary {
+  id: string;
+  snippet: {
+    liveChatId?: string;
+    scheduledStartTime?: string;
+    actualStartTime?: string;
+    publishedAt?: string;
+  };
+  status: { lifeCycleStatus: string };
+  contentDetails?: { boundStreamId?: string };
+}
+
 // ---------------------------------------------------------------------------
 // Required OAuth scopes
 // ---------------------------------------------------------------------------
@@ -65,6 +77,15 @@ const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const GOOGLE_REVOKE_URL = 'https://oauth2.googleapis.com/revoke';
 const YT_API = 'https://www.googleapis.com/youtube/v3';
+
+function describeError(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  try {
+    return JSON.stringify(err);
+  } catch {
+    return String(err);
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Stream setup config (stored under platforms.youtube.setup in config.json)
@@ -164,8 +185,13 @@ export class YouTubeProvider implements PlatformProvider {
   private playlistsAppliedForBroadcast: string | null = null;
 
   // ---- token file ------------------------------------------------------------
-  private static dataDir = process.env.YASH_DATA_DIR || path.join(process.env.HOME || '.', '.yash');
-  private static tokenFile = path.join(YouTubeProvider.dataDir, 'youtube_tokens.json');
+  private static getDataDir(): string {
+    return process.env.YASH_DATA_DIR || path.join(process.env.HOME || '.', '.yash');
+  }
+
+  private static getTokenFile(): string {
+    return path.join(YouTubeProvider.getDataDir(), 'youtube_tokens.json');
+  }
 
   // ---------------------------------------------------------------------------
   // Config + token file helpers
@@ -184,7 +210,7 @@ export class YouTubeProvider implements PlatformProvider {
 
   private async readTokenFile(): Promise<YouTubeTokenFile | null> {
     try {
-      const raw = await fs.readFile(YouTubeProvider.tokenFile, 'utf8');
+      const raw = await fs.readFile(YouTubeProvider.getTokenFile(), 'utf8');
       return JSON.parse(raw) as YouTubeTokenFile;
     } catch {
       return null;
@@ -192,13 +218,13 @@ export class YouTubeProvider implements PlatformProvider {
   }
 
   private async writeTokenFile(data: YouTubeTokenFile): Promise<void> {
-    await fs.mkdir(YouTubeProvider.dataDir, { recursive: true });
-    await fs.writeFile(YouTubeProvider.tokenFile, JSON.stringify(data, null, 2));
+    await fs.mkdir(YouTubeProvider.getDataDir(), { recursive: true });
+    await fs.writeFile(YouTubeProvider.getTokenFile(), JSON.stringify(data, null, 2));
   }
 
   private async deleteTokenFile(): Promise<void> {
     try {
-      await fs.unlink(YouTubeProvider.tokenFile);
+      await fs.unlink(YouTubeProvider.getTokenFile());
     } catch {
       /* already gone */
     }
@@ -272,49 +298,102 @@ export class YouTubeProvider implements PlatformProvider {
     }
   }
 
-  private async _findActiveBroadcast(): Promise<{ id: string; liveChatId: string | null } | null> {
-    if (!this.isAuthenticated() || !this.tokenData) return null;
-
-    const streamId = this.streamKey ? await this._findStreamIdByKey(this.streamKey) : null;
-
-    // The YouTube API no longer accepts mine+broadcastStatus together.
-    // Fetch all user broadcasts and filter client-side by lifeCycleStatus.
+  private async _listOwnBroadcasts(): Promise<YouTubeBroadcastSummary[]> {
     try {
       const resp = await this._request(
         `${YT_API}/liveBroadcasts?part=id,snippet,status,contentDetails&mine=true&maxResults=50`,
       );
       if (!resp.ok) {
         const errBody = await resp.text().catch(() => '');
-        defaultLogger.warn(`[YouTube] _findActiveBroadcast: HTTP ${resp.status} — ${errBody}`);
-        return null;
+        defaultLogger.warn(`[YouTube] liveBroadcasts list failed: HTTP ${resp.status} — ${errBody}`);
+        return [];
       }
 
-      const data = (await resp.json()) as {
-        items?: Array<{
-          id: string;
-          snippet: { liveChatId?: string };
-          status: { lifeCycleStatus: string };
-          contentDetails?: { boundStreamId?: string };
-        }>;
-      };
-
-      let items = data.items ?? [];
-
-      // Narrow to the exact stream if we resolved a stream ID
-      if (streamId) {
-        items = items.filter((b) => b.contentDetails?.boundStreamId === streamId);
-      }
-
-      // Prefer live, then ready (set up but not yet live)
-      const live = items.find((b) => b.status.lifeCycleStatus === 'live');
-      const ready = items.find((b) => b.status.lifeCycleStatus === 'ready');
-      const broadcast = live ?? ready ?? null;
-
-      if (broadcast) {
-        return { id: broadcast.id, liveChatId: broadcast.snippet.liveChatId ?? null };
-      }
+      const data = (await resp.json()) as { items?: YouTubeBroadcastSummary[] };
+      return data.items ?? [];
     } catch (err) {
-      defaultLogger.error('[YouTube] _findActiveBroadcast error:', err);
+      defaultLogger.error('[YouTube] _listOwnBroadcasts error:', err);
+      return [];
+    }
+  }
+
+  private _metadataTargetRank(status: string): number {
+    switch (status) {
+      case 'live':
+        return 500;
+      case 'testing':
+        return 450;
+      case 'ready':
+        return 400;
+      case 'created':
+        return 350;
+      case 'complete':
+        return 100;
+      case 'revoked':
+        return 0;
+      default:
+        return 200;
+    }
+  }
+
+  private _broadcastTimestamp(item: YouTubeBroadcastSummary): number {
+    const raw =
+      item.snippet.actualStartTime ?? item.snippet.scheduledStartTime ?? item.snippet.publishedAt;
+    const ts = raw ? Date.parse(raw) : 0;
+    return Number.isNaN(ts) ? 0 : ts;
+  }
+
+  private _pickBestBroadcast(items: YouTubeBroadcastSummary[]): YouTubeBroadcastSummary | null {
+    if (items.length === 0) return null;
+    return items
+      .slice()
+      .sort((a, b) => {
+        const rankDelta =
+          this._metadataTargetRank(b.status.lifeCycleStatus) -
+          this._metadataTargetRank(a.status.lifeCycleStatus);
+        if (rankDelta !== 0) return rankDelta;
+        return this._broadcastTimestamp(b) - this._broadcastTimestamp(a);
+      })[0]!;
+  }
+
+  private async _resolveMetadataTargetBroadcast(): Promise<{
+    id: string;
+    liveChatId: string | null;
+  } | null> {
+    if (!this.isAuthenticated() || !this.tokenData) return null;
+
+    const items = await this._listOwnBroadcasts();
+    if (items.length === 0) return null;
+
+    const streamId = this.streamKey ? await this._findStreamIdByKey(this.streamKey) : null;
+    const streamBoundItems = streamId
+      ? items.filter((item) => item.contentDetails?.boundStreamId === streamId)
+      : [];
+
+    const chosen = this._pickBestBroadcast(streamBoundItems.length > 0 ? streamBoundItems : items);
+    if (!chosen) return null;
+
+    return { id: chosen.id, liveChatId: chosen.snippet.liveChatId ?? null };
+  }
+
+  private async _findActiveBroadcast(): Promise<{ id: string; liveChatId: string | null } | null> {
+    if (!this.isAuthenticated() || !this.tokenData) return null;
+
+    const streamId = this.streamKey ? await this._findStreamIdByKey(this.streamKey) : null;
+
+    const allItems = await this._listOwnBroadcasts();
+    let items = allItems;
+
+    if (streamId) {
+      items = items.filter((b) => b.contentDetails?.boundStreamId === streamId);
+    }
+
+    const live = items.find((b) => b.status.lifeCycleStatus === 'live');
+    const ready = items.find((b) => b.status.lifeCycleStatus === 'ready');
+    const broadcast = live ?? ready ?? null;
+
+    if (broadcast) {
+      return { id: broadcast.id, liveChatId: broadcast.snippet.liveChatId ?? null };
     }
 
     return null;
@@ -481,15 +560,15 @@ export class YouTubeProvider implements PlatformProvider {
     if (!this.isAuthenticated()) throw new Error('Not authenticated with YouTube');
     if (!this.tokenData) return {};
 
-    if (!this.broadcastId) {
-      const broadcast = await this._findActiveBroadcast();
-      if (!broadcast) {
-        defaultLogger.warn('[YouTube] updateStreamMetadata — no active broadcast found');
-        return {};
-      }
-      this.broadcastId = broadcast.id;
-      this.liveChatId = broadcast.liveChatId;
+    const broadcast = await this._resolveMetadataTargetBroadcast();
+    if (!broadcast) {
+      defaultLogger.warn(
+        '[YouTube] updateStreamMetadata — no broadcast found for the configured stream target',
+      );
+      return {};
     }
+    this.broadcastId = broadcast.id;
+    this.liveChatId = broadcast.liveChatId;
 
     try {
       // GET current snippet to preserve scheduledStartTime and other required fields
@@ -533,34 +612,43 @@ export class YouTubeProvider implements PlatformProvider {
 
       defaultLogger.info('[YouTube] broadcast metadata updated');
 
-      // Update video category if provided (videos.update, separate resource from liveBroadcast)
-      if (metadata.youtubeCategory) {
-        const catId = YT_CATEGORY_IDS[metadata.youtubeCategory];
-        if (catId) {
-          const videoGetResp = await this._request(
-            `${YT_API}/videos?part=snippet&id=${this.broadcastId}`,
-          );
-          if (videoGetResp.ok) {
-            const videoData = (await videoGetResp.json()) as {
-              items?: Array<{ id: string; snippet: Record<string, unknown> }>;
+      // The user-visible YouTube title/description/category live on the video resource.
+      // liveBroadcasts.update alone is not sufficient to persist those fields reliably.
+      const catId = metadata.youtubeCategory ? YT_CATEGORY_IDS[metadata.youtubeCategory] : undefined;
+      const shouldUpdateVideoSnippet =
+        finalTitle !== undefined ||
+        finalDescription !== undefined ||
+        metadata.youtubeCategory !== undefined ||
+        metadata.tags !== undefined;
+
+      if (shouldUpdateVideoSnippet) {
+        const videoGetResp = await this._request(`${YT_API}/videos?part=snippet&id=${this.broadcastId}`);
+        if (!videoGetResp.ok) {
+          defaultLogger.warn('[YouTube] videos.get before update failed:', await videoGetResp.text());
+        } else {
+          const videoData = (await videoGetResp.json()) as {
+            items?: Array<{ id: string; snippet: Record<string, unknown> }>;
+          };
+          const video = videoData.items?.[0];
+          if (video) {
+            const nextVideoSnippet: Record<string, unknown> = {
+              ...video.snippet,
+              ...(finalTitle !== undefined && { title: finalTitle }),
+              ...(finalDescription !== undefined && { description: finalDescription }),
+              ...(metadata.tags !== undefined && { tags: metadata.tags }),
+              ...(catId !== undefined && { categoryId: catId }),
             };
-            const video = videoData.items?.[0];
-            if (video) {
-              const videoResp = await this._request(`${YT_API}/videos?part=snippet`, {
-                method: 'PUT',
-                body: JSON.stringify({
-                  id: this.broadcastId,
-                  snippet: { ...video.snippet, categoryId: catId },
-                }),
-              });
-              if (!videoResp.ok) {
-                defaultLogger.warn(
-                  '[YouTube] videos.update category failed:',
-                  await videoResp.text(),
-                );
-              } else {
-                defaultLogger.info(`[YouTube] video category set to ${metadata.youtubeCategory}`);
-              }
+            const videoResp = await this._request(`${YT_API}/videos?part=snippet`, {
+              method: 'PUT',
+              body: JSON.stringify({
+                id: this.broadcastId,
+                snippet: nextVideoSnippet,
+              }),
+            });
+            if (!videoResp.ok) {
+              defaultLogger.warn('[YouTube] videos.update failed:', await videoResp.text());
+            } else {
+              defaultLogger.info('[YouTube] video snippet updated');
             }
           }
         }
@@ -965,7 +1053,7 @@ export class YouTubeProvider implements PlatformProvider {
   async createPlaylist(title: string): Promise<{ id: string; title: string } | null> {
     if (!this.isAuthenticated() || !this.tokenData) return null;
     try {
-      const resp = await this._request(`${YT_API}/playlists?part=id,snippet`, {
+      const resp = await this._request(`${YT_API}/playlists?part=id,snippet,status`, {
         method: 'POST',
         body: JSON.stringify({
           snippet: { title },
@@ -977,7 +1065,7 @@ export class YouTubeProvider implements PlatformProvider {
       defaultLogger.info(`[YouTube] playlist created: "${data.snippet.title}" (${data.id})`);
       return { id: data.id, title: data.snippet.title };
     } catch (err) {
-      defaultLogger.error('[YouTube] createPlaylist error:', err);
+      defaultLogger.error(`[YouTube] createPlaylist error: ${describeError(err)}`);
       return null;
     }
   }
@@ -1026,7 +1114,7 @@ export class YouTubeProvider implements PlatformProvider {
           defaultLogger.info(`[YouTube] added to subject playlist "${playlist.title}"`);
         }
       } catch (err) {
-        defaultLogger.error('[YouTube] failed to add to subject playlist:', err);
+        defaultLogger.error(`[YouTube] failed to add to subject playlist: ${describeError(err)}`);
       }
     }
   }

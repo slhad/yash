@@ -107,6 +107,14 @@ interface StreamModal {
 let activeModal: TwitchSetupModal | null = null;
 let activeStreamModal: StreamModal | null = null;
 
+function ensureMainInputFocus(): void {
+  if (!uiNodes) return;
+  if (activeModal || activeStreamModal) return;
+  if (!uiNodes.inputEl.focused) {
+    uiNodes.inputEl.focus();
+  }
+}
+
 // ─── initUI ─────────────────────────────────────────────────────────────────
 // Builds the complete layout tree once and attaches it to renderer.root.
 // Called once at startup; called again only on structural settings changes.
@@ -434,6 +442,8 @@ function updateUI(messages: string[]): void {
   sidebarBox.visible = eventsVisible || logsVisible;
   clearScrollBox(sidebarScroll);
   _fillSidebar(renderer, sidebarScroll, eventsVisible, logsVisible, eventsTail, logsTail);
+
+  ensureMainInputFocus();
 }
 
 // ─── Command dispatch ────────────────────────────────────────────────────────
@@ -2311,11 +2321,21 @@ async function handleCommand(trimmed: string): Promise<void> {
     lastMessages.push(
       '[help]       e.g.  /marker Q&A | 3723    (timestamp in seconds, YouTube only)',
     );
+    lastMessages.push('[help]   /info  — show current stream/channel info from all providers');
     lastMessages.push('[help]   /settings get <key>  — get a setting value');
     lastMessages.push('[help]   /settings set <key> <value>  — set a setting value');
     lastMessages.push('[help]   /logs clear | tail <n> | visible <true|false>  — manage logs');
     lastMessages.push('[help]   /exit  — exit the app');
     lastMessages.push('[help]   /help  — show this help');
+  } else if (cmd === '/info') {
+    for (const platform of ['youtube', 'twitch', 'kick']) {
+      try {
+        const info = await fetchPlatformInfo(platform);
+        lastMessages.push(`[system] ${platform}: ${formatInfoValue(info)}`);
+      } catch (err) {
+        lastMessages.push(`[system] ${platform}: error: ${String(err)}`);
+      }
+    }
   } else {
     lastMessages.push(`[system] Unknown command: ${trimmed}`);
   }
@@ -2371,6 +2391,109 @@ function renderChatLine(renderer: CliRenderer, msg: ChatLine): TextRenderable | 
   return new TextRenderable(renderer, { content: msg.content, fg: msg.fg });
 }
 
+function compactObject<T extends Record<string, unknown>>(value: T): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined));
+}
+
+function formatInfoValue(value: unknown): string {
+  if (value === null) return 'null';
+  if (value === undefined) return 'undefined';
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+async function fetchYoutubeInfo(): Promise<Record<string, unknown>> {
+  if (!youtube.isAuthenticated()) return { error: 'not authenticated' };
+
+  const provider = youtube as any;
+  const baseInfo = provider.getChannelInfo?.() ?? {};
+  const target =
+    (await provider._resolveMetadataTargetBroadcast?.()) ??
+    (baseInfo.broadcastId ? { id: baseInfo.broadcastId, liveChatId: baseInfo.liveChatId } : null);
+
+  if (!target?.id || !provider._request) {
+    return compactObject({
+      ...baseInfo,
+      streamStatus: youtube.getStreamStatus(),
+      viewerCount: youtube.getViewerCount(),
+    });
+  }
+
+  const [broadcastResp, videoResp] = await Promise.all([
+    provider._request(`${'https://www.googleapis.com/youtube/v3'}/liveBroadcasts?part=id,snippet,status,contentDetails&id=${target.id}`),
+    provider._request(`${'https://www.googleapis.com/youtube/v3'}/videos?part=snippet&id=${target.id}`),
+  ]);
+
+  const broadcastData = broadcastResp.ok ? await broadcastResp.json() : { items: [] };
+  const videoData = videoResp.ok ? await videoResp.json() : { items: [] };
+  const broadcast = broadcastData.items?.[0];
+  const video = videoData.items?.[0];
+
+  return compactObject({
+    ...baseInfo,
+    streamStatus: youtube.getStreamStatus(),
+    viewerCount: youtube.getViewerCount(),
+    title: video?.snippet?.title ?? broadcast?.snippet?.title,
+    description: video?.snippet?.description ?? broadcast?.snippet?.description,
+    lifeCycleStatus: broadcast?.status?.lifeCycleStatus,
+    scheduledStartTime: broadcast?.snippet?.scheduledStartTime,
+    actualStartTime: broadcast?.snippet?.actualStartTime,
+    boundStreamId: broadcast?.contentDetails?.boundStreamId,
+    categoryId: video?.snippet?.categoryId,
+    tags: video?.snippet?.tags,
+  });
+}
+
+async function fetchTwitchInfo(): Promise<Record<string, unknown>> {
+  if (!twitch.isAuthenticated()) return { error: 'not authenticated' };
+
+  const provider = twitch as any;
+  if (!provider.apiClient || !provider.userId) return { error: 'api client not ready' };
+
+  const channel = await provider.apiClient.channels.getChannelInfoById(provider.userId);
+  return compactObject({
+    title: channel?.title,
+    game: channel?.gameName,
+    gameId: channel?.gameId,
+    tags: channel?.tags ?? [],
+    language: channel?.language,
+    delay: channel?.delay,
+    streamStatus: twitch.getStreamStatus(),
+    viewerCount: twitch.getViewerCount(),
+  });
+}
+
+async function fetchKickInfo(): Promise<Record<string, unknown>> {
+  if (!kick.isAuthenticated()) return { error: 'not authenticated' };
+
+  const provider = kick as any;
+  if (!provider.client || !provider.channelSlug) return { error: 'api client not ready' };
+
+  const channel = await provider.client.channels.getChannel(provider.channelSlug);
+  return compactObject({
+    title: channel?.stream_title ?? channel?.user?.username,
+    slug: channel?.slug,
+    category: channel?.category?.name ?? null,
+    categoryId: channel?.category?.id ?? null,
+    tags: channel?.recent_categories?.map?.((c: any) => c?.name).filter(Boolean),
+    followers: channel?.followers_count ?? 0,
+    verified: channel?.verified ?? false,
+    streamStatus: kick.getStreamStatus(),
+    viewerCount: kick.getViewerCount(),
+  });
+}
+
+async function fetchPlatformInfo(platform: string): Promise<Record<string, unknown>> {
+  if (platform === 'youtube') return fetchYoutubeInfo();
+  if (platform === 'twitch') return fetchTwitchInfo();
+  if (platform === 'kick') return fetchKickInfo();
+  return { error: `unsupported platform: ${platform}` };
+}
+
 async function main() {
   const renderer = await createCliRenderer({
     screenMode:
@@ -2383,6 +2506,7 @@ async function main() {
     prependInputHandlers: [
       (sequence: string): boolean => {
         if (!uiNodes) return false;
+        ensureMainInputFocus();
 
         // Raw mode swallows Ctrl+C — re-raise as SIGINT so one C-c exits cleanly
         if (sequence === '\x03') {
@@ -2496,7 +2620,7 @@ async function main() {
   uiNodes = initUI(renderer, lastMessages);
 
   // Focus input and wire ENTER + INPUT handlers once
-  uiNodes.inputEl.focus();
+  ensureMainInputFocus();
 
   uiNodes.inputEl.on(InputRenderableEvents.INPUT, () => {
     const val = uiNodes!.inputEl.value;
