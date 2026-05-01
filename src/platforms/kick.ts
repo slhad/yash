@@ -55,6 +55,11 @@ interface KickTokenFile extends OAuthToken {
   channelSlug: string;
 }
 
+interface KickEventSubscriptionRecord {
+  event?: unknown;
+  name?: unknown;
+}
+
 // ---------------------------------------------------------------------------
 // Required OAuth scopes
 // ---------------------------------------------------------------------------
@@ -65,6 +70,9 @@ const REQUIRED_SCOPES = [
   'chat:write',
   'events:subscribe',
 ];
+
+const KICK_EVENTS_SUBSCRIPTIONS_URL = 'https://api.kick.com/public/v1/events/subscriptions';
+const REQUIRED_WEBHOOK_EVENTS = [{ name: 'chat.message.sent', version: 1 }] as const;
 
 export class KickProvider implements PlatformProvider {
   // ---- config ----------------------------------------------------------------
@@ -99,9 +107,17 @@ export class KickProvider implements PlatformProvider {
   private webhookUrl: string | null = null;
 
   // ---- token file ------------------------------------------------------------
-  private static dataDir = process.env.YASH_DATA_DIR || path.join(process.env.HOME || '.', '.yash');
-  private static tokenFile = path.join(KickProvider.dataDir, 'kick_tokens.json');
-  private static pendingAuthFile = path.join(KickProvider.dataDir, 'kick_pending_auth.json');
+  private static getDataDir(): string {
+    return process.env.YASH_DATA_DIR || path.join(process.env.HOME || '.', '.yash');
+  }
+
+  private static getTokenFile(): string {
+    return path.join(KickProvider.getDataDir(), 'kick_tokens.json');
+  }
+
+  private static getPendingAuthFile(): string {
+    return path.join(KickProvider.getDataDir(), 'kick_pending_auth.json');
+  }
 
   // ---------------------------------------------------------------------------
   // Helpers
@@ -124,7 +140,7 @@ export class KickProvider implements PlatformProvider {
 
   private async readTokenFile(): Promise<KickTokenFile | null> {
     try {
-      const raw = await fs.readFile(KickProvider.tokenFile, 'utf8');
+      const raw = await fs.readFile(KickProvider.getTokenFile(), 'utf8');
       return JSON.parse(raw) as KickTokenFile;
     } catch {
       return null;
@@ -132,29 +148,29 @@ export class KickProvider implements PlatformProvider {
   }
 
   private async writeTokenFile(data: KickTokenFile): Promise<void> {
-    await fs.mkdir(KickProvider.dataDir, { recursive: true });
-    await fs.writeFile(KickProvider.tokenFile, JSON.stringify(data, null, 2));
+    await fs.mkdir(KickProvider.getDataDir(), { recursive: true });
+    await fs.writeFile(KickProvider.getTokenFile(), JSON.stringify(data, null, 2));
   }
 
   private async deleteTokenFile(): Promise<void> {
     try {
-      await fs.unlink(KickProvider.tokenFile);
+      await fs.unlink(KickProvider.getTokenFile());
     } catch {
       /* already gone */
     }
   }
 
   private async writePendingAuth(verifier: string, authUrl: string): Promise<void> {
-    await fs.mkdir(KickProvider.dataDir, { recursive: true });
+    await fs.mkdir(KickProvider.getDataDir(), { recursive: true });
     await fs.writeFile(
-      KickProvider.pendingAuthFile,
+      KickProvider.getPendingAuthFile(),
       JSON.stringify({ codeVerifier: verifier, authUrl, createdAt: Date.now() }),
     );
   }
 
   private async readPendingAuth(): Promise<{ codeVerifier: string; authUrl: string } | null> {
     try {
-      const raw = await fs.readFile(KickProvider.pendingAuthFile, 'utf8');
+      const raw = await fs.readFile(KickProvider.getPendingAuthFile(), 'utf8');
       const data = JSON.parse(raw) as { codeVerifier: string; authUrl: string; createdAt: number };
       // Reject old-format files (missing authUrl) or expired ones
       if (!data.authUrl || !data.codeVerifier) return null;
@@ -167,7 +183,7 @@ export class KickProvider implements PlatformProvider {
 
   private async deletePendingAuth(): Promise<void> {
     try {
-      await fs.unlink(KickProvider.pendingAuthFile);
+      await fs.unlink(KickProvider.getPendingAuthFile());
     } catch {
       /* already gone */
     }
@@ -572,12 +588,105 @@ export class KickProvider implements PlatformProvider {
     this._startPoll();
     defaultLogger.info('[Kick] stream status polling started (60s interval)');
     await this._startSmeeRelay();
+    await this._ensureEventSubscriptions();
+  }
+
+  private async _getAccessToken(): Promise<string | null> {
+    const inMemory = (this.client as any)?.token?.accessToken;
+    if (typeof inMemory === 'string' && inMemory.length > 0) {
+      return inMemory;
+    }
+    const saved = await this.readTokenFile();
+    return saved?.accessToken ?? null;
+  }
+
+  private async _fetchEventSubscriptions(): Promise<string[]> {
+    const accessToken = await this._getAccessToken();
+    if (!accessToken) {
+      defaultLogger.warn('[Kick] Cannot inspect event subscriptions: missing access token');
+      return [];
+    }
+
+    const resp = await fetch(KICK_EVENTS_SUBSCRIPTIONS_URL, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: 'application/json',
+      },
+    });
+
+    if (!resp.ok) {
+      const body = await resp.text().catch(() => '');
+      throw new Error(`Kick subscriptions GET failed (${resp.status}): ${body || resp.statusText}`);
+    }
+
+    const payload = (await resp.json().catch(() => ({}))) as { data?: KickEventSubscriptionRecord[] };
+    return Array.isArray(payload.data)
+      ? payload.data
+          .map((item) => {
+            if (typeof item.event === 'string') return item.event;
+            if (typeof item.name === 'string') return item.name;
+            return null;
+          })
+          .filter((value): value is string => Boolean(value))
+      : [];
+  }
+
+  async getEventSubscriptions(): Promise<string[]> {
+    if (!this.isAuthenticated()) {
+      return [];
+    }
+    return this._fetchEventSubscriptions();
+  }
+
+  private async _createEventSubscription(name: string, version = 1): Promise<void> {
+    const accessToken = await this._getAccessToken();
+    if (!accessToken) {
+      throw new Error('missing access token');
+    }
+
+    const resp = await fetch(KICK_EVENTS_SUBSCRIPTIONS_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        broadcaster_user_id: this.broadcasterId,
+        events: [{ name, version }],
+        method: 'webhook',
+      }),
+    });
+
+    if (!resp.ok) {
+      const body = await resp.text().catch(() => '');
+      throw new Error(`Kick subscriptions POST failed (${resp.status}): ${body || resp.statusText}`);
+    }
+  }
+
+  private async _ensureEventSubscriptions(): Promise<void> {
+    try {
+      const existing = new Set(await this._fetchEventSubscriptions());
+      const missing = REQUIRED_WEBHOOK_EVENTS.filter((event) => !existing.has(event.name));
+
+      if (missing.length === 0) {
+        defaultLogger.info('[Kick] Event subscription already active for chat.message.sent');
+        return;
+      }
+
+      for (const event of missing) {
+        await this._createEventSubscription(event.name, event.version);
+        defaultLogger.info(`[Kick] Created event subscription: ${event.name}@v${event.version}`);
+      }
+    } catch (err) {
+      defaultLogger.warn('[Kick] Failed to ensure event subscriptions (non-fatal):', err);
+    }
   }
 
   private async _startSmeeRelay(): Promise<void> {
     try {
       if (!this.smeeRelay) {
-        this.smeeRelay = new SmeeRelay(KickProvider.dataDir);
+        this.smeeRelay = new SmeeRelay(KickProvider.getDataDir());
       }
       const url = await this.smeeRelay.getOrCreateChannelUrl();
       this.webhookUrl = url;
@@ -687,7 +796,10 @@ export class KickProvider implements PlatformProvider {
   // Events other than chat.message.sent are silently ignored.
   // ---------------------------------------------------------------------------
   handleWebhookEvent(payload: unknown): void {
-    if (!payload || typeof payload !== 'object') return;
+    if (!payload || typeof payload !== 'object') {
+      defaultLogger.warn('[Kick] Ignoring webhook payload: not an object');
+      return;
+    }
 
     const p = payload as Record<string, unknown>;
 
@@ -701,10 +813,18 @@ export class KickProvider implements PlatformProvider {
       p['Kick-Event-Type'] ?? p['kick-event-type'] ?? p['x-kick-event-type'] ?? body['event'] ?? '',
     );
 
-    if (eventType !== 'chat.message.sent') return;
+    if (eventType !== 'chat.message.sent') {
+      if (eventType) {
+        defaultLogger.info(`[Kick] Ignoring webhook event type: ${eventType}`);
+      }
+      return;
+    }
 
     const sender = body['sender'];
-    if (!sender || typeof sender !== 'object') return;
+    if (!sender || typeof sender !== 'object') {
+      defaultLogger.warn('[Kick] Ignoring chat.message.sent webhook: missing sender object');
+      return;
+    }
     const s = sender as Record<string, unknown>;
 
     this._dispatch({

@@ -31,6 +31,10 @@ import { getConfig, isDemoMode, saveConfig } from './utils/config';
 import logCollector from './utils/logCollector';
 import { defaultLogger } from './utils/logger';
 import SettingsStore from './utils/settings';
+import {
+  getMessageTargetPrefix,
+  type MessageTarget,
+} from './utils/tuiMessageInput';
 import { getAutocomplete } from './utils/tuiCommands';
 import { parseMarkerArgs, parseSettingsValue } from './utils/webCommands';
 import './index.ts'; // start Bun.serve web server in the same process
@@ -65,6 +69,16 @@ function formatElapsed(start: Date): string {
   return h > 0 ? `${h}h${m}m${s}s` : `${m}m${s}s`;
 }
 
+function formatPlatformStatusLabel(
+  status: { authenticated: boolean; streamStatus: string },
+  viewers: string,
+): string {
+  if (!status.authenticated) {
+    return `LOGGED OUT${viewers}`;
+  }
+  return `${status.streamStatus}${viewers}`;
+}
+
 function clearScrollBox(scroll: ScrollBoxRenderable): void {
   for (const child of scroll.getChildren()) {
     scroll.remove(child.id);
@@ -86,11 +100,13 @@ interface UINodes {
   chatScroll: ScrollBoxRenderable;
   sidebarBox: BoxRenderable;
   sidebarScroll: ScrollBoxRenderable;
+  composeTargetText: TextRenderable;
   inputEl: InputRenderable;
   autocompleteHint: TextRenderable;
 }
 
 let uiNodes: UINodes | null = null;
+let selectedMessageTarget: MessageTarget = 'all';
 
 interface TwitchSetupModal {
   box: BoxRenderable;
@@ -113,6 +129,57 @@ function ensureMainInputFocus(): void {
   if (!uiNodes.inputEl.focused) {
     uiNodes.inputEl.focus();
   }
+}
+
+function getConnectedMessageTargets(): MessageTarget[] {
+  const targets: MessageTarget[] = ['all'];
+  if (youtube.isAuthenticated()) targets.push('youtube');
+  if (twitch.isAuthenticated()) targets.push('twitch');
+  if (kick.isAuthenticated()) targets.push('kick');
+  return targets;
+}
+
+function cycleMessageTarget(): void {
+  const targets = getConnectedMessageTargets();
+  const currentIndex = targets.indexOf(selectedMessageTarget);
+  if (currentIndex === -1 || currentIndex === targets.length - 1) {
+    selectedMessageTarget = targets[0] ?? 'all';
+    return;
+  }
+  selectedMessageTarget = targets[currentIndex + 1] ?? 'all';
+}
+
+function getMessageTargetColor(target: MessageTarget): string {
+  if (target === 'all') return 'cyan';
+  return platformColor(target);
+}
+
+function updateInputAssist(): void {
+  if (!uiNodes) return;
+  const val = uiNodes.inputEl.value;
+  const hint = uiNodes.autocompleteHint;
+  const composeTargetText = uiNodes.composeTargetText;
+
+  if (val.startsWith('/') && val.length > 0) {
+    uiNodes.inputEl.fg = 'white';
+    uiNodes.inputEl.placeholder = '> type a command…';
+    composeTargetText.visible = false;
+    const { hints } = getAutocomplete(val);
+    if (hints.length > 0) {
+      hint.content = `  ${hints.join('  ')}`;
+      hint.visible = true;
+    } else {
+      hint.visible = false;
+    }
+    return;
+  }
+
+  hint.visible = false;
+  composeTargetText.content = `${selectedMessageTarget} > `;
+  composeTargetText.fg = getMessageTargetColor(selectedMessageTarget);
+  composeTargetText.visible = true;
+  uiNodes.inputEl.placeholder = 'type a message…';
+  uiNodes.inputEl.fg = 'white';
 }
 
 // ─── initUI ─────────────────────────────────────────────────────────────────
@@ -193,7 +260,7 @@ function initUI(renderer: CliRenderer, messages: string[]): UINodes {
           : ` (${viewerCount})`
         : '';
     const t = new TextRenderable(renderer, {
-      content: `${platform}: ${status.streamStatus}${viewers}  `,
+      content: `${platform}: ${formatPlatformStatusLabel(status, viewers)}  `,
       fg: status.authenticated ? 'green' : 'red',
     });
     platformTexts.set(platform, t);
@@ -274,17 +341,29 @@ function initUI(renderer: CliRenderer, messages: string[]): UINodes {
   const inputEl =
     uiNodes?.inputEl ??
     new InputRenderable(renderer, {
-      placeholder: '> type a command or message…',
-      width: '100%',
+      placeholder: 'type a message…',
+      width: '90%',
     });
+  inputEl.fg = 'white';
 
   const inputBox = new BoxRenderable(renderer, {
     borderStyle: 'rounded',
     border: ['left', 'right', 'bottom'],
     padding: 1,
     width: '100%',
+    flexDirection: 'column',
+    gap: 1,
   });
-  inputBox.add(inputEl);
+  const inputRow = new BoxRenderable(renderer, { flexDirection: 'row', width: '100%' });
+  const composeTargetText =
+    uiNodes?.composeTargetText ??
+    new TextRenderable(renderer, {
+      content: `${selectedMessageTarget} > `,
+      fg: getMessageTargetColor(selectedMessageTarget),
+    });
+  inputRow.add(composeTargetText);
+  inputRow.add(inputEl);
+  inputBox.add(inputRow);
 
   // Autocomplete hint — hidden until user types a '/'
   // Re-use singleton so it survives initUI rebuilds
@@ -319,6 +398,7 @@ function initUI(renderer: CliRenderer, messages: string[]): UINodes {
     chatScroll,
     sidebarBox,
     sidebarScroll,
+    composeTargetText,
     inputEl,
     autocompleteHint,
   };
@@ -416,7 +496,7 @@ function updateUI(messages: string[]): void {
             ? ` (${elapsed}/${viewerCount})`
             : ` (${viewerCount})`
           : '';
-      node.content = `${platform}: ${status.streamStatus}${viewers}  `;
+      node.content = `${platform}: ${formatPlatformStatusLabel(status, viewers)}  `;
       node.fg = status.authenticated ? 'green' : 'red';
     }
   }
@@ -2097,9 +2177,10 @@ function openStreamModal(preselected: string[]): void {
 
 async function handleCommand(trimmed: string): Promise<void> {
   if (!trimmed.startsWith('/')) {
+    const targetPlatforms = selectedMessageTarget === 'all' ? [] : [selectedMessageTarget];
     try {
-      await chatService.sendMessage(trimmed, []);
-      lastMessages.push(`[you] ${trimmed}`);
+      await chatService.sendMessage(trimmed, targetPlatforms);
+      lastMessages.push(transformOutgoingMessage(selectedMessageTarget, trimmed));
     } catch (err) {
       lastMessages.push(`[system] Failed to send message: ${String(err)}`);
     }
@@ -2174,7 +2255,7 @@ async function handleCommand(trimmed: string): Promise<void> {
       const targetPlatforms = target === 'all' ? [] : [target];
       try {
         await chatService.sendMessage(text, targetPlatforms);
-        lastMessages.push(`[you → ${target}] ${text}`);
+        lastMessages.push(transformOutgoingMessage(target as MessageTarget, text));
       } catch (err) {
         lastMessages.push(`[system] Failed to send message: ${String(err)}`);
       }
@@ -2377,6 +2458,16 @@ function transformMessage(msg: {
   };
 }
 
+function transformOutgoingMessage(target: MessageTarget, message: string): ChatLine {
+  return {
+    parts: [
+      { content: '[you → ', fg: 'white' },
+      { content: `${target}`, fg: getMessageTargetColor(target) },
+      { content: `] ${message}`, fg: 'white' },
+    ],
+  };
+}
+
 function renderChatLine(renderer: CliRenderer, msg: ChatLine): TextRenderable | BoxRenderable {
   if (typeof msg === 'string') {
     return new TextRenderable(renderer, { content: msg, fg: 'white' });
@@ -2473,7 +2564,10 @@ async function fetchKickInfo(): Promise<Record<string, unknown>> {
   const provider = kick as any;
   if (!provider.client || !provider.channelSlug) return { error: 'api client not ready' };
 
-  const channel = await provider.client.channels.getChannel(provider.channelSlug);
+  const [channel, eventSubscriptions] = await Promise.all([
+    provider.client.channels.getChannel(provider.channelSlug),
+    provider.getEventSubscriptions?.().catch?.(() => []),
+  ]);
   return compactObject({
     title: channel?.stream_title ?? channel?.user?.username,
     slug: channel?.slug,
@@ -2482,6 +2576,7 @@ async function fetchKickInfo(): Promise<Record<string, unknown>> {
     tags: channel?.recent_categories?.map?.((c: any) => c?.name).filter(Boolean),
     followers: channel?.followers_count ?? 0,
     verified: channel?.verified ?? false,
+    eventSubscriptions,
     streamStatus: kick.getStreamStatus(),
     viewerCount: kick.getViewerCount(),
   });
@@ -2516,6 +2611,11 @@ async function main() {
 
         if (sequence === '\t') {
           const val = uiNodes.inputEl.value;
+          if (!val.startsWith('/')) {
+            cycleMessageTarget();
+            updateInputAssist();
+            return true;
+          }
           const { completion, hints } = getAutocomplete(val);
           if (completion) {
             uiNodes.inputEl.value = completion;
@@ -2534,8 +2634,9 @@ async function main() {
           if (inputHistory.length === 0) return true;
           if (historyIndex === -1) historyIndex = inputHistory.length - 1;
           else if (historyIndex > 0) historyIndex--;
-          uiNodes.inputEl.value = inputHistory[historyIndex];
-          uiNodes.autocompleteHint.visible = false;
+          const entry = inputHistory[historyIndex] ?? '';
+          uiNodes.inputEl.value = entry;
+          updateInputAssist();
           return true;
         }
 
@@ -2547,9 +2648,10 @@ async function main() {
             historyIndex = -1;
             uiNodes.inputEl.value = '';
           } else {
-            uiNodes.inputEl.value = inputHistory[historyIndex];
+            const entry = inputHistory[historyIndex] ?? '';
+            uiNodes.inputEl.value = entry;
           }
-          uiNodes.autocompleteHint.visible = false;
+          updateInputAssist();
           return true;
         }
 
@@ -2623,25 +2725,12 @@ async function main() {
   ensureMainInputFocus();
 
   uiNodes.inputEl.on(InputRenderableEvents.INPUT, () => {
-    const val = uiNodes!.inputEl.value;
-    const hint = uiNodes!.autocompleteHint;
-
-    // Live hint while typing a command
-    if (val.startsWith('/') && val.length > 0) {
-      const { hints } = getAutocomplete(val);
-      if (hints.length > 0) {
-        hint.content = `  ${hints.join('  ')}`;
-        hint.visible = true;
-      } else {
-        hint.visible = false;
-      }
-    } else {
-      hint.visible = false;
-    }
+    updateInputAssist();
   });
 
   uiNodes.inputEl.on(InputRenderableEvents.ENTER, async () => {
-    let trimmed = uiNodes!.inputEl.value.trim();
+    const rawValue = uiNodes!.inputEl.value;
+    let trimmed = rawValue.trim();
     if (trimmed.startsWith('/')) {
       const { completion, hints } = getAutocomplete(trimmed);
       if (hints.length === 1 && completion) trimmed = completion;
@@ -2652,8 +2741,12 @@ async function main() {
     inputHistory.push(trimmed);
     historyIndex = -1;
     await handleCommand(trimmed);
+    selectedMessageTarget = 'all';
+    updateInputAssist();
     updateUI(lastMessages);
   });
+
+  updateInputAssist();
 
   // Periodic refresh — in-place mutations only, no flicker
   const updateLoop = setInterval(async () => {

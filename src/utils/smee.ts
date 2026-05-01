@@ -58,6 +58,7 @@ export class SmeeRelay {
       defaultLogger.warn('[SmeeRelay] start() called before getOrCreateChannelUrl()');
       return;
     }
+    defaultLogger.info(`[SmeeRelay] Starting listener for ${this.channelUrl}`);
     this._connect(onEvent);
   }
 
@@ -77,6 +78,7 @@ export class SmeeRelay {
         headers: { Accept: 'text/event-stream' },
         signal,
       });
+      defaultLogger.info(`[SmeeRelay] Connected to ${url}`);
       if (!res.body) return;
 
       const reader = res.body.getReader();
@@ -94,7 +96,8 @@ export class SmeeRelay {
           const data = line.slice(6).trim();
           if (!data || data === 'ping') continue;
           try {
-            onEvent(JSON.parse(data));
+            const parsed = JSON.parse(data);
+            onEvent(parsed);
           } catch {
             defaultLogger.warn('[SmeeRelay] Failed to parse SSE event data');
           }
