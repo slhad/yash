@@ -15,7 +15,16 @@ import { getAutocomplete, TUI_COMMANDS } from '../src/utils/tuiCommands';
 
 describe('TUI_COMMANDS', () => {
   test('contains all expected commands', () => {
-    const expected = ['/connect', '/exit', '/help', '/info', '/logs', '/marker', '/msg', '/settings'];
+    const expected = [
+      '/connect',
+      '/exit',
+      '/help',
+      '/info',
+      '/logs',
+      '/marker',
+      '/msg',
+      '/settings',
+    ];
     for (const cmd of expected) {
       expect(TUI_COMMANDS).toContain(cmd as (typeof TUI_COMMANDS)[number]);
     }

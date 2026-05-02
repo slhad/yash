@@ -619,7 +619,9 @@ export class KickProvider implements PlatformProvider {
       throw new Error(`Kick subscriptions GET failed (${resp.status}): ${body || resp.statusText}`);
     }
 
-    const payload = (await resp.json().catch(() => ({}))) as { data?: KickEventSubscriptionRecord[] };
+    const payload = (await resp.json().catch(() => ({}))) as {
+      data?: KickEventSubscriptionRecord[];
+    };
     return Array.isArray(payload.data)
       ? payload.data
           .map((item) => {
@@ -660,7 +662,9 @@ export class KickProvider implements PlatformProvider {
 
     if (!resp.ok) {
       const body = await resp.text().catch(() => '');
-      throw new Error(`Kick subscriptions POST failed (${resp.status}): ${body || resp.statusText}`);
+      throw new Error(
+        `Kick subscriptions POST failed (${resp.status}): ${body || resp.statusText}`,
+      );
     }
   }
 

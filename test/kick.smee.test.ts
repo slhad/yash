@@ -11,8 +11,8 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, mock, tes
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { KickProvider } from '../src/platforms/kick';
-import { makeRepoTempDir, removeRepoTempDir } from './helpers/testDataDir';
 import { SmeeRelay } from '../src/utils/smee';
+import { makeRepoTempDir, removeRepoTempDir } from './helpers/testDataDir';
 
 const originalYashDataDir = process.env.YASH_DATA_DIR;
 let testDataDir: string;
