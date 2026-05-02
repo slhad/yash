@@ -326,33 +326,6 @@ body.yash-unified #status-bar .offline {
   color: #556;
 }
 
-body.yash-unified #kick-webhook-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-body.yash-unified #kick-webhook-row.is-hidden {
-  display: none;
-}
-
-body.yash-unified #kick-webhook-row code {
-  background: #1e1e3a;
-  border: 1px solid #3a3a6a;
-  border-radius: 3px;
-  padding: 1px 6px;
-  font-size: 11px;
-  color: #c0d0ff;
-  user-select: all;
-}
-
-body.yash-unified #kick-webhook-copy {
-  padding: 1px 7px;
-  border-radius: 3px;
-  font-size: 11px;
-}
-
 .yash-status-separator {
   color: #334;
 }

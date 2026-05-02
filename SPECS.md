@@ -55,7 +55,6 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
     * Route /unified to show unified view of all chats
         * Message box supports all applicable / commands: `/help`, `/msg`, `/marker`, `/connect`, `/settings`
         * Status bar shows per-platform elapsed time + viewer counts
-        * Kick webhook URL displayed with copy button (fetched from `/api/kick/webhook`)
     * Route /sidebyside to show view of chats side by side with config options to enable any platform (saved in browser)
         * Message box supports all applicable / commands: `/help`, `/msg`, `/marker`, `/connect`, `/settings`
     * All chats view must have a message box to send messages like TUI, display top/bottom/hide (saved in browser individually)

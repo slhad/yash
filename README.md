@@ -183,7 +183,7 @@ Kick Webhook Relay
 ------------------
 When the Kick platform provider calls `setupWebhooks()`, the app starts a smee.io relay channel and logs the public relay URL to the console. Register that URL in your Kick developer app settings (under "Webhook URL") so Kick can deliver real-time chat events to your local instance.
 
-The relay URL is also available at runtime via `GET /api/kick/webhook` (returns `{ url: string | null }`), and the `unified` web view displays it with a copy button for convenience.
+The relay URL is also available at runtime via `GET /api/kick/webhook` (returns `{ url: string | null }`).
 
 Metrics & Prometheus
 --------------------

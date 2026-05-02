@@ -14,10 +14,6 @@
 
   <div id="status-bar">
     <span id="status-platforms">loading…</span>
-    <span id="kick-webhook-row" class="is-hidden">
-      Kick webhook: <code id="kick-webhook-url"></code>
-      <button id="kick-webhook-copy" title="Copy webhook URL">copy</button>
-    </span>
   </div>
 
   <div id="messages"></div>
@@ -147,10 +143,6 @@
                                                                                             setInterval(fetchHistory, 2000);
 
                                                                                             const statusPlatformsEl = document.getElementById('status-platforms');
-                                                                                            const kickWebhookRow = document.getElementById('kick-webhook-row');
-                                                                                            const kickWebhookUrlEl = document.getElementById('kick-webhook-url');
-                                                                                            const kickWebhookCopyBtn = document.getElementById('kick-webhook-copy');
-
                                                                                             async function fetchStatus() {
                                                                                               try {
                                                                                                 const res = await fetch('/api/status');
@@ -175,25 +167,7 @@
                                                                                               } catch (_) {}
                                                                                             }
 
-                                                                                            async function fetchKickWebhook() {
-                                                                                              try {
-                                                                                                const res = await fetch('/api/kick/webhook');
-                                                                                                if (!res.ok) return;
-                                                                                                const { url } = await res.json();
-                                                                                                if (url) {
-                                                                                                  kickWebhookUrlEl.textContent = url;
-                                                                                                  kickWebhookRow.classList.remove('is-hidden');
-                                                                                                }
-                                                                                              } catch (_) {}
-                                                                                            }
-
-                                                                                            kickWebhookCopyBtn.addEventListener('click', () => {
-                                                                                              const url = kickWebhookUrlEl.textContent;
-                                                                                              if (url) navigator.clipboard.writeText(url).catch(() => {});
-                                                                                            });
-
                                                                                             fetchStatus();
-                                                                                            fetchKickWebhook();
                                                                                             setInterval(fetchStatus, 3000);
 
                                                                                             // Append a system feedback line to the message feed (UI-only, stays local)

@@ -585,9 +585,7 @@ export class YouTubeProvider implements PlatformProvider {
       items = items.filter((b) => b.contentDetails?.boundStreamId === streamId);
     }
 
-    const live = items.find((b) => b.status.lifeCycleStatus === 'live');
-    const ready = items.find((b) => b.status.lifeCycleStatus === 'ready');
-    const broadcast = live ?? ready ?? null;
+    const broadcast = items.find((b) => this._isActiveBroadcast(b)) ?? null;
 
     if (broadcast) {
       return { id: broadcast.id, liveChatId: broadcast.snippet.liveChatId ?? null };

@@ -736,6 +736,44 @@ describe('YouTubeProvider — updateStreamMetadata target selection', () => {
   });
 });
 
+describe('YouTubeProvider — active broadcast detection', () => {
+  test('does not treat a ready broadcast as online', async () => {
+    const p = makeProvider() as any;
+    p.isAuthenticatedFlag = true;
+    p.tokenData = {
+      accessToken: 'token',
+      refreshToken: 'refresh',
+      expiresIn: 3600,
+      obtainmentTimestamp: Date.now(),
+      channelId: 'chan',
+      channelTitle: 'title',
+    };
+    p.streamKey = 'saved_stream_key';
+    p._findStreamIdByKey = async () => 'stream-saved';
+    p._request = async (url: string) => {
+      if (url.includes('/liveBroadcasts?part=id,snippet,status,contentDetails&mine=true')) {
+        return new Response(
+          JSON.stringify({
+            items: [
+              {
+                id: 'saved-ready-broadcast',
+                snippet: { liveChatId: 'chat-ready' },
+                status: { lifeCycleStatus: 'ready' },
+                contentDetails: { boundStreamId: 'stream-saved' },
+              },
+            ],
+          }),
+        );
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    };
+
+    const activeBroadcast = await p._findActiveBroadcast();
+
+    expect(activeBroadcast).toBeNull();
+  });
+});
+
 describe('YouTubeProvider — playlists', () => {
   test('createPlaylist requests snippet and status parts', async () => {
     const p = makeProvider() as any;

@@ -31,6 +31,7 @@ import { getConfig, isDemoMode, saveConfig } from './utils/config';
 import logCollector from './utils/logCollector';
 import { defaultLogger } from './utils/logger';
 import SettingsStore from './utils/settings';
+import { buildTargetedStreamMetadataUpdate } from './utils/streamMetadata';
 import { getAutocomplete } from './utils/tuiCommands';
 import { type MessageTarget } from './utils/tuiMessageInput';
 import { parseMarkerArgs, parseSettingsValue } from './utils/webCommands';
@@ -1969,12 +1970,11 @@ function openStreamModal(preselected: string[]): void {
         : undefined,
     };
 
-    const changed: Record<string, any> = {};
-    for (const key of Object.keys(newMeta)) {
-      if (JSON.stringify(newMeta[key]) !== JSON.stringify(savedStream[key])) {
-        changed[key] = newMeta[key];
-      }
-    }
+    const { changed, merged } = buildTargetedStreamMetadataUpdate(
+      savedStream,
+      selectedPlatforms,
+      newMeta,
+    );
 
     if (Object.keys(changed).length === 0) {
       lastMessages.push('[stream] No changes.');
@@ -1985,7 +1985,6 @@ function openStreamModal(preselected: string[]): void {
     lastMessages.push(`[stream] Updating on: ${targetPlatforms.join(', ')}…`);
     updateUI(lastMessages);
     try {
-      const merged = { ...savedStream, ...changed };
       await saveConfig({ stream: merged });
       let platformResults: {
         platform: string;
