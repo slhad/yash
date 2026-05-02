@@ -6,26 +6,22 @@
  * are absent from the config (which is the case in CI).
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import * as fs from 'node:fs/promises';
-import * as os from 'node:os';
-import * as path from 'node:path';
 import { StreamStatus } from '../src/platforms/base';
 import { TwitchProvider } from '../src/platforms/twitch';
+import { makeRepoTempDir, removeRepoTempDir } from './helpers/testDataDir';
 
 const originalYashDataDir = process.env.YASH_DATA_DIR;
 let testDataDir: string;
 
 beforeAll(async () => {
-  testDataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'yash-twitch-provider-'));
+  testDataDir = await makeRepoTempDir('yash-twitch-provider');
   process.env.YASH_DATA_DIR = testDataDir;
 });
 
 afterAll(async () => {
   if (originalYashDataDir === undefined) delete process.env.YASH_DATA_DIR;
   else process.env.YASH_DATA_DIR = originalYashDataDir;
-  if (testDataDir) {
-    await fs.rm(testDataDir, { recursive: true, force: true });
-  }
+  await removeRepoTempDir(testDataDir);
 });
 
 // ---------------------------------------------------------------------------

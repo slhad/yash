@@ -1,13 +1,11 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { StreamStatus } from '../src/platforms/base';
 import { YouTubeProvider } from '../src/platforms/youtube';
+import { makeRepoTempDirSync, removeRepoTempDirSync } from './helpers/testDataDir';
 
 const originalNodeEnv = process.env.NODE_ENV;
 const originalYashDataDir = process.env.YASH_DATA_DIR;
-const testDataDir = mkdtempSync(join(tmpdir(), 'yash-youtube-test-'));
+const testDataDir = makeRepoTempDirSync('yash-youtube-test');
 
 beforeAll(() => {
   process.env.YASH_DATA_DIR = testDataDir;
@@ -20,7 +18,7 @@ afterAll(() => {
   if (originalYashDataDir === undefined) delete process.env.YASH_DATA_DIR;
   else process.env.YASH_DATA_DIR = originalYashDataDir;
 
-  rmSync(testDataDir, { recursive: true, force: true });
+  removeRepoTempDirSync(testDataDir);
 });
 
 function makeProvider() {

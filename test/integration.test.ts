@@ -1,13 +1,12 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
 import * as fs from 'node:fs/promises';
-import * as os from 'node:os';
-import * as path from 'node:path';
 import { KickProvider } from '../src/platforms/kick';
 import { TwitchProvider } from '../src/platforms/twitch';
 import { YouTubeProvider } from '../src/platforms/youtube';
 import { ChatService } from '../src/services/chat.service';
 import { ObsService } from '../src/services/obs.service';
 import { StreamService } from '../src/services/stream.service';
+import { makeRepoTempDir, removeRepoTempDir } from './helpers/testDataDir';
 
 let chatService: ChatService;
 let streamService: StreamService;
@@ -20,7 +19,7 @@ let testDataDir: string;
 
 describe('Integration: Services and Providers', () => {
   beforeAll(async () => {
-    testDataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'yash-integration-'));
+    testDataDir = await makeRepoTempDir('yash-integration');
     process.env.YASH_DATA_DIR = testDataDir;
     youtube = new YouTubeProvider();
     twitch = new TwitchProvider();
@@ -37,9 +36,7 @@ describe('Integration: Services and Providers', () => {
   afterAll(async () => {
     if (originalYashDataDir === undefined) delete process.env.YASH_DATA_DIR;
     else process.env.YASH_DATA_DIR = originalYashDataDir;
-    if (testDataDir) {
-      await fs.rm(testDataDir, { recursive: true, force: true });
-    }
+    await removeRepoTempDir(testDataDir);
   });
 
   test('should register providers with chat service', () => {

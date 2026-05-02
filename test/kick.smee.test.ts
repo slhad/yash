@@ -9,25 +9,23 @@
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, mock, test } from 'bun:test';
 import * as fs from 'node:fs/promises';
-import * as os from 'node:os';
 import * as path from 'node:path';
 import { KickProvider } from '../src/platforms/kick';
+import { makeRepoTempDir, removeRepoTempDir } from './helpers/testDataDir';
 import { SmeeRelay } from '../src/utils/smee';
 
 const originalYashDataDir = process.env.YASH_DATA_DIR;
 let testDataDir: string;
 
 beforeAll(async () => {
-  testDataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'yash-kick-smee-provider-'));
+  testDataDir = await makeRepoTempDir('yash-kick-smee-provider');
   process.env.YASH_DATA_DIR = testDataDir;
 });
 
 afterAll(async () => {
   if (originalYashDataDir === undefined) delete process.env.YASH_DATA_DIR;
   else process.env.YASH_DATA_DIR = originalYashDataDir;
-  if (testDataDir) {
-    await fs.rm(testDataDir, { recursive: true, force: true });
-  }
+  await removeRepoTempDir(testDataDir);
 });
 
 // ---------------------------------------------------------------------------
@@ -37,11 +35,11 @@ describe('SmeeRelay — getOrCreateChannelUrl', () => {
   let tmpDir: string;
 
   beforeEach(async () => {
-    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'yash-smee-test-'));
+    tmpDir = await makeRepoTempDir('yash-smee-test');
   });
 
   afterEach(async () => {
-    await fs.rm(tmpDir, { recursive: true, force: true });
+    await removeRepoTempDir(tmpDir);
   });
 
   test('fetches a new URL from smee.io and persists it when no file exists', async () => {
@@ -151,7 +149,7 @@ describe('SmeeRelay — getChannelUrl / stop', () => {
   });
 
   test('getChannelUrl reflects URL after getOrCreateChannelUrl', async () => {
-    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'yash-smee-gc-'));
+    const tmpDir = await makeRepoTempDir('yash-smee-gc');
     const expectedUrl = 'https://smee.io/geturl';
     const origFetch = global.fetch;
     global.fetch = mock(async () => ({ url: expectedUrl })) as any;
@@ -161,7 +159,7 @@ describe('SmeeRelay — getChannelUrl / stop', () => {
       expect(relay.getChannelUrl()).toBe(expectedUrl);
     } finally {
       global.fetch = origFetch;
-      await fs.rm(tmpDir, { recursive: true, force: true });
+      await removeRepoTempDir(tmpDir);
     }
   });
 
@@ -176,7 +174,7 @@ describe('SmeeRelay — getChannelUrl / stop', () => {
 // ---------------------------------------------------------------------------
 describe('SmeeRelay — SSE parsing', () => {
   test('parses a data line and calls onEvent with parsed JSON', async () => {
-    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'yash-smee-sse-'));
+    const tmpDir = await makeRepoTempDir('yash-smee-sse');
     const channelUrl = 'https://smee.io/ssetest';
 
     // Simulate SSE stream: one ping (ignored) then one data event then EOF
@@ -233,7 +231,7 @@ describe('SmeeRelay — SSE parsing', () => {
       expect(evt.body.content).toBe('hi');
     } finally {
       global.fetch = origFetch;
-      await fs.rm(tmpDir, { recursive: true, force: true });
+      await removeRepoTempDir(tmpDir);
     }
   });
 });

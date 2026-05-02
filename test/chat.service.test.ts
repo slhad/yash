@@ -1,8 +1,22 @@
-import { beforeEach, describe, expect, test } from 'bun:test';
+import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
 import type { ChatMessage } from '../src/platforms/base';
 import { KickProvider } from '../src/platforms/kick';
 import { TwitchProvider } from '../src/platforms/twitch';
 import { ChatService } from '../src/services/chat.service';
+import { makeRepoTempDirSync, removeRepoTempDirSync } from './helpers/testDataDir';
+
+const originalYashDataDir = process.env.YASH_DATA_DIR;
+const testDataDir = makeRepoTempDirSync('yash-chat-service');
+
+beforeAll(() => {
+  process.env.YASH_DATA_DIR = testDataDir;
+});
+
+afterAll(() => {
+  if (originalYashDataDir === undefined) delete process.env.YASH_DATA_DIR;
+  else process.env.YASH_DATA_DIR = originalYashDataDir;
+  removeRepoTempDirSync(testDataDir);
+});
 
 describe('ChatService', () => {
   let chatService: ChatService;

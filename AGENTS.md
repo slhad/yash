@@ -51,6 +51,11 @@ Default to using Bun instead of Node.js.
 
 Use `bun test` to run tests.
 
+- Any test that can read, write, clear, or mutate persisted runtime state must isolate itself under repository-local `tmp/tests/...`.
+- Tests must never read from or write to the real user data directory such as `~/.yash`, even indirectly through default provider/service paths.
+- When a test exercises code that uses persisted auth, tokens, webhook cache, logs, or other filesystem-backed state, it must override `YASH_DATA_DIR` to a dedicated temp directory under `[tmp]` and clean it up after the test or suite finishes.
+- Prefer shared helpers for test temp directories instead of ad hoc paths so this behavior stays consistent across the suite.
+
 ```ts#index.test.ts
 import { test, expect } from "bun:test";
 

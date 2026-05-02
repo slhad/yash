@@ -1,8 +1,22 @@
 // Basic test for platform providers
-import { describe, expect, test } from 'bun:test';
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { KickProvider } from '../src/platforms/kick';
 import { TwitchProvider } from '../src/platforms/twitch';
 import { YouTubeProvider } from '../src/platforms/youtube';
+import { makeRepoTempDirSync, removeRepoTempDirSync } from './helpers/testDataDir';
+
+const originalYashDataDir = process.env.YASH_DATA_DIR;
+const testDataDir = makeRepoTempDirSync('yash-platforms');
+
+beforeAll(() => {
+  process.env.YASH_DATA_DIR = testDataDir;
+});
+
+afterAll(() => {
+  if (originalYashDataDir === undefined) delete process.env.YASH_DATA_DIR;
+  else process.env.YASH_DATA_DIR = originalYashDataDir;
+  removeRepoTempDirSync(testDataDir);
+});
 
 describe('Platform Providers', () => {
   test('YouTubeProvider should be instantiable', () => {

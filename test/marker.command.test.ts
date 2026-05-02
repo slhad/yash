@@ -5,10 +5,24 @@
  *  - Kick createMarker returns null gracefully
  *  - PlatformProvider interface satisfied by all three providers
  */
-import { describe, expect, test } from 'bun:test';
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { KickProvider } from '../src/platforms/kick';
 import { TwitchProvider } from '../src/platforms/twitch';
 import { YouTubeProvider } from '../src/platforms/youtube';
+import { makeRepoTempDirSync, removeRepoTempDirSync } from './helpers/testDataDir';
+
+const originalYashDataDir = process.env.YASH_DATA_DIR;
+const markerTestDataDir = makeRepoTempDirSync('yash-marker-command');
+
+beforeAll(() => {
+  process.env.YASH_DATA_DIR = markerTestDataDir;
+});
+
+afterAll(() => {
+  if (originalYashDataDir === undefined) delete process.env.YASH_DATA_DIR;
+  else process.env.YASH_DATA_DIR = originalYashDataDir;
+  removeRepoTempDirSync(markerTestDataDir);
+});
 
 // ─── YouTube chapter store ────────────────────────────────────────────────────
 
