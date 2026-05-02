@@ -40,7 +40,7 @@ export async function loadConfig(): Promise<any> {
 }
 
 export async function reloadConfig(): Promise<any> {
-  const fs = await import('fs/promises');
+  const fs = await import('node:fs/promises');
   try {
     const raw = await fs.readFile(`${process.cwd()}/config.json`, 'utf8');
     const cfg = JSON.parse(raw);
@@ -105,7 +105,7 @@ function applyEnvOverrides(cfg: any): any {
 }
 
 export async function saveConfig(patch: any): Promise<void> {
-  const fs = await import('fs/promises');
+  const fs = await import('node:fs/promises');
   const configPath = `${process.cwd()}/config.json`;
   let current: any = {};
   try {
@@ -115,7 +115,7 @@ export async function saveConfig(patch: any): Promise<void> {
     // file missing or unparseable — start fresh
   }
   const merged = deepMerge(current, patch);
-  await fs.writeFile(configPath, JSON.stringify(merged, null, 2) + '\n', 'utf8');
+  await fs.writeFile(configPath, `${JSON.stringify(merged, null, 2)}\n`, 'utf8');
   // Bust require cache so next getConfig() reads the new file
   try {
     const req = require;

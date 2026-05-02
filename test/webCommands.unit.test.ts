@@ -16,7 +16,7 @@
  *     • error handling (failed fetch)
  */
 
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { handleWebCommand, parseMarkerArgs, parseSettingsValue } from '../src/utils/webCommands';
 
 // ─── parseMarkerArgs ─────────────────────────────────────────────────────────

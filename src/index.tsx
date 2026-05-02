@@ -32,7 +32,7 @@ import logCollector from './utils/logCollector';
 import { defaultLogger } from './utils/logger';
 import SettingsStore from './utils/settings';
 import { getAutocomplete } from './utils/tuiCommands';
-import { getMessageTargetPrefix, type MessageTarget } from './utils/tuiMessageInput';
+import { type MessageTarget } from './utils/tuiMessageInput';
 import { parseMarkerArgs, parseSettingsValue } from './utils/webCommands';
 import './index.ts'; // start Bun.serve web server in the same process
 
@@ -1138,7 +1138,7 @@ function openYouTubeStreamKeyModal(onSaved?: () => void): void {
 function maskStreamKey(key: string): string {
   const parts = key.split('-');
   if (parts.length >= 2) {
-    return `${parts[0]}-${'•'.repeat(4)}` + (parts.length > 2 ? `-${'•'.repeat(4)}` : '');
+    return `${parts[0]}-${'•'.repeat(4)}${parts.length > 2 ? `-${'•'.repeat(4)}` : ''}`;
   }
   return `${key.slice(0, 4)}••••`;
 }

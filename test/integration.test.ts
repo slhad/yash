@@ -1,5 +1,4 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
-import * as fs from 'node:fs/promises';
 import { KickProvider } from '../src/platforms/kick';
 import { TwitchProvider } from '../src/platforms/twitch';
 import { YouTubeProvider } from '../src/platforms/youtube';

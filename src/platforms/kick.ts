@@ -814,7 +814,7 @@ export class KickProvider implements PlatformProvider {
 
     // Event type can come from a smee-forwarded header or from the body itself.
     const eventType = String(
-      p['Kick-Event-Type'] ?? p['kick-event-type'] ?? p['x-kick-event-type'] ?? body['event'] ?? '',
+      p['Kick-Event-Type'] ?? p['kick-event-type'] ?? p['x-kick-event-type'] ?? body.event ?? '',
     );
 
     if (eventType !== 'chat.message.sent') {
@@ -824,7 +824,7 @@ export class KickProvider implements PlatformProvider {
       return;
     }
 
-    const sender = body['sender'];
+    const sender = body.sender;
     if (!sender || typeof sender !== 'object') {
       defaultLogger.warn('[Kick] Ignoring chat.message.sent webhook: missing sender object');
       return;
@@ -832,12 +832,12 @@ export class KickProvider implements PlatformProvider {
     const s = sender as Record<string, unknown>;
 
     this._dispatch({
-      id: String(body['message_id'] ?? `kick_wh_${Date.now()}`),
+      id: String(body.message_id ?? `kick_wh_${Date.now()}`),
       platform: 'kick',
-      userId: String(s['user_id'] ?? ''),
-      username: String(s['username'] ?? 'Unknown'),
-      message: String(body['content'] ?? ''),
-      timestamp: body['created_at'] ? new Date(body['created_at'] as string).getTime() : Date.now(),
+      userId: String(s.user_id ?? ''),
+      username: String(s.username ?? 'Unknown'),
+      message: String(body.content ?? ''),
+      timestamp: body.created_at ? new Date(body.created_at as string).getTime() : Date.now(),
     });
   }
 

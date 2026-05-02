@@ -1,5 +1,5 @@
 // ObsService for interacting with OBS-studio via obs-websocket v5 protocol
-import { createHash } from 'crypto';
+import { createHash } from 'node:crypto';
 
 import { getConfig, isDemoMode } from '../utils/config';
 import { defaultLogger } from '../utils/logger';

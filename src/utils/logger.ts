@@ -123,7 +123,7 @@ export class Logger {
     }
 
     if (isServer) {
-      process.stderr.write(output + '\n');
+      process.stderr.write(`${output}\n`);
       fileLog(output);
     } else {
       console.error(output);
@@ -148,7 +148,7 @@ function fileLog(line: string): void {
     try {
       const stat = fs.statSync(LOG_FILE);
       if (stat.size > LOG_MAX_BYTES) {
-        fs.renameSync(LOG_FILE, LOG_FILE + '.1');
+        fs.renameSync(LOG_FILE, `${LOG_FILE}.1`);
       }
     } catch {
       // file doesn't exist yet — fine
