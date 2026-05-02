@@ -78,6 +78,14 @@ export interface MetadataUpdateResult {
   skipped?: string[];
   skippedTags?: string[];
   appliedTags?: string[];
+  warnings?: MetadataUpdateWarning[];
+  references?: unknown;
+}
+
+export interface MetadataUpdateWarning {
+  code: string;
+  message: string;
+  details?: Record<string, unknown>;
 }
 
 export interface PlatformProvider {

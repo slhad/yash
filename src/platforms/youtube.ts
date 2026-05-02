@@ -56,13 +56,31 @@ interface YouTubeTokenFile {
 interface YouTubeBroadcastSummary {
   id: string;
   snippet: {
+    title?: string;
     liveChatId?: string;
     scheduledStartTime?: string;
     actualStartTime?: string;
     publishedAt?: string;
   };
-  status: { lifeCycleStatus: string };
+  status: { lifeCycleStatus: string; privacyStatus?: string };
   contentDetails?: { boundStreamId?: string };
+}
+
+export interface YouTubeBroadcastReference {
+  id: string;
+  title: string;
+  lifeCycleStatus: string;
+  liveChatId: string | null;
+  boundStreamId: string | null;
+  scheduledStartTime: string | null;
+  actualStartTime: string | null;
+  publishedAt: string | null;
+}
+
+export interface YouTubeBroadcastReferenceGroups {
+  active: YouTubeBroadcastReference[];
+  scheduled: YouTubeBroadcastReference[];
+  all: YouTubeBroadcastReference[];
 }
 
 // ---------------------------------------------------------------------------
@@ -305,7 +323,9 @@ export class YouTubeProvider implements PlatformProvider {
       );
       if (!resp.ok) {
         const errBody = await resp.text().catch(() => '');
-        defaultLogger.warn(`[YouTube] liveBroadcasts list failed: HTTP ${resp.status} — ${errBody}`);
+        defaultLogger.warn(
+          `[YouTube] liveBroadcasts list failed: HTTP ${resp.status} — ${errBody}`,
+        );
         return [];
       }
 
@@ -343,22 +363,181 @@ export class YouTubeProvider implements PlatformProvider {
     return Number.isNaN(ts) ? 0 : ts;
   }
 
-  private _pickBestBroadcast(items: YouTubeBroadcastSummary[]): YouTubeBroadcastSummary | null {
-    if (items.length === 0) return null;
-    return items
-      .slice()
-      .sort((a, b) => {
-        const rankDelta =
-          this._metadataTargetRank(b.status.lifeCycleStatus) -
-          this._metadataTargetRank(a.status.lifeCycleStatus);
-        if (rankDelta !== 0) return rankDelta;
-        return this._broadcastTimestamp(b) - this._broadcastTimestamp(a);
-      })[0]!;
+  private _sortBroadcasts(items: YouTubeBroadcastSummary[]): YouTubeBroadcastSummary[] {
+    return items.slice().sort((a, b) => this._broadcastTimestamp(b) - this._broadcastTimestamp(a));
   }
 
-  private async _resolveMetadataTargetBroadcast(): Promise<{
+  private _toBroadcastReference(item: YouTubeBroadcastSummary): YouTubeBroadcastReference {
+    return {
+      id: item.id,
+      title: item.snippet.title?.trim() || '(untitled broadcast)',
+      lifeCycleStatus: item.status.lifeCycleStatus,
+      liveChatId: item.snippet.liveChatId ?? null,
+      boundStreamId: item.contentDetails?.boundStreamId ?? null,
+      scheduledStartTime: item.snippet.scheduledStartTime ?? null,
+      actualStartTime: item.snippet.actualStartTime ?? null,
+      publishedAt: item.snippet.publishedAt ?? null,
+    };
+  }
+
+  private _isActiveBroadcast(item: YouTubeBroadcastSummary): boolean {
+    return item.status.lifeCycleStatus === 'live' || item.status.lifeCycleStatus === 'testing';
+  }
+
+  private _isScheduledBroadcast(item: YouTubeBroadcastSummary): boolean {
+    return (
+      !!item.snippet.scheduledStartTime &&
+      item.status.lifeCycleStatus !== 'complete' &&
+      item.status.lifeCycleStatus !== 'revoked'
+    );
+  }
+
+  private _isMutableMetadataTarget(item: YouTubeBroadcastSummary): boolean {
+    switch (item.status.lifeCycleStatus) {
+      case 'live':
+      case 'testing':
+      case 'ready':
+      case 'created':
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  private _fallbackBroadcastPrivacyStatus(
+    items: YouTubeBroadcastSummary[],
+    streamId: string,
+  ): string {
+    const bound = this._sortBroadcasts(
+      items.filter(
+        (item) => item.contentDetails?.boundStreamId === streamId && item.status.privacyStatus,
+      ),
+    );
+    return bound[0]?.status.privacyStatus ?? 'public';
+  }
+
+  private async _createFallbackBroadcastForStream(
+    streamId: string,
+    metadata: StreamMetadata,
+    items: YouTubeBroadcastSummary[],
+  ): Promise<{
     id: string;
     liveChatId: string | null;
+    warning: {
+      code: string;
+      message: string;
+      details: Record<string, unknown>;
+    };
+  } | null> {
+    const scheduledStartTime = new Date(Date.now() + 5 * 60_000).toISOString();
+    const privacyStatus = this._fallbackBroadcastPrivacyStatus(items, streamId);
+    const title = metadata.title?.trim() || 'Live stream';
+
+    try {
+      const insertResp = await this._request(
+        `${YT_API}/liveBroadcasts?part=id,snippet,status,contentDetails`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            snippet: {
+              title,
+              scheduledStartTime,
+            },
+            status: {
+              privacyStatus,
+            },
+            contentDetails: {
+              monitorStream: {
+                enableMonitorStream: true,
+                broadcastStreamDelayMs: 0,
+              },
+              enableAutoStart: true,
+              enableAutoStop: true,
+              enableDvr: true,
+              enableEmbed: true,
+              recordFromStart: true,
+            },
+          }),
+        },
+      );
+      if (!insertResp.ok) {
+        defaultLogger.warn(
+          `[YouTube] fallback liveBroadcasts.insert failed: HTTP ${insertResp.status} — ${await insertResp.text()}`,
+        );
+        return null;
+      }
+
+      const inserted = (await insertResp.json()) as YouTubeBroadcastSummary;
+      const bindUrl = new URL(`${YT_API}/liveBroadcasts/bind`);
+      bindUrl.searchParams.set('id', inserted.id);
+      bindUrl.searchParams.set('part', 'id,snippet,status,contentDetails');
+      bindUrl.searchParams.set('streamId', streamId);
+
+      const bindResp = await this._request(bindUrl.toString(), { method: 'POST' });
+      if (!bindResp.ok) {
+        defaultLogger.warn(
+          `[YouTube] fallback liveBroadcasts.bind failed: HTTP ${bindResp.status} — ${await bindResp.text()}`,
+        );
+        return null;
+      }
+
+      const bound = (await bindResp.json()) as YouTubeBroadcastSummary;
+      defaultLogger.info(
+        `[YouTube] fallback broadcast created and bound (${bound.id} → ${streamId})`,
+      );
+
+      return {
+        id: bound.id,
+        liveChatId: bound.snippet.liveChatId ?? inserted.snippet.liveChatId ?? null,
+        warning: {
+          code: 'youtube_fallback_broadcast_created',
+          message:
+            'Created a new YouTube fallback broadcast bound to the configured stream. The YouTube Live Streaming API requires a scheduled start time on insert, so this may briefly exist as an upcoming broadcast until you go live.',
+          details: {
+            broadcastId: bound.id,
+            streamId,
+            privacyStatus,
+            scheduledStartTime,
+          },
+        },
+      };
+    } catch (err) {
+      defaultLogger.error('[YouTube] _createFallbackBroadcastForStream error:', err);
+      return null;
+    }
+  }
+
+  async listBroadcastReferences(limit = 10): Promise<YouTubeBroadcastReferenceGroups> {
+    const items = this._sortBroadcasts(await this._listOwnBroadcasts());
+    const take = (subset: YouTubeBroadcastSummary[]) =>
+      subset.slice(0, limit).map((item) => this._toBroadcastReference(item));
+
+    return {
+      active: take(items.filter((item) => this._isActiveBroadcast(item))),
+      scheduled: take(items.filter((item) => this._isScheduledBroadcast(item))),
+      all: take(items),
+    };
+  }
+
+  private _pickBestBroadcast(items: YouTubeBroadcastSummary[]): YouTubeBroadcastSummary | null {
+    if (items.length === 0) return null;
+    return items.slice().sort((a, b) => {
+      const rankDelta =
+        this._metadataTargetRank(b.status.lifeCycleStatus) -
+        this._metadataTargetRank(a.status.lifeCycleStatus);
+      if (rankDelta !== 0) return rankDelta;
+      return this._broadcastTimestamp(b) - this._broadcastTimestamp(a);
+    })[0]!;
+  }
+
+  private async _resolveMetadataTargetBroadcast(metadata: StreamMetadata): Promise<{
+    id: string;
+    liveChatId: string | null;
+    warning?: {
+      code: string;
+      message: string;
+      details: Record<string, unknown>;
+    };
   } | null> {
     if (!this.isAuthenticated() || !this.tokenData) return null;
 
@@ -366,14 +545,32 @@ export class YouTubeProvider implements PlatformProvider {
     if (items.length === 0) return null;
 
     const streamId = this.streamKey ? await this._findStreamIdByKey(this.streamKey) : null;
+    const mutableItems = items.filter((item) => this._isMutableMetadataTarget(item));
     const streamBoundItems = streamId
-      ? items.filter((item) => item.contentDetails?.boundStreamId === streamId)
+      ? mutableItems.filter((item) => item.contentDetails?.boundStreamId === streamId)
       : [];
 
-    const chosen = this._pickBestBroadcast(streamBoundItems.length > 0 ? streamBoundItems : items);
-    if (!chosen) return null;
+    const candidateItems =
+      streamId && items.some((item) => item.contentDetails?.boundStreamId === streamId)
+        ? streamBoundItems
+        : mutableItems;
+    const chosen = this._pickBestBroadcast(candidateItems);
+    if (chosen) {
+      return { id: chosen.id, liveChatId: chosen.snippet.liveChatId ?? null };
+    }
 
-    return { id: chosen.id, liveChatId: chosen.snippet.liveChatId ?? null };
+    if (streamId) {
+      const fallback = await this._createFallbackBroadcastForStream(streamId, metadata, items);
+      if (fallback) {
+        return {
+          id: fallback.id,
+          liveChatId: fallback.liveChatId,
+          warning: fallback.warning,
+        };
+      }
+    }
+
+    return null;
   }
 
   private async _findActiveBroadcast(): Promise<{ id: string; liveChatId: string | null } | null> {
@@ -560,12 +757,24 @@ export class YouTubeProvider implements PlatformProvider {
     if (!this.isAuthenticated()) throw new Error('Not authenticated with YouTube');
     if (!this.tokenData) return {};
 
-    const broadcast = await this._resolveMetadataTargetBroadcast();
+    const broadcast = await this._resolveMetadataTargetBroadcast(metadata);
+    const warnings = broadcast?.warning ? [broadcast.warning] : [];
     if (!broadcast) {
+      const references = await this.listBroadcastReferences(10);
       defaultLogger.warn(
         '[YouTube] updateStreamMetadata — no broadcast found for the configured stream target',
       );
-      return {};
+      return {
+        warnings: [
+          {
+            code: 'youtube_no_matching_broadcast',
+            message:
+              'No YouTube broadcast target was found. Metadata was saved locally only and not applied on YouTube.',
+            details: { references },
+          },
+        ],
+        references,
+      };
     }
     this.broadcastId = broadcast.id;
     this.liveChatId = broadcast.liveChatId;
@@ -614,7 +823,9 @@ export class YouTubeProvider implements PlatformProvider {
 
       // The user-visible YouTube title/description/category live on the video resource.
       // liveBroadcasts.update alone is not sufficient to persist those fields reliably.
-      const catId = metadata.youtubeCategory ? YT_CATEGORY_IDS[metadata.youtubeCategory] : undefined;
+      const catId = metadata.youtubeCategory
+        ? YT_CATEGORY_IDS[metadata.youtubeCategory]
+        : undefined;
       const shouldUpdateVideoSnippet =
         finalTitle !== undefined ||
         finalDescription !== undefined ||
@@ -622,9 +833,14 @@ export class YouTubeProvider implements PlatformProvider {
         metadata.tags !== undefined;
 
       if (shouldUpdateVideoSnippet) {
-        const videoGetResp = await this._request(`${YT_API}/videos?part=snippet&id=${this.broadcastId}`);
+        const videoGetResp = await this._request(
+          `${YT_API}/videos?part=snippet&id=${this.broadcastId}`,
+        );
         if (!videoGetResp.ok) {
-          defaultLogger.warn('[YouTube] videos.get before update failed:', await videoGetResp.text());
+          defaultLogger.warn(
+            '[YouTube] videos.get before update failed:',
+            await videoGetResp.text(),
+          );
         } else {
           const videoData = (await videoGetResp.json()) as {
             items?: Array<{ id: string; snippet: Record<string, unknown> }>;
@@ -659,7 +875,7 @@ export class YouTubeProvider implements PlatformProvider {
         defaultLogger.error('[YouTube] applySetupPlaylists error:', err),
       );
 
-      return {};
+      return warnings.length > 0 ? { warnings } : {};
     } catch (err) {
       this.lastError = err instanceof Error ? err.message : String(err);
       defaultLogger.error('[YouTube] updateStreamMetadata error:', err);

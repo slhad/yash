@@ -31,11 +31,8 @@ import { getConfig, isDemoMode, saveConfig } from './utils/config';
 import logCollector from './utils/logCollector';
 import { defaultLogger } from './utils/logger';
 import SettingsStore from './utils/settings';
-import {
-  getMessageTargetPrefix,
-  type MessageTarget,
-} from './utils/tuiMessageInput';
 import { getAutocomplete } from './utils/tuiCommands';
+import { getMessageTargetPrefix, type MessageTarget } from './utils/tuiMessageInput';
 import { parseMarkerArgs, parseSettingsValue } from './utils/webCommands';
 import './index.ts'; // start Bun.serve web server in the same process
 
@@ -1995,6 +1992,8 @@ function openStreamModal(preselected: string[]): void {
         skipped?: string[];
         skippedTags?: string[];
         appliedTags?: string[];
+        warnings?: { code: string; message: string; details?: Record<string, unknown> }[];
+        references?: Record<string, unknown>;
         error?: string;
       }[] = [];
       try {
@@ -2021,6 +2020,36 @@ function openStreamModal(preselected: string[]): void {
               content: `[stream] ${r.platform}:   ✗ tags rejected: ${r.skippedTags!.join(', ')}`,
               fg: 'red',
             });
+          }
+          for (const warning of r.warnings ?? []) {
+            lastMessages.push({
+              content: `[stream] ${r.platform}:   ! ${warning.message}`,
+              fg: 'yellow',
+            });
+            const refs = warning.details?.references as
+              | {
+                  active?: Array<{ id: string; title: string; lifeCycleStatus: string }>;
+                  scheduled?: Array<{ id: string; title: string; lifeCycleStatus: string }>;
+                  all?: Array<{ id: string; title: string; lifeCycleStatus: string }>;
+                }
+              | undefined;
+            if (refs) {
+              const groups: Array<['active' | 'scheduled' | 'all', typeof refs.all]> = [
+                ['active', refs.active],
+                ['scheduled', refs.scheduled],
+                ['all', refs.all],
+              ];
+              for (const [group, entries] of groups) {
+                const preview = (entries ?? [])
+                  .slice(0, 3)
+                  .map((entry) => `${entry.id} (${entry.lifeCycleStatus}) ${entry.title}`)
+                  .join(' | ');
+                lastMessages.push({
+                  content: `[stream] ${r.platform}:   ${group}: ${preview || '(none)'}`,
+                  fg: 'gray',
+                });
+              }
+            }
           }
         }
       }
@@ -2515,8 +2544,12 @@ async function fetchYoutubeInfo(): Promise<Record<string, unknown>> {
   }
 
   const [broadcastResp, videoResp] = await Promise.all([
-    provider._request(`${'https://www.googleapis.com/youtube/v3'}/liveBroadcasts?part=id,snippet,status,contentDetails&id=${target.id}`),
-    provider._request(`${'https://www.googleapis.com/youtube/v3'}/videos?part=snippet&id=${target.id}`),
+    provider._request(
+      `${'https://www.googleapis.com/youtube/v3'}/liveBroadcasts?part=id,snippet,status,contentDetails&id=${target.id}`,
+    ),
+    provider._request(
+      `${'https://www.googleapis.com/youtube/v3'}/videos?part=snippet&id=${target.id}`,
+    ),
   ]);
 
   const broadcastData = broadcastResp.ok ? await broadcastResp.json() : { items: [] };

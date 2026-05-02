@@ -85,6 +85,16 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
 * Screenshots of webviews made with playwright
 * Gif of TUI made with VHS
 
+## Documentation Requirements
+- `README.md` must contain a Mermaid diagram describing the `/stream` command validation and execution flow end to end
+- The Mermaid diagram must cover, at minimum:
+    * target platform selection
+    * config persistence
+    * per-provider validation / target resolution
+    * YouTube mutable-broadcast selection or fallback creation/bind flow
+    * provider update success / warning / error outcomes
+- Any change to `/stream` validation, provider targeting, fallback behavior, or update sequencing must update that Mermaid diagram in `README.md` in the same change
+
 ## Technical Requirements
 
 ### Runtime and Testing
@@ -117,6 +127,11 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
     * OAuth2 Authorization Code flow; tokens persisted to `~/.yash/youtube_tokens.json`; access token auto-refreshed before expiry
     * `getAuthUrl()` / `handleOAuthCallback(code)` — browser-based consent flow; callback at `GET /api/youtube/callback`
     * `updateStreamMetadata()` — updates live broadcast title/description via `liveBroadcasts.update` (GET + PUT to preserve all snippet fields)
+        * Only mutable broadcasts (`created`, `ready`, `testing`, `live`) may be targeted; completed/revoked broadcasts must never be mutated by `/stream`
+        * If no mutable broadcast exists for the configured stream key, YASH creates a new fallback broadcast via `liveBroadcasts.insert`, binds it to the saved stream via `liveBroadcasts.bind`, and then applies metadata updates to that new broadcast
+        * Limitation: the public YouTube Live Streaming API requires `snippet.scheduledStartTime` on insert, so this fallback cannot perfectly match Studio's unscheduled "Direct stream" object; it may briefly exist as an upcoming broadcast before going live
+        * Verified behavior: Studio can create a `ready` "Direct stream" broadcast with `snippet.scheduledStartTime = null`, but public `liveBroadcasts.insert` rejects Unix epoch zero (`1970-01-01T00:00:00.000Z`) with `invalidScheduledStartTime`; YASH therefore cannot reproduce Studio's unscheduled direct-stream sentinel through the public API
+        * If no broadcast target exists, returns diagnostics instead of a silent YouTube no-op; diagnostics include up to the last 10 broadcasts grouped as `active`, `scheduled`, and `all`
     * `sendMessage()` — posts to live chat via `liveChatMessages.insert`
     * Live chat polling — adaptive interval driven by API's `pollingIntervalMillis` (min 2 s); skips first page to avoid replaying history
     * Status polling (60 s interval) — detects active broadcast, updates `streamStatus`, viewer count from `liveStreamingDetails.concurrentViewers`
@@ -242,7 +257,7 @@ Configuration is stored in `[root]/config.json`. Environment variables take prec
 | GET | `/api/chat/history` | Full chat message history |
 | POST | `/api/chat/send` | Send message: `{ message, platforms? }` |
 | GET | `/api/stream` | Read persisted stream metadata from config |
-| POST | `/api/stream` | Update metadata on platforms: `{ platforms?, metadata? }` — also persists to `config.json` |
+| POST | `/api/stream` | Update metadata on platforms: `{ platforms?, metadata? }` — also persists to `config.json`; response includes `{ success, platformResults }` with per-platform warnings/diagnostics |
 | POST | `/api/stream/marker` | Cross-platform marker: `{ platforms?, description?, timestamp? }` |
 | GET | `/api/help` | List all available / commands (for WebUI consumption) |
 | GET | `/api/settings` | Read all settings or `?key=<k>` for a single key |

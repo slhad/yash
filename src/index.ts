@@ -112,6 +112,7 @@ Bun.serve({
         const cfg = getConfig();
         const current = cfg.stream ?? {};
         const changed: Record<string, any> = {};
+        let platformResults: Awaited<ReturnType<typeof streamService.setStreamMetadata>> = [];
         for (const key of Object.keys(metadata ?? {})) {
           if (JSON.stringify(metadata[key]) !== JSON.stringify(current[key])) {
             changed[key] = metadata[key];
@@ -119,9 +120,16 @@ Bun.serve({
         }
         if (Object.keys(changed).length > 0) {
           await saveConfig({ stream: { ...current, ...changed } });
-          await streamService.setStreamMetadata(targetPlatforms ?? platforms, metadata);
+          try {
+            platformResults = await streamService.setStreamMetadata(
+              targetPlatforms ?? platforms,
+              metadata,
+            );
+          } catch (err: any) {
+            platformResults = err.platformResults ?? [];
+          }
         }
-        return new Response(JSON.stringify({ success: true }), {
+        return new Response(JSON.stringify({ success: true, platformResults }), {
           headers: { 'Content-Type': 'application/json' },
         });
       },

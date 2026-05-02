@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
-import type { StreamMetadata } from '../src/platforms/base';
 import { StreamStatus } from '../src/platforms/base';
 import { KickProvider } from '../src/platforms/kick';
 import { TwitchProvider } from '../src/platforms/twitch';
@@ -46,6 +45,64 @@ describe('StreamService', () => {
     });
 
     expect(twitchProvider.getStreamStatus()).toBe(StreamStatus.OFFLINE);
+  });
+
+  test('should preserve provider warnings and references in platform results', async () => {
+    const warningProvider = {
+      authenticate: async () => ({ success: true }),
+      isAuthenticated: () => true,
+      logout: async () => {},
+      updateStreamMetadata: async () => ({
+        warnings: [
+          {
+            code: 'youtube_no_matching_broadcast',
+            message: 'No YouTube broadcast target was found.',
+          },
+        ],
+        references: {
+          active: [],
+          scheduled: [{ id: 'scheduled-1' }],
+          all: [{ id: 'scheduled-1' }],
+        },
+      }),
+      getStreamKey: () => '',
+      getStreamStatus: () => StreamStatus.OFFLINE,
+      sendMessage: async () => {},
+      onMessage: () => () => {},
+      setupWebhooks: async () => {},
+      getPlatformName: () => 'youtube',
+      getStatus: () => ({
+        authenticated: true,
+        streamStatus: StreamStatus.OFFLINE,
+        connectionStatus: 'connected' as const,
+        lastError: null,
+      }),
+      getViewerCount: () => 0,
+      getStreamStartTime: () => null,
+      createMarker: async () => null,
+      getMarkers: async () => [],
+    };
+
+    streamService.registerProvider('youtube', warningProvider);
+
+    const result = await streamService.setStreamMetadata(['youtube'], { title: 'Updated Title' });
+
+    expect(result).toEqual([
+      {
+        platform: 'youtube',
+        warnings: [
+          {
+            code: 'youtube_no_matching_broadcast',
+            message: 'No YouTube broadcast target was found.',
+          },
+        ],
+        references: {
+          active: [],
+          scheduled: [{ id: 'scheduled-1' }],
+          all: [{ id: 'scheduled-1' }],
+        },
+      },
+    ]);
   });
 
   test('should get stream key for platform', () => {

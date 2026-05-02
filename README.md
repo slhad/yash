@@ -12,8 +12,20 @@ unified interface. Written to run on Bun. This repository contains:
 Quickstart
 
 1. Install dependencies: `bun install`
-2. Run tests: `bun test`
-3. Launch the TUI (development with hot reload): `bun --hot ./src/main.tsx`
+2. Copy `config.example.json` to `config.json`
+3. Run checks: `bun test` or `bun typecheck`
+4. Launch the full app: `bun run start`
+
+Runtime entrypoints
+-------------------
+
+- `bun run start` starts the current primary entrypoint: `src/index.tsx`
+- `src/index.tsx` runs the TUI and imports `src/index.ts` as a side effect to start `Bun.serve` in the same process
+- `bun run start:webui` runs only the web server (`src/index.ts`)
+- `bun run start:tui` runs the TUI-focused mode (`YASH_TUI_ONLY=1 bun run src/index.tsx`)
+- `Bun.serve` intentionally uses `development: false`; Bun development-mode bundle timing output corrupts the TUI rendering on the shared terminal fd
+
+Important: running the TUI process and web server as separate long-lived processes against the same port is not the supported default flow anymore. Use `bun run start` unless you explicitly want a web-only or TUI-only mode.
 
 Configuration
 -------------
@@ -24,6 +36,78 @@ This project reads configuration from `config.json` in the repository root durin
 2. Add `config.json` to `.gitignore` if it's not already ignored (this repository's .gitignore already includes `config.json`).
 
 Stream modal category autocomplete: the `/stream` modal (TUI) and stream form (WebUI) have per-platform category fields. Twitch and Kick fields autocomplete live as you type (300 ms debounce); YouTube uses a static dropdown. All three are sent as separate metadata fields (`twitchGame`, `kickCategory`, `youtubeCategory`).
+
+YouTube `/stream` targeting notes:
+
+- `/stream` may only update mutable YouTube broadcasts: `created`, `ready`, `testing`, or `live`
+- Completed or revoked broadcasts are never valid update targets
+- If no mutable broadcast exists for the configured stream key, YASH creates a fallback broadcast with `liveBroadcasts.insert`, binds it with `liveBroadcasts.bind`, and then applies the metadata update to that new broadcast
+- Studio can create an unscheduled `ready` "Direct stream" broadcast with `snippet.scheduledStartTime = null`
+- The public YouTube API does not expose that exact creation behavior: `liveBroadcasts.insert` requires a future `scheduledStartTime`, and using Unix epoch zero is rejected with `invalidScheduledStartTime`
+
+/stream validation and execution flow
+------------------------------------
+
+```mermaid
+flowchart TD
+    A["User runs /stream in TUI or submits stream form in WebUI"] --> B["Collect selected platforms and metadata fields"]
+    B --> C{"Any metadata changed?"}
+    C -- No --> C1["Stop: no-op, report 'No changes'"]
+    C -- Yes --> D["Persist merged stream metadata to config.json"]
+    D --> E["Call StreamService.setStreamMetadata(targetPlatforms, mergedMetadata)"]
+
+    E --> F{"For each selected provider"}
+
+    F --> Y["YouTube provider"]
+    F --> T["Twitch provider"]
+    F --> K["Kick provider"]
+
+    T --> T1["Validate auth and resolve Twitch game/category by name"]
+    T1 --> T2{"Validation/update result"}
+    T2 -- Success --> T3["Return applied/skipped field details"]
+    T2 -- Error --> T4["Return provider error"]
+
+    K --> K1["Validate auth and resolve Kick category by name"]
+    K1 --> K2{"Validation/update result"}
+    K2 -- Success --> K3["Return applied/skipped field details"]
+    K2 -- Error --> K4["Return provider error"]
+
+    Y --> Y1["List own liveBroadcasts and current liveStreams"]
+    Y1 --> Y2["Resolve saved YouTube stream key to streamId"]
+    Y2 --> Y3["Filter broadcasts to mutable lifecycle states: created, ready, testing, live"]
+    Y3 --> Y4{"Mutable broadcast bound to saved streamId exists?"}
+    Y4 -- Yes --> Y5["Pick best mutable bound broadcast"]
+    Y4 -- No --> Y6{"Any mutable broadcast exists at all?"}
+    Y6 -- Yes --> Y7["Pick best mutable unbound/other broadcast"]
+    Y6 -- No --> Y8{"saved streamId available?"}
+    Y8 -- No --> Y13["Return warning: no broadcast target found + recent broadcast references"]
+    Y8 -- Yes --> Y9["Create fallback broadcast via liveBroadcasts.insert"]
+    Y9 --> Y10["Bind fallback broadcast to saved stream via liveBroadcasts.bind"]
+    Y10 --> Y11["Return warning: fallback broadcast created"]
+    Y11 --> Y5
+
+    Y5 --> Y12["Update liveBroadcast snippet, then update video snippet/title/description/category/tags"]
+    Y12 --> Y14{"Update result"}
+    Y14 -- Success --> Y15["Return applied field details and optional warnings"]
+    Y14 -- Error --> Y16["Return provider error"]
+
+    T3 --> Z["Aggregate per-provider results"]
+    T4 --> Z
+    K3 --> Z
+    K4 --> Z
+    Y13 --> Z
+    Y15 --> Z
+    Y16 --> Z
+
+    Z --> R{"Any provider errors?"}
+    R -- No --> R1["Report per-provider success/warning results to UI"]
+    R -- Yes --> R2["Report mixed success/error results to UI"]
+```
+
+Notes:
+- YouTube completed/revoked broadcasts are never valid `/stream` update targets.
+- If YouTube has no mutable target, YASH may create a fallback broadcast and bind it to the saved stream key before applying metadata.
+- The public YouTube API does not reproduce Studio's unscheduled direct-stream sentinel exactly; fallback creation may briefly exist as an upcoming broadcast because `liveBroadcasts.insert` requires a future `scheduledStartTime`.
 
 OBS Reconnection & Backoff
 --------------------------
@@ -72,7 +156,8 @@ CI and secrets
  - There is also a gitleaks GitHub Action to scan history and PRs for secrets. Review gitleaks results in CI and tune if required.
 
 Notes:
-- Use `bun --hot ./src/main.tsx` for the interactive TUI entrypoint in development.
+- Use `bun run start` as the default local development entrypoint.
+- `src/main.tsx` is the browser-side dashboard entry imported by `index.html`; it is not the TUI process entrypoint.
 
 See SPECS.md for architecture and conventions.
 
@@ -202,14 +287,14 @@ docker pull ghcr.io/<OWNER>/<REPO>/yash-ci:latest
 
 ```
 mkdir -p tmp
-docker run --rm -p 3000:3000 -v "$(pwd)/tmp:/app/tmp" --user "$(id -u):$(id -g)" ghcr.io/<OWNER>/<REPO>/yash-ci:latest /bin/bash -lc 'bun run src/index.ts'
+docker run --rm -p 3000:3000 -v "$(pwd)/tmp:/app/tmp" --user "$(id -u):$(id -g)" ghcr.io/<OWNER>/<REPO>/yash-ci:latest /bin/bash -lc 'bun run start:webui'
 ```
 
 - CI / hermetic invocation (example taken from the repository CI):
 
 ```
 docker run --rm -e RUN_PLAYWRIGHT=1 -v "${{ github.workspace }}/tmp:/app/tmp" --user "$(id -u):$(id -g)" ghcr.io/<OWNER>/<REPO>/yash-ci:latest /bin/bash -lc '
-  bun run src/index.ts &
+  bun run start:webui &
   for i in $(seq 1 60); do
     curl -sSf http://localhost:3000/api/status -o /dev/null && break || sleep 1
   done

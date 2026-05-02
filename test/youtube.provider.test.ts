@@ -523,6 +523,219 @@ describe('YouTubeProvider — updateStreamMetadata target selection', () => {
     expect(videoPutBodies[0].id).toBe('saved-created-broadcast');
     expect(videoPutBodies[0].snippet.title).toBe('New title');
   });
+
+  test('returns recent broadcast references when no YouTube broadcast target exists', async () => {
+    const p = makeProvider() as any;
+    p.isAuthenticatedFlag = true;
+    p.tokenData = {
+      accessToken: 'token',
+      refreshToken: 'refresh',
+      expiresIn: 3600,
+      obtainmentTimestamp: Date.now(),
+      channelId: 'chan',
+      channelTitle: 'title',
+    };
+
+    p._request = async (url: string) => {
+      if (url.includes('/liveBroadcasts?part=id,snippet,status,contentDetails&mine=true')) {
+        return new Response(
+          JSON.stringify({
+            items: [
+              {
+                id: 'live-1',
+                snippet: {
+                  title: 'Live broadcast',
+                  liveChatId: 'chat-live',
+                  actualStartTime: '2026-05-02T12:00:00Z',
+                  publishedAt: '2026-05-02T11:00:00Z',
+                },
+                status: { lifeCycleStatus: 'live' },
+                contentDetails: { boundStreamId: 'stream-live' },
+              },
+              {
+                id: 'scheduled-1',
+                snippet: {
+                  title: 'Scheduled broadcast',
+                  scheduledStartTime: '2026-05-03T12:00:00Z',
+                  publishedAt: '2026-05-02T10:00:00Z',
+                },
+                status: { lifeCycleStatus: 'ready' },
+                contentDetails: { boundStreamId: 'stream-ready' },
+              },
+              {
+                id: 'complete-1',
+                snippet: {
+                  title: 'Completed broadcast',
+                  publishedAt: '2026-05-01T10:00:00Z',
+                },
+                status: { lifeCycleStatus: 'complete' },
+                contentDetails: { boundStreamId: 'stream-complete' },
+              },
+            ],
+          }),
+        );
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    };
+
+    p._findStreamIdByKey = async () => null;
+    p._resolveMetadataTargetBroadcast = async () => null;
+
+    const result = await p.updateStreamMetadata({ title: 'New title' });
+
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings?.[0]?.code).toBe('youtube_no_matching_broadcast');
+    expect(result.references?.active.map((item: any) => item.id)).toEqual(['live-1']);
+    expect(result.references?.scheduled.map((item: any) => item.id)).toEqual(['scheduled-1']);
+    expect(result.references?.all.map((item: any) => item.id)).toEqual([
+      'scheduled-1',
+      'live-1',
+      'complete-1',
+    ]);
+    expect(result.references?.all[0]).toEqual(
+      expect.objectContaining({
+        id: 'scheduled-1',
+        title: 'Scheduled broadcast',
+        lifeCycleStatus: 'ready',
+      }),
+    );
+  });
+
+  test('creates and binds a fallback broadcast when only completed broadcasts exist for the saved stream key', async () => {
+    const p = makeProvider() as any;
+    p.isAuthenticatedFlag = true;
+    p.tokenData = {
+      accessToken: 'token',
+      refreshToken: 'refresh',
+      expiresIn: 3600,
+      obtainmentTimestamp: Date.now(),
+      channelId: 'chan',
+      channelTitle: 'title',
+    };
+    p.streamKey = 'saved_stream_key';
+    p._findStreamIdByKey = async () => 'stream-saved';
+
+    const insertBodies: any[] = [];
+    const bindUrls: string[] = [];
+    const putBodies: any[] = [];
+    const videoPutBodies: any[] = [];
+    p._request = async (url: string, options: RequestInit = {}) => {
+      if (url.includes('/liveBroadcasts?part=id,snippet,status,contentDetails&mine=true')) {
+        return new Response(
+          JSON.stringify({
+            items: [
+              {
+                id: 'completed-bound',
+                snippet: {
+                  title: 'Completed bound broadcast',
+                  actualStartTime: '2026-05-01T12:00:00Z',
+                  publishedAt: '2026-05-01T11:00:00Z',
+                },
+                status: { lifeCycleStatus: 'complete', privacyStatus: 'public' },
+                contentDetails: { boundStreamId: 'stream-saved' },
+              },
+              {
+                id: 'other-live',
+                snippet: {
+                  title: 'Other live broadcast',
+                  actualStartTime: '2026-05-02T12:00:00Z',
+                  publishedAt: '2026-05-02T11:00:00Z',
+                },
+                status: { lifeCycleStatus: 'live', privacyStatus: 'public' },
+                contentDetails: { boundStreamId: 'stream-other' },
+              },
+            ],
+          }),
+        );
+      }
+
+      if (
+        url.includes('/liveBroadcasts?part=id,snippet,status,contentDetails') &&
+        options.method === 'POST'
+      ) {
+        insertBodies.push(JSON.parse(String(options.body)));
+        return new Response(
+          JSON.stringify({
+            id: 'fallback-created',
+            snippet: {
+              title: 'New title',
+              liveChatId: 'chat-fallback',
+              publishedAt: '2026-05-02T12:05:00Z',
+            },
+            status: { lifeCycleStatus: 'created', privacyStatus: 'public' },
+            contentDetails: {},
+          }),
+        );
+      }
+
+      if (url.includes('/liveBroadcasts/bind?')) {
+        bindUrls.push(url);
+        return new Response(
+          JSON.stringify({
+            id: 'fallback-created',
+            snippet: {
+              title: 'New title',
+              liveChatId: 'chat-fallback',
+              publishedAt: '2026-05-02T12:05:00Z',
+            },
+            status: { lifeCycleStatus: 'ready', privacyStatus: 'public' },
+            contentDetails: { boundStreamId: 'stream-saved' },
+          }),
+        );
+      }
+
+      if (url.includes('/liveBroadcasts?part=id,snippet&id=fallback-created')) {
+        return new Response(
+          JSON.stringify({
+            items: [{ id: 'fallback-created', snippet: { title: 'Fallback title' } }],
+          }),
+        );
+      }
+
+      if (url.includes('/liveBroadcasts?part=snippet') && options.method === 'PUT') {
+        putBodies.push(JSON.parse(String(options.body)));
+        return new Response(JSON.stringify({ ok: true }));
+      }
+
+      if (url.includes('/videos?part=snippet&id=fallback-created')) {
+        return new Response(
+          JSON.stringify({
+            items: [
+              {
+                id: 'fallback-created',
+                snippet: {
+                  title: 'Fallback video title',
+                  description: 'Old description',
+                  categoryId: '20',
+                },
+              },
+            ],
+          }),
+        );
+      }
+
+      if (url.includes('/videos?part=snippet') && options.method === 'PUT') {
+        videoPutBodies.push(JSON.parse(String(options.body)));
+        return new Response(JSON.stringify({ ok: true }));
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    };
+
+    const result = await p.updateStreamMetadata({ title: 'New title' });
+
+    expect(insertBodies).toHaveLength(1);
+    expect(insertBodies[0].snippet.title).toBe('New title');
+    expect(insertBodies[0].status.privacyStatus).toBe('public');
+    expect(bindUrls).toHaveLength(1);
+    expect(bindUrls[0]).toContain('streamId=stream-saved');
+    expect(putBodies).toHaveLength(1);
+    expect(putBodies[0].id).toBe('fallback-created');
+    expect(videoPutBodies).toHaveLength(1);
+    expect(videoPutBodies[0].id).toBe('fallback-created');
+    expect(result.warnings?.[0]?.code).toBe('youtube_fallback_broadcast_created');
+  });
 });
 
 describe('YouTubeProvider — playlists', () => {

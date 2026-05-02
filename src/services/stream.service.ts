@@ -7,6 +7,8 @@ export type PlatformMetadataResult = {
   skipped?: string[];
   skippedTags?: string[];
   appliedTags?: string[];
+  warnings?: { code: string; message: string; details?: Record<string, unknown> }[];
+  references?: unknown;
   error?: string;
 };
 
@@ -41,6 +43,8 @@ export class StreamService {
         if (val.skipped?.length) result.skipped = val.skipped;
         if (val.skippedTags?.length) result.skippedTags = val.skippedTags;
         if (val.appliedTags?.length) result.appliedTags = val.appliedTags;
+        if (val.warnings?.length) result.warnings = val.warnings;
+        if (val.references) result.references = val.references;
         platformResults.push(result);
       } else {
         const reason = (r as PromiseRejectedResult).reason;
