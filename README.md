@@ -35,6 +35,22 @@ This project reads configuration from `config.json` in the repository root durin
    - `cp config.example.json config.json`
 2. Add `config.json` to `.gitignore` if it's not already ignored (this repository's .gitignore already includes `config.json`).
 
+Security posture
+----------------
+
+This build uses file-backed local configuration and token storage. The following security features are intentionally out of scope in the current repository state:
+
+- encryption at rest for platform tokens or local config
+- OS keyring integration
+- encryption-key rotation
+- encrypted admin key export/import flows
+
+Operationally, that means:
+
+- `config.json` and the files under `~/.yash/` should be treated as sensitive local secrets
+- this repository is suitable for local or otherwise controlled environments, not as-is for broad public multi-tenant deployment
+- if you expose the web server beyond localhost, you should add a reverse proxy / network ACL layer and explicit authentication controls around any sensitive endpoints
+
 Stream modal category autocomplete: the `/stream` modal (TUI) and stream form (WebUI) have per-platform category fields. Twitch and Kick fields autocomplete live as you type (300 ms debounce); YouTube uses a static dropdown. All three are sent as separate metadata fields (`twitchGame`, `kickCategory`, `youtubeCategory`).
 
 YouTube `/stream` targeting notes:
@@ -153,59 +169,14 @@ Notes: values supplied via environment variables are parsed as strings and cast 
 CI and secrets
 --------------
 - For CI, provide secrets via environment variables or a secrets manager (do not commit config.json with credentials).
- - There is also a gitleaks GitHub Action to scan history and PRs for secrets. Review gitleaks results in CI and tune if required.
+- There is also a gitleaks GitHub Action to scan history and PRs for secrets. Review gitleaks results in CI and tune if required.
+- CI secret injection reduces accidental commits; it does not change the runtime fact that YASH persists tokens/config to local files in this build.
 
 Notes:
 - Use `bun run start` as the default local development entrypoint.
 - `src/main.tsx` is the browser-side dashboard entry imported by `index.html`; it is not the TUI process entrypoint.
 
 See SPECS.md for architecture and conventions.
-
-Admin API
----------
-This repository exposes several admin-only endpoints under `/api/admin/*` for
-managing admin keys and auditing operations. Note: encryption-related
-operations (encryption key rotation, exporting encryption keys, and hybrid
-export/import of admin keys or tokens) have been removed in this build and
-corresponding endpoints return 501 Not Implemented. The remaining admin
-endpoints support key creation, listing, revocation, and audit operations.
-
-Endpoints (summary):
-
-- POST `/api/admin/rotate-key` : (Removed) Rotation of encryption keys is no
-  longer supported; this endpoint returns 501 Not Implemented.
-- POST `/api/admin/export-key` : (Removed) Exporting encryption keys or
-  hybrid-encrypted token packages is no longer supported and will return 501.
-- POST `/api/admin/keys` : Create a one-time-display admin token. Returns
-  `{ id, token, createdAt }` (token shown once).
-- GET `/api/admin/keys` : List admin keys metadata (id, label, createdAt, revoked).
-- POST `/api/admin/keys/revoke` : Revoke a key by id. Body: `{ "id": "..." }`.
-- POST `/api/admin/keys/import` : (Removed) Importing encrypted admin key
-  packages is no longer supported and will return 501 Not Implemented. To
-  restore keys from backups, restore the `admin_keys.json` file in your data
-  directory and ensure it has strict filesystem permissions.
-- GET  `/api/admin/audit/tail?lines=N` : Return the last N lines of the
-  append-only audit log (default 100).
-- GET  `/api/admin/audit/verify` : Verify the chained HMAC audit log and
-  return a result `{ ok: boolean, badIndex?: number }`.
-
-Authentication & environment variables
--------------------------------------
-- `ADMIN_TOKEN` : Optional global admin bearer token. If set, clients must send
-  `Authorization: Bearer <ADMIN_TOKEN>` unless they present a valid admin key
-  created via `/api/admin/keys`.
-- `ADMIN_HMAC_KEY` : Key used to HMAC admin tokens (used by AdminService).
-- `ADMIN_ALLOWED_IPS` : Comma-separated allowlist (supports `*` and `prefix*`)
-  for client IPs.
-- `ADMIN_RATE_LIMIT_WINDOW_MS` : Rate-limit window in ms (default: 60000).
-- `ADMIN_RATE_LIMIT_REQUESTS` : Allowed requests per window (default: 30).
-
-Audit
------
-The admin API appends best-effort audit entries for sensitive operations. The
-audit log is stored under the data directory (default `~/.yash/audit.log`) and
-is tamper-evident via a chained HMAC scheme. Do not expose the audit file over
-untrusted channels; use the `audit/verify` endpoint to verify integrity.
 
 
 Kick Webhook Relay
@@ -241,6 +212,11 @@ Example: counter obs.reconnect.failures -> obs_reconnect_failures_total
 
 Security note: /api/metrics and /metrics are unauthenticated by default. If you plan to
 expose them on a public network, add an ACL or authentication layer before enabling scraping.
+
+Practical recommendation:
+
+- leave metrics bound to localhost or an internal network by default
+- if you need remote scraping, set `YASH_METRICS_TOKEN` and still prefer a reverse proxy / firewall boundary
 
 Optional authentication
 -----------------------

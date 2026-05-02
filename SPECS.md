@@ -75,7 +75,6 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
 - Secrets security (encryption at rest, key rotation, OS keyring integration)
 - OS keyring integration (keytar) and related token migration scripts
 - Encrypted token storage and encryption-based admin key export/import (hybrid RSA+AES packages)
-- Admin endpoints that perform encryption/key export/import or rotation (e.g., /api/admin/rotate-key, /api/admin/export-key, /api/admin/keys/import)
 - Repository pre-commit hook installer and .githooks management (pre-commit hook installer scripts)
 - Any feature that depends on native keyring binaries or OS-specific keyring modules
 - Automatic migration/backup tooling for encrypted secrets
@@ -290,12 +289,6 @@ Configuration is stored in `[root]/config.json`. Environment variables take prec
 | GET | `/api/obs/status` | OBS connection status + metrics |
 | GET | `/api/metrics` | JSON metrics snapshot |
 | GET | `/metrics` | Prometheus text format metrics |
-| POST | `/api/admin/keys` | Create admin key |
-| GET | `/api/admin/keys` | List admin keys |
-| POST | `/api/admin/keys/revoke` | Revoke admin key: `{ id }` |
-| POST | `/api/admin/keys/update-roles` | Update key roles |
-| GET | `/api/admin/audit/tail` | Tail audit log: `?lines=<n>` |
-| GET | `/api/admin/audit/verify` | Verify audit log integrity |
 
 ## Project Structure
 ```

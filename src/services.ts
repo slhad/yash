@@ -1,7 +1,6 @@
 import { KickProvider } from './platforms/kick';
 import { TwitchProvider } from './platforms/twitch';
 import { YouTubeProvider } from './platforms/youtube';
-import AdminService from './services/admin.service';
 import { AuthService } from './services/auth.service';
 import { ChatService } from './services/chat.service';
 import { ObsService } from './services/obs.service';
@@ -22,7 +21,6 @@ export const obsService = new ObsService(
   true, // real WebSocket transport (OBS WebSocket v5)
 );
 export const authService = new AuthService();
-export const adminService = new AdminService();
 export const settingsStore = new SettingsStore();
 
 export const platforms = ['youtube', 'twitch', 'kick'];
