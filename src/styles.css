@@ -10,3 +10,427 @@ body {
   min-height: 100vh;
   padding: 1rem;
 }
+
+body.yash-root {
+  min-height: 100vh;
+}
+
+body.yash-root #root {
+  min-height: 100vh;
+}
+
+body.yash-unified,
+body.yash-sidebyside {
+  background: #0f0f1a;
+  color: #e0e0e0;
+  font-size: 14px;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+body.yash-unified *,
+body.yash-sidebyside * {
+  box-sizing: border-box;
+}
+
+body.yash-unified h1,
+body.yash-sidebyside h1 {
+  margin: 0;
+}
+
+body.yash-unified button,
+body.yash-unified select,
+body.yash-unified textarea,
+body.yash-sidebyside button,
+body.yash-sidebyside select,
+body.yash-sidebyside textarea {
+  font: inherit;
+}
+
+body.yash-unified header,
+body.yash-sidebyside header {
+  background: #1a1a2e;
+  border-bottom: 1px solid #2a2a4a;
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+body.yash-unified header {
+  justify-content: space-between;
+}
+
+body.yash-sidebyside header {
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+body.yash-unified header h1,
+body.yash-sidebyside header h1 {
+  color: #00c8ff;
+  font-size: 15px;
+  font-weight: bold;
+}
+
+body.yash-sidebyside header h1 {
+  margin-right: 4px;
+}
+
+body.yash-unified #position-btn,
+body.yash-sidebyside #position-btn,
+body.yash-sidebyside .toggle-btn,
+body.yash-unified #kick-webhook-copy {
+  background: #2a2a4a;
+  border: 1px solid #3a3a6a;
+  color: #a0a0c0;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+body.yash-unified #position-btn,
+body.yash-sidebyside #position-btn,
+body.yash-sidebyside .toggle-btn {
+  padding: 4px 10px;
+  font-size: 13px;
+}
+
+body.yash-sidebyside .toggle-btn {
+  transition:
+    background 0.15s,
+    color 0.15s;
+}
+
+body.yash-unified #position-btn:hover,
+body.yash-sidebyside #position-btn:hover,
+body.yash-sidebyside .toggle-btn:hover,
+body.yash-unified #kick-webhook-copy:hover {
+  background: #3a3a5a;
+  color: #e0e0e0;
+}
+
+body.yash-sidebyside .toggle-btn.active-youtube {
+  background: #cc0000;
+  border-color: #ff2222;
+  color: #fff;
+}
+
+body.yash-sidebyside .toggle-btn.active-twitch {
+  background: #6441a5;
+  border-color: #8855cc;
+  color: #fff;
+}
+
+body.yash-sidebyside .toggle-btn.active-kick {
+  background: #1a7a00;
+  border-color: #53fc18;
+  color: #53fc18;
+}
+
+body.yash-unified #messages,
+body.yash-sidebyside .col-messages {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+body.yash-unified #messages {
+  padding: 8px 12px;
+}
+
+body.yash-sidebyside .col-messages {
+  padding: 6px 8px;
+}
+
+body.yash-unified #messages::-webkit-scrollbar,
+body.yash-sidebyside .col-messages::-webkit-scrollbar,
+body.yash-sidebyside #system-feed::-webkit-scrollbar {
+  width: 6px;
+}
+
+body.yash-unified #messages::-webkit-scrollbar-track,
+body.yash-sidebyside .col-messages::-webkit-scrollbar-track,
+body.yash-sidebyside #system-feed::-webkit-scrollbar-track {
+  background: #1a1a2e;
+}
+
+body.yash-unified #messages::-webkit-scrollbar-thumb,
+body.yash-sidebyside .col-messages::-webkit-scrollbar-thumb,
+body.yash-sidebyside #system-feed::-webkit-scrollbar-thumb {
+  background: #3a3a6a;
+  border-radius: 3px;
+}
+
+body.yash-unified .msg,
+body.yash-sidebyside .msg {
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+body.yash-unified .msg .platform-tag {
+  font-size: 11px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  margin-right: 4px;
+  font-weight: bold;
+}
+
+body.yash-unified .tag-youtube {
+  background: #cc0000;
+  color: #fff;
+}
+
+body.yash-unified .tag-twitch {
+  background: #6441a5;
+  color: #fff;
+}
+
+body.yash-unified .tag-kick {
+  background: #53fc18;
+  color: #111;
+}
+
+body.yash-unified .tag-unknown {
+  background: #444;
+  color: #ccc;
+}
+
+body.yash-unified .msg .username,
+body.yash-sidebyside .msg .username {
+  color: #00c8ff;
+  margin-right: 4px;
+}
+
+body.yash-unified .msg .text,
+body.yash-sidebyside .msg .text {
+  color: #e0e0e0;
+}
+
+body.yash-unified #msgbox,
+body.yash-sidebyside #msgbox {
+  background: #1a1a2e;
+  border-top: 1px solid #2a2a4a;
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  flex-shrink: 0;
+}
+
+body.yash-unified #msgbox.position-top,
+body.yash-sidebyside #msgbox.position-top {
+  order: -1;
+  border-top: none;
+  border-bottom: 1px solid #2a2a4a;
+}
+
+.yash-msgbox-row {
+  display: flex;
+  gap: 6px;
+  align-items: flex-end;
+  width: 100%;
+}
+
+body.yash-unified #platform-select,
+body.yash-unified #message-input,
+body.yash-sidebyside #platform-select,
+body.yash-sidebyside #message-input {
+  background: #2a2a4a;
+  border: 1px solid #3a3a6a;
+  color: #e0e0e0;
+  padding: 6px 8px;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+body.yash-unified #platform-select,
+body.yash-sidebyside #platform-select {
+  flex-shrink: 0;
+}
+
+body.yash-unified #message-input,
+body.yash-sidebyside #message-input {
+  flex: 1;
+  resize: none;
+  min-height: 34px;
+  max-height: 80px;
+}
+
+body.yash-unified #message-input:focus,
+body.yash-unified #platform-select:focus,
+body.yash-sidebyside #message-input:focus,
+body.yash-sidebyside #platform-select:focus {
+  outline: none;
+  border-color: #00c8ff;
+}
+
+body.yash-unified #autocomplete-hint,
+body.yash-sidebyside #autocomplete-hint {
+  font-size: 11px;
+  color: #5a7a9a;
+  padding: 2px 4px;
+  min-height: 16px;
+}
+
+body.yash-unified #send-btn,
+body.yash-sidebyside #send-btn {
+  background: #00c8ff;
+  border: none;
+  color: #0f0f1a;
+  padding: 6px 14px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: bold;
+  cursor: pointer;
+  flex-shrink: 0;
+  height: 34px;
+}
+
+body.yash-unified #send-btn:hover,
+body.yash-sidebyside #send-btn:hover {
+  background: #00a8df;
+}
+
+body.yash-unified #send-btn:disabled,
+body.yash-sidebyside #send-btn:disabled {
+  background: #3a3a5a;
+  color: #666;
+  cursor: not-allowed;
+}
+
+body.yash-unified #status-bar {
+  background: #12122a;
+  border-bottom: 1px solid #2a2a4a;
+  padding: 4px 12px;
+  font-size: 12px;
+  color: #7a8aaa;
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+
+body.yash-unified #status-bar .platform-status {
+  color: #a0b0cc;
+}
+
+body.yash-unified #status-bar .online {
+  color: #4cff8a;
+}
+
+body.yash-unified #status-bar .offline {
+  color: #556;
+}
+
+body.yash-unified #kick-webhook-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+body.yash-unified #kick-webhook-row.is-hidden {
+  display: none;
+}
+
+body.yash-unified #kick-webhook-row code {
+  background: #1e1e3a;
+  border: 1px solid #3a3a6a;
+  border-radius: 3px;
+  padding: 1px 6px;
+  font-size: 11px;
+  color: #c0d0ff;
+  user-select: all;
+}
+
+body.yash-unified #kick-webhook-copy {
+  padding: 1px 7px;
+  border-radius: 3px;
+  font-size: 11px;
+}
+
+.yash-status-separator {
+  color: #334;
+}
+
+body.yash-sidebyside #position-btn {
+  margin-left: auto;
+}
+
+body.yash-sidebyside #system-feed {
+  background: #0f0f1a;
+  border-top: 1px solid #2a2a4a;
+  padding: 4px 12px;
+  font-size: 12px;
+  color: #888;
+  max-height: 80px;
+  overflow-y: auto;
+  flex-shrink: 0;
+  display: none;
+}
+
+body.yash-sidebyside #system-feed.visible {
+  display: block;
+}
+
+body.yash-sidebyside #system-feed .sys-line {
+  padding: 1px 0;
+}
+
+body.yash-sidebyside #columns {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+body.yash-sidebyside .column {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid #2a2a4a;
+  min-width: 0;
+  transition: flex 0.2s;
+}
+
+body.yash-sidebyside .column:last-child {
+  border-right: none;
+}
+
+body.yash-sidebyside .column.hidden {
+  flex: 0;
+  overflow: hidden;
+  border-right: none;
+}
+
+body.yash-sidebyside .col-header {
+  background: #1a1a2e;
+  border-bottom: 1px solid #2a2a4a;
+  padding: 6px 10px;
+  font-weight: bold;
+  font-size: 13px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+body.yash-sidebyside .col-header.youtube {
+  color: #ff4444;
+}
+
+body.yash-sidebyside .col-header.twitch {
+  color: #a970ff;
+}
+
+body.yash-sidebyside .col-header.kick {
+  color: #53fc18;
+}
+
+body.yash-sidebyside .no-msgs {
+  color: #444;
+  font-size: 12px;
+  text-align: center;
+  margin-top: 12px;
+}
