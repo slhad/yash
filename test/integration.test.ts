@@ -16,10 +16,19 @@ let kick: KickProvider;
 const originalYashDataDir = process.env.YASH_DATA_DIR;
 let testDataDir: string;
 
+beforeAll(async () => {
+  testDataDir = await makeRepoTempDir('yash-integration');
+  process.env.YASH_DATA_DIR = testDataDir;
+});
+
+afterAll(async () => {
+  if (originalYashDataDir === undefined) delete process.env.YASH_DATA_DIR;
+  else process.env.YASH_DATA_DIR = originalYashDataDir;
+  await removeRepoTempDir(testDataDir);
+});
+
 describe('Integration: Services and Providers', () => {
   beforeAll(async () => {
-    testDataDir = await makeRepoTempDir('yash-integration');
-    process.env.YASH_DATA_DIR = testDataDir;
     youtube = new YouTubeProvider();
     twitch = new TwitchProvider();
     kick = new KickProvider();
@@ -30,12 +39,6 @@ describe('Integration: Services and Providers', () => {
     chatService = new ChatService();
     streamService = new StreamService();
     obsService = new ObsService();
-  });
-
-  afterAll(async () => {
-    if (originalYashDataDir === undefined) delete process.env.YASH_DATA_DIR;
-    else process.env.YASH_DATA_DIR = originalYashDataDir;
-    await removeRepoTempDir(testDataDir);
   });
 
   test('should register providers with chat service', () => {
