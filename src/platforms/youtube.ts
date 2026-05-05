@@ -26,7 +26,7 @@
 
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { getConfig, reloadConfig } from '../utils/config';
+import { getConfig, reloadConfig, saveConfig } from '../utils/config';
 import { defaultLogger } from '../utils/logger';
 import type {
   AuthResult,
@@ -211,6 +211,11 @@ export class YouTubeProvider implements PlatformProvider {
     return path.join(YouTubeProvider.getDataDir(), 'youtube_tokens.json');
   }
 
+  constructor() {
+    this.loadCfg();
+    this.loadPersistedChapters();
+  }
+
   // ---------------------------------------------------------------------------
   // Config + token file helpers
   // ---------------------------------------------------------------------------
@@ -224,6 +229,48 @@ export class YouTubeProvider implements PlatformProvider {
       process.env.YOUTUBE_REDIRECT_URI ||
       'http://localhost:3000/api/youtube/callback';
     this.streamKey = cfg.streamKey || this.streamKey;
+  }
+
+  private loadPersistedChapters(): void {
+    const chapters = getConfig()?.stream?.chapters;
+    if (!Array.isArray(chapters)) {
+      this.chapterMarkers = [];
+      return;
+    }
+
+    this.chapterMarkers = chapters
+      .filter((item): item is Record<string, unknown> => !!item && typeof item === 'object')
+      .map((item) => {
+        const createdAtRaw = item.createdAt;
+        const createdAt =
+          typeof createdAtRaw === 'string' || createdAtRaw instanceof Date
+            ? new Date(createdAtRaw)
+            : new Date();
+        return {
+          id: typeof item.id === 'string' ? item.id : `yt_marker_${Date.now()}`,
+          createdAt: Number.isNaN(createdAt.getTime()) ? new Date() : createdAt,
+          description: typeof item.description === 'string' ? item.description : '',
+          positionInSeconds:
+            typeof item.positionInSeconds === 'number' && Number.isFinite(item.positionInSeconds)
+              ? item.positionInSeconds
+              : 0,
+          platform: 'youtube',
+          ...(typeof item.videoId === 'string' ? { videoId: item.videoId } : {}),
+          ...(typeof item.url === 'string' ? { url: item.url } : {}),
+        } satisfies StreamMarker;
+      });
+  }
+
+  private async persistChapters(): Promise<void> {
+    await saveConfig({
+      stream: {
+        chapters: this.chapterMarkers.map((marker) => ({
+          ...marker,
+          createdAt: marker.createdAt.toISOString(),
+        })),
+      },
+    });
+    await reloadConfig();
   }
 
   private async readTokenFile(): Promise<YouTubeTokenFile | null> {
@@ -625,6 +672,7 @@ export class YouTubeProvider implements PlatformProvider {
   async handleOAuthCallback(code: string): Promise<AuthResult> {
     await reloadConfig();
     this.loadCfg();
+    this.loadPersistedChapters();
     if (!this.clientId || !this.clientSecret) {
       return { success: false, error: 'YouTube clientId/clientSecret not configured' };
     }
@@ -691,10 +739,12 @@ export class YouTubeProvider implements PlatformProvider {
   async authenticate(): Promise<AuthResult> {
     if (process.env.NODE_ENV === 'test') {
       this.isAuthenticatedFlag = true;
+      this.loadPersistedChapters();
       return { success: true, accessToken: 'mock_youtube_access_token', expiresIn: 3600 };
     }
 
     this.loadCfg();
+    this.loadPersistedChapters();
 
     if (!this.clientId || !this.clientSecret) {
       return { success: false, error: 'YouTube credentials not configured' };
@@ -1117,19 +1167,132 @@ export class YouTubeProvider implements PlatformProvider {
     return this.streamStartTime;
   }
 
+  private async _resolveMarkerTimestamp(timestamp?: number): Promise<number> {
+    if (timestamp !== undefined) return timestamp;
+    if (this.streamStartTime) {
+      return Math.max(0, Math.floor((Date.now() - this.streamStartTime.getTime()) / 1000));
+    }
+
+    const activeBroadcast = await this._findActiveBroadcast();
+    if (!activeBroadcast) return 0;
+
+    this.broadcastId = activeBroadcast.id;
+    this.liveChatId = activeBroadcast.liveChatId;
+
+    const videoResp = await this._request(
+      `${YT_API}/videos?part=liveStreamingDetails&id=${activeBroadcast.id}`,
+    );
+    if (!videoResp.ok) return 0;
+
+    const videoData = (await videoResp.json()) as {
+      items?: Array<{ liveStreamingDetails?: { actualStartTime?: string } }>;
+    };
+    const actualStartTime = videoData.items?.[0]?.liveStreamingDetails?.actualStartTime;
+    if (!actualStartTime) return 0;
+
+    this.streamStartTime = new Date(actualStartTime);
+    return Math.max(0, Math.floor((Date.now() - this.streamStartTime.getTime()) / 1000));
+  }
+
+  private async _persistChapterDescription(): Promise<void> {
+    if (!this.isAuthenticated() || !this.tokenData) return;
+
+    const setup = this.getSetup();
+    if (!setup.chaptering.enabled || this.chapterMarkers.length === 0) return;
+
+    const streamConfig = getConfig()?.stream ?? {};
+    const userDesc =
+      typeof streamConfig.description === 'string' ? streamConfig.description : '';
+    const tags = Array.isArray(streamConfig.tags)
+      ? streamConfig.tags.filter((tag: unknown): tag is string => typeof tag === 'string')
+      : undefined;
+    const finalDescription = this.buildFinalDescription(userDesc, tags);
+    if (!finalDescription) return;
+
+    const target =
+      (this.broadcastId ? { id: this.broadcastId, liveChatId: this.liveChatId } : null) ??
+      (await this._findActiveBroadcast());
+    if (!target) {
+      defaultLogger.warn('[YouTube] createMarker — no active broadcast found for description sync');
+      return;
+    }
+
+    const getResp = await this._request(`${YT_API}/liveBroadcasts?part=id,snippet&id=${target.id}`);
+    if (!getResp.ok) {
+      throw new Error(`Failed to get broadcast: ${await getResp.text()}`);
+    }
+
+    const getData = (await getResp.json()) as {
+      items?: Array<{ id: string; snippet: Record<string, unknown> }>;
+    };
+    const current = getData.items?.[0];
+    if (!current) throw new Error('Broadcast not found');
+
+    const putResp = await this._request(`${YT_API}/liveBroadcasts?part=snippet`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        id: target.id,
+        snippet: { ...current.snippet, description: finalDescription },
+      }),
+    });
+    if (!putResp.ok) {
+      throw new Error(`Failed to update broadcast: ${await putResp.text()}`);
+    }
+
+    const videoGetResp = await this._request(`${YT_API}/videos?part=snippet&id=${target.id}`);
+    if (!videoGetResp.ok) {
+      throw new Error(`Failed to get video: ${await videoGetResp.text()}`);
+    }
+
+    const videoData = (await videoGetResp.json()) as {
+      items?: Array<{ id: string; snippet: Record<string, unknown> }>;
+    };
+    const video = videoData.items?.[0];
+    if (!video) throw new Error('Video not found');
+
+    const videoResp = await this._request(`${YT_API}/videos?part=snippet`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        id: target.id,
+        snippet: { ...video.snippet, description: finalDescription },
+      }),
+    });
+    if (!videoResp.ok) {
+      throw new Error(`Failed to update video: ${await videoResp.text()}`);
+    }
+
+    this.broadcastId = target.id;
+    this.liveChatId = target.liveChatId;
+    defaultLogger.info('[YouTube] chapter description synced to live video');
+  }
+
   // ---------------------------------------------------------------------------
   // Markers — in-memory chapter store
   // ---------------------------------------------------------------------------
 
   async createMarker(description?: string, timestamp?: number): Promise<StreamMarker | null> {
+    const derivedTimestamp = await this._resolveMarkerTimestamp(timestamp);
     const marker: StreamMarker = {
       id: `yt_marker_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
       createdAt: new Date(),
       description: description ?? '',
-      positionInSeconds: timestamp ?? 0,
+      positionInSeconds: derivedTimestamp,
       platform: 'youtube',
     };
     this.chapterMarkers.push(marker);
+    try {
+      await this.persistChapters();
+      await this._persistChapterDescription();
+    } catch (err) {
+      this.chapterMarkers = this.chapterMarkers.filter((item) => item.id !== marker.id);
+      try {
+        await this.persistChapters();
+      } catch (persistErr) {
+        defaultLogger.error('[YouTube] createMarker rollback persist error:', persistErr);
+      }
+      defaultLogger.error('[YouTube] createMarker description sync error:', err);
+      throw err;
+    }
     defaultLogger.info(
       `[YouTube] chapter marker stored — "${marker.description}" at ${marker.positionInSeconds}s (id: ${marker.id})`,
     );
@@ -1145,6 +1308,9 @@ export class YouTubeProvider implements PlatformProvider {
 
   clearMarkers(): void {
     this.chapterMarkers = [];
+    void this.persistChapters().catch((err) =>
+      defaultLogger.error('[YouTube] clearMarkers persist error:', err),
+    );
   }
 
   /**

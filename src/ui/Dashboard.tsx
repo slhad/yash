@@ -43,6 +43,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       return true;
     }
   });
+  const [showChatTimestamps, setShowChatTimestamps] = useState(true);
 
   // When showPlatformStatus changes, persist it
   useEffect(() => {
@@ -50,6 +51,33 @@ export const Dashboard: React.FC<DashboardProps> = ({
       localStorage.setItem('yash_showPlatformStatus', String(showPlatformStatus));
     } catch {}
   }, [showPlatformStatus]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadChatTimestampSetting = async () => {
+      try {
+        const res = await fetch('/api/settings?key=chat.timestamps.visible');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled) setShowChatTimestamps(data.value !== false);
+      } catch {}
+    };
+
+    const handleSettingsChanged = (event: Event) => {
+      const detail = (event as CustomEvent<{ key?: string; value?: unknown }>).detail;
+      if (!detail || detail.key !== 'chat.timestamps.visible') return;
+      setShowChatTimestamps(detail.value !== false);
+    };
+
+    void loadChatTimestampSetting();
+    window.addEventListener('yash:settings-changed', handleSettingsChanged);
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener('yash:settings-changed', handleSettingsChanged);
+    };
+  }, []);
   const [authStatus, setAuthStatus] = useState<Record<string, boolean>>({});
   const [streamStatus, setStreamStatus] = useState<Record<string, string>>({});
   const [connectionStatus, setConnectionStatus] = useState<Record<string, string>>({});
@@ -167,6 +195,25 @@ export const Dashboard: React.FC<DashboardProps> = ({
     borderRadius: '3px',
   };
 
+  const toggleChatTimestamps = async () => {
+    const next = !showChatTimestamps;
+    setShowChatTimestamps(next);
+
+    try {
+      const res = await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: 'chat.timestamps.visible', value: next }),
+      });
+
+      if (!res.ok) {
+        setShowChatTimestamps(!next);
+      }
+    } catch {
+      setShowChatTimestamps(!next);
+    }
+  };
+
   return (
     <div style={{ padding: '8px', backgroundColor: '#0f0f1a' }}>
       <div style={{ marginBottom: '8px' }}>
@@ -220,6 +267,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
               >
                 {showPlatformStatus ? '[x] Show Platform Status' : '[ ] Show Platform Status'}
               </button>
+              <button
+                type="button"
+                onClick={() => void toggleChatTimestamps()}
+                style={{
+                  ...btnStyle,
+                  backgroundColor: showChatTimestamps ? '#22c55e' : '#333',
+                }}
+              >
+                {showChatTimestamps ? '[x] Show Chat Timestamps' : '[ ] Show Chat Timestamps'}
+              </button>
             </div>
           </div>
         )}
@@ -252,7 +309,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
             <div style={{ marginBottom: '8px' }}>
               <span style={{ fontWeight: 'bold' }}>Unified Chat</span>
             </div>
-            <ChatDisplay messages={messages} showTimestamps={true} />
+            <ChatDisplay messages={messages} showTimestamps={showChatTimestamps} />
           </div>
 
           <MessageInput

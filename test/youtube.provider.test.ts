@@ -1,7 +1,14 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import * as fs from 'node:fs/promises';
 import { StreamStatus } from '../src/platforms/base';
 import { YouTubeProvider } from '../src/platforms/youtube';
-import { makeRepoTempDirSync, removeRepoTempDirSync } from './helpers/testDataDir';
+import { getConfigPath, reloadConfig } from '../src/utils/config';
+import {
+  makeRepoTempDir,
+  makeRepoTempDirSync,
+  removeRepoTempDir,
+  removeRepoTempDirSync,
+} from './helpers/testDataDir';
 
 const originalNodeEnv = process.env.NODE_ENV;
 const originalYashDataDir = process.env.YASH_DATA_DIR;
@@ -22,7 +29,10 @@ afterAll(() => {
 });
 
 function makeProvider() {
-  return new YouTubeProvider();
+  const provider = new YouTubeProvider() as any;
+  provider.chapterMarkers = [];
+  provider.persistChapters = async () => {};
+  return provider as YouTubeProvider;
 }
 
 // ---------------------------------------------------------------------------
@@ -212,10 +222,188 @@ describe('YouTubeProvider — markers', () => {
     expect(marker!.positionInSeconds).toBe(0);
   });
 
+  test('createMarker derives positionInSeconds from streamStartTime when live', async () => {
+    const p = makeProvider() as any;
+    p.streamStartTime = new Date(Date.now() - 95_000);
+    const marker = await p.createMarker('Chapter');
+    expect(marker!.positionInSeconds).toBeGreaterThanOrEqual(95);
+    expect(marker!.positionInSeconds).toBeLessThanOrEqual(96);
+  });
+
+  test('createMarker derives positionInSeconds from live API data when streamStartTime is missing', async () => {
+    const p = makeProvider() as any;
+    p.isAuthenticatedFlag = true;
+    p.tokenData = {
+      accessToken: 'token',
+      refreshToken: 'refresh',
+      expiresIn: 3600,
+      obtainmentTimestamp: Date.now(),
+      channelId: 'chan',
+      channelTitle: 'title',
+    };
+    p.streamKey = 'saved_stream_key';
+    p.getSetup = () => ({
+      defaultPlaylist: { enabled: false, playlistId: '', playlistTitle: '' },
+      subjectPlaylist: { enabled: false },
+      chaptering: { enabled: false },
+      tags: { enabled: false },
+      description: { enabled: false },
+      subjectTitle: { enabled: false },
+    });
+    p._findStreamIdByKey = async () => 'stream-saved';
+    p._request = async (url: string) => {
+      if (url.includes('/liveBroadcasts?part=id,snippet,status,contentDetails&mine=true')) {
+        return new Response(
+          JSON.stringify({
+            items: [
+              {
+                id: 'live-broadcast',
+                snippet: { liveChatId: 'chat-live' },
+                status: { lifeCycleStatus: 'live' },
+                contentDetails: { boundStreamId: 'stream-saved' },
+              },
+            ],
+          }),
+        );
+      }
+
+      if (url.includes('/videos?part=liveStreamingDetails&id=live-broadcast')) {
+        return new Response(
+          JSON.stringify({
+            items: [
+              {
+                liveStreamingDetails: {
+                  actualStartTime: new Date(Date.now() - 95_000).toISOString(),
+                },
+              },
+            ],
+          }),
+        );
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    };
+
+    const marker = await p.createMarker('Chapter');
+    expect(marker!.positionInSeconds).toBeGreaterThanOrEqual(95);
+    expect(marker!.positionInSeconds).toBeLessThanOrEqual(96);
+  });
+
+  test('createMarker preserves an explicit 0 timestamp when streamStartTime exists', async () => {
+    const p = makeProvider() as any;
+    p.streamStartTime = new Date(Date.now() - 95_000);
+    const marker = await p.createMarker('Intro', 0);
+    expect(marker!.positionInSeconds).toBe(0);
+  });
+
   test('createMarker stores provided timestamp', async () => {
     const p = makeProvider();
     const marker = await p.createMarker('Q&A', 3600);
     expect(marker!.positionInSeconds).toBe(3600);
+  });
+
+  test('createMarker persists chapter descriptions to the current YouTube video', async () => {
+    const p = makeProvider() as any;
+    p.isAuthenticatedFlag = true;
+    p.tokenData = {
+      accessToken: 'token',
+      refreshToken: 'refresh',
+      expiresIn: 3600,
+      obtainmentTimestamp: Date.now(),
+      channelId: 'chan',
+      channelTitle: 'title',
+    };
+    p.broadcastId = 'live-broadcast';
+    p.liveChatId = 'chat-live';
+    p.getSetup = () => ({
+      defaultPlaylist: { enabled: false, playlistId: '', playlistTitle: '' },
+      subjectPlaylist: { enabled: false },
+      chaptering: { enabled: true },
+      tags: { enabled: false },
+      description: { enabled: false },
+      subjectTitle: { enabled: false },
+    });
+
+    const broadcastPutBodies: any[] = [];
+    const videoPutBodies: any[] = [];
+    p._request = async (url: string, options: RequestInit = {}) => {
+      if (url.includes('/liveBroadcasts?part=id,snippet&id=live-broadcast')) {
+        return new Response(
+          JSON.stringify({
+            items: [{ id: 'live-broadcast', snippet: { title: 'Live title' } }],
+          }),
+        );
+      }
+
+      if (url.includes('/liveBroadcasts?part=snippet') && options.method === 'PUT') {
+        broadcastPutBodies.push(JSON.parse(String(options.body)));
+        return new Response(JSON.stringify({ ok: true }));
+      }
+
+      if (url.includes('/videos?part=snippet&id=live-broadcast')) {
+        return new Response(
+          JSON.stringify({
+            items: [
+              {
+                id: 'live-broadcast',
+                snippet: {
+                  title: 'Video title',
+                  description: 'Old description',
+                  categoryId: '20',
+                },
+              },
+            ],
+          }),
+        );
+      }
+
+      if (url.includes('/videos?part=snippet') && options.method === 'PUT') {
+        videoPutBodies.push(JSON.parse(String(options.body)));
+        return new Response(JSON.stringify({ ok: true }));
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    };
+
+    await p.createMarker('Intro', 0);
+    await p.createMarker('Topic', 60);
+
+    expect(broadcastPutBodies).toHaveLength(2);
+    expect(videoPutBodies).toHaveLength(2);
+    expect(videoPutBodies[0].snippet.description).toContain('Timestamps :\n0:00 Intro');
+    expect(videoPutBodies[1].snippet.description).toContain('Timestamps :\n0:00 Intro\n1:00 Topic');
+  });
+
+  test('createMarker rolls back the marker when description sync fails', async () => {
+    const p = makeProvider() as any;
+    p.isAuthenticatedFlag = true;
+    p.tokenData = {
+      accessToken: 'token',
+      refreshToken: 'refresh',
+      expiresIn: 3600,
+      obtainmentTimestamp: Date.now(),
+      channelId: 'chan',
+      channelTitle: 'title',
+    };
+    p.broadcastId = 'live-broadcast';
+    p.liveChatId = 'chat-live';
+    p.getSetup = () => ({
+      defaultPlaylist: { enabled: false, playlistId: '', playlistTitle: '' },
+      subjectPlaylist: { enabled: false },
+      chaptering: { enabled: true },
+      tags: { enabled: false },
+      description: { enabled: false },
+      subjectTitle: { enabled: false },
+    });
+    p._request = async (url: string) => {
+      if (url.includes('/liveBroadcasts?part=id,snippet&id=live-broadcast')) {
+        return new Response(JSON.stringify({ items: [] }));
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    };
+
+    await expect(p.createMarker('Broken', 15)).rejects.toThrow('Broadcast not found');
+    expect(await p.getMarkers({ limit: 10 })).toHaveLength(0);
   });
 
   test('getMarkers returns all markers in order', async () => {
@@ -265,6 +453,83 @@ describe('YouTubeProvider — markers', () => {
 
     const all = await p.getMarkers();
     expect(all).toHaveLength(2);
+  });
+
+  test('createMarker persists chapters into config.json and a new provider reloads them', async () => {
+    const tempDir = await makeRepoTempDir('yash-youtube-chapters-persist');
+    const originalYashDataDir = process.env.YASH_DATA_DIR;
+
+    try {
+      process.env.YASH_DATA_DIR = tempDir;
+      await fs.writeFile(
+        getConfigPath(),
+        `${JSON.stringify({ stream: { title: 'Persisted title', chapters: [] } }, null, 2)}\n`,
+        'utf8',
+      );
+
+      await reloadConfig();
+      const p = new YouTubeProvider();
+      await p.createMarker('Persisted Intro', 42);
+
+      const savedConfig = JSON.parse(await fs.readFile(getConfigPath(), 'utf8'));
+      expect(savedConfig.stream.chapters).toHaveLength(1);
+      expect(savedConfig.stream.chapters[0].description).toBe('Persisted Intro');
+      expect(savedConfig.stream.chapters[0].positionInSeconds).toBe(42);
+
+      await reloadConfig();
+      const reloaded = new YouTubeProvider();
+      const markers = await reloaded.getMarkers({ limit: 10 });
+      expect(markers).toHaveLength(1);
+      expect(markers[0]?.description).toBe('Persisted Intro');
+      expect(markers[0]?.positionInSeconds).toBe(42);
+    } finally {
+      if (originalYashDataDir === undefined) delete process.env.YASH_DATA_DIR;
+      else process.env.YASH_DATA_DIR = originalYashDataDir;
+      await removeRepoTempDir(tempDir);
+    }
+  });
+
+  test('clearMarkers removes persisted chapters from config.json', async () => {
+    const tempDir = await makeRepoTempDir('yash-youtube-chapters-clear');
+    const originalYashDataDir = process.env.YASH_DATA_DIR;
+
+    try {
+      process.env.YASH_DATA_DIR = tempDir;
+      await fs.writeFile(
+        getConfigPath(),
+        `${JSON.stringify(
+          {
+            stream: {
+              chapters: [
+                {
+                  id: 'yt_marker_saved',
+                  createdAt: '2026-05-05T21:00:00.000Z',
+                  description: 'Saved marker',
+                  positionInSeconds: 15,
+                  platform: 'youtube',
+                },
+              ],
+            },
+          },
+          null,
+          2,
+        )}\n`,
+        'utf8',
+      );
+
+      await reloadConfig();
+      const p = new YouTubeProvider();
+      expect(await p.getMarkers({ limit: 10 })).toHaveLength(1);
+      p.clearMarkers();
+      await new Promise((resolve) => setTimeout(resolve, 25));
+
+      const savedConfig = JSON.parse(await fs.readFile(getConfigPath(), 'utf8'));
+      expect(savedConfig.stream.chapters).toEqual([]);
+    } finally {
+      if (originalYashDataDir === undefined) delete process.env.YASH_DATA_DIR;
+      else process.env.YASH_DATA_DIR = originalYashDataDir;
+      await removeRepoTempDir(tempDir);
+    }
   });
 });
 

@@ -7,12 +7,12 @@ unified interface. Written to run on Bun. This repository contains:
 
 - src/: TypeScript source (platform providers, services, UI)
 - test/: Unit and integration tests (run with `bun test`)
-- config.json: (local config) Not committed — use config.example.json as a template and create a local config.json with your secrets.
+- config.example.json: Template for the runtime config stored at `YASH_DATA_DIR/config.json` (defaults to `~/.yash/config.json`)
 
 Quickstart
 
 1. Install dependencies: `bun install`
-2. Copy `config.example.json` to `config.json`
+2. Copy `config.example.json` to `${YASH_DATA_DIR:-$HOME/.yash}/config.json`
 3. Run checks: `bun test` or `bun typecheck`
 4. Launch the full app: `bun run start`
 
@@ -29,11 +29,15 @@ Important: running the TUI process and web server as separate long-lived process
 
 Configuration
 -------------
-This project reads configuration from `config.json` in the repository root during local runs and tests. Do NOT commit secrets.
+This project reads runtime configuration from `YASH_DATA_DIR/config.json`; when `YASH_DATA_DIR` is unset, the default path is `~/.yash/config.json`. Do NOT commit secrets.
 
-1. Copy `config.example.json` to `config.json` and update values that are local-only (obs websocket password, stream keys, etc.).
-   - `cp config.example.json config.json`
-2. Add `config.json` to `.gitignore` if it's not already ignored (this repository's .gitignore already includes `config.json`).
+On startup, YASH performs a one-time migration from the legacy repository-root `config.json` when that legacy file exists and the runtime config file does not yet exist.
+
+1. Copy `config.example.json` to your runtime config location and update values that are local-only (OBS websocket password, stream keys, etc.).
+   - `mkdir -p "${YASH_DATA_DIR:-$HOME/.yash}" && cp config.example.json "${YASH_DATA_DIR:-$HOME/.yash}/config.json"`
+2. If you already have a legacy repo-root `config.json`, YASH will migrate it once automatically the first time it starts without an existing runtime config file.
+
+UI display preferences are stored separately in `settings.json` under `YASH_DATA_DIR` or, by default, `~/.yash/settings.json`. That includes TUI/WebUI display toggles such as sidebar visibility, message placement, and chat timestamp visibility.
 
 Security posture
 ----------------
@@ -47,7 +51,7 @@ This build uses file-backed local configuration and token storage. The following
 
 Operationally, that means:
 
-- `config.json` and the files under `~/.yash/` should be treated as sensitive local secrets
+- `YASH_DATA_DIR/config.json` and the other files under `YASH_DATA_DIR` (default `~/.yash/`) should be treated as sensitive local secrets
 - this repository is suitable for local or otherwise controlled environments, not as-is for broad public multi-tenant deployment
 - if you expose the web server beyond localhost, you should add a reverse proxy / network ACL layer and explicit authentication controls around any sensitive endpoints
 
@@ -69,7 +73,7 @@ flowchart TD
     A["User runs /stream in TUI or submits stream form in WebUI"] --> B["Collect selected platforms and metadata fields"]
     B --> C{"Any metadata changed?"}
     C -- No --> C1["Stop: no-op, report 'No changes'"]
-    C -- Yes --> D["Persist merged stream metadata to config.json"]
+    C -- Yes --> D["Persist merged stream metadata to YASH_DATA_DIR/config.json"]
     D --> E["Call StreamService.setStreamMetadata(targetPlatforms, mergedMetadata)"]
 
     E --> F{"For each selected provider"}
@@ -127,7 +131,7 @@ Notes:
 
 OBS Reconnection & Backoff
 --------------------------
-You can tune the OBS websocket reconnection and backoff behaviour via environment variables or `config.json` (under `obs.websocket`). Environment variables take precedence and are useful for CI/runtime overrides.
+You can tune the OBS websocket reconnection and backoff behaviour via environment variables or the runtime config file at `YASH_DATA_DIR/config.json` (default `~/.yash/config.json`, under `obs.websocket`). Environment variables take precedence and are useful for CI/runtime overrides.
 
 Environment variables (examples & defaults):
 
@@ -148,7 +152,7 @@ export YASH_OBS_RECONNECT_MULTIPLIER=2
 export YASH_OBS_RECONNECT_MAX_ATTEMPTS=10
 ```
 
-Or in `config.json`:
+Or in `~/.yash/config.json` (or `$YASH_DATA_DIR/config.json` if overridden):
 
 ```
 {
@@ -168,7 +172,7 @@ Notes: values supplied via environment variables are parsed as strings and cast 
 
 CI and secrets
 --------------
-- For CI, provide secrets via environment variables or a secrets manager (do not commit config.json with credentials).
+- For CI, provide secrets via environment variables or a secrets manager (do not commit runtime config files with credentials).
 - There is also a gitleaks GitHub Action to scan history and PRs for secrets. Review gitleaks results in CI and tune if required.
 - CI secret injection reduces accidental commits; it does not change the runtime fact that YASH persists tokens/config to local files in this build.
 

@@ -25,8 +25,7 @@
     }
   },
   "chat": {
-    "maxHistorySize": 1000,
-    "showTimestamps": true
+    "maxHistorySize": 1000
   },
   "server": {
     "port": 3000,

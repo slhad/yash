@@ -3,12 +3,14 @@
  *
  * Covers:
  *   - parseMarkerArgs()     — pipe-split argument parsing
+ *   - parseMarkersArgs()    — marker list argument parsing
  *   - parseSettingsValue()  — JSON-parse-with-string-fallback
- *   - handleWebCommand()    — full command dispatcher (all 5 WebUI commands)
+ *   - handleWebCommand()    — full command dispatcher
  *     • plain message passthrough (returns false)
  *     • /help
  *     • /msg
  *     • /marker
+ *     • /markers
  *     • /connect  (Twitch redirect + YouTube/Kick auth)
  *     • /settings get / set
  *     • unknown command
@@ -17,7 +19,12 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { handleWebCommand, parseMarkerArgs, parseSettingsValue } from '../src/utils/webCommands';
+import {
+  handleWebCommand,
+  parseMarkerArgs,
+  parseMarkersArgs,
+  parseSettingsValue,
+} from '../src/utils/webCommands';
 
 // ─── parseMarkerArgs ─────────────────────────────────────────────────────────
 
@@ -67,6 +74,28 @@ describe('parseMarkerArgs', () => {
   test('whitespace-only description → no description field', () => {
     const result = parseMarkerArgs(['   ']);
     expect(result.description).toBeUndefined();
+  });
+});
+
+describe('parseMarkersArgs', () => {
+  test('empty args → default object', () => {
+    expect(parseMarkersArgs([])).toEqual({});
+  });
+
+  test('platform only → platform filter', () => {
+    expect(parseMarkersArgs(['youtube'])).toEqual({ platforms: ['youtube'] });
+  });
+
+  test('all + limit → limit only', () => {
+    expect(parseMarkersArgs(['all', '5'])).toEqual({ platforms: undefined, limit: 5 });
+  });
+
+  test('limit only → numeric limit', () => {
+    expect(parseMarkersArgs(['10'])).toEqual({ limit: 10 });
+  });
+
+  test('invalid limit → error', () => {
+    expect(parseMarkersArgs(['youtube', 'nope']).error).toContain('Invalid limit');
   });
 });
 
@@ -325,6 +354,71 @@ describe('handleWebCommand — /marker', () => {
   });
 });
 
+describe('handleWebCommand — /markers', () => {
+  test('plain /markers → GETs /api/stream/markers for all platforms', async () => {
+    const { calls } = mockFetch((url) => {
+      if (url.startsWith('/api/stream/markers')) return { ok: true, body: { markers: [] } };
+      return { ok: false };
+    });
+
+    const result = await handleWebCommand('/markers', { platforms: [] });
+    expect(result).toBe(true);
+    expect(calls[0]?.url).toContain('/api/stream/markers?');
+    expect(calls[0]?.url).toContain('platform=youtube');
+    expect(calls[0]?.url).toContain('platform=twitch');
+    expect(calls[0]?.url).toContain('platform=kick');
+  });
+
+  test('/markers youtube 5 → GETs filtered markers', async () => {
+    const { calls } = mockFetch((url) => {
+      if (url.startsWith('/api/stream/markers')) return { ok: true, body: { markers: [] } };
+      return { ok: false };
+    });
+
+    await handleWebCommand('/markers youtube 5', { platforms: [] });
+    expect(calls[0]?.url).toContain('platform=youtube');
+    expect(calls[0]?.url).toContain('limit=5');
+  });
+
+  test('response summary shown via feedback', async () => {
+    mockFetch((url) => {
+      if (url.startsWith('/api/stream/markers')) {
+        return {
+          ok: true,
+          body: {
+            markers: [
+              { platform: 'youtube', markers: [{ positionInSeconds: 10, description: 'Intro' }] },
+              { platform: 'twitch', markers: [], error: 'not authenticated' },
+            ],
+          },
+        };
+      }
+      return { ok: false };
+    });
+    const feedback: Array<[string, string]> = [];
+    await handleWebCommand('/markers', {
+      platforms: [],
+      feedback: (l, t) => feedback.push([l, t]),
+    });
+    const markersFeedback = feedback.find(([l]) => l === 'markers');
+    expect(markersFeedback).toBeDefined();
+    expect(markersFeedback![1]).toContain('youtube');
+    expect(markersFeedback![1]).toContain('Intro');
+    expect(markersFeedback![1]).toContain('twitch');
+  });
+
+  test('invalid limit → usage feedback', async () => {
+    const { calls } = mockFetch(() => ({ ok: true, body: {} }));
+    const feedback: Array<[string, string]> = [];
+    await handleWebCommand('/markers youtube nope', {
+      platforms: [],
+      feedback: (l, t) => feedback.push([l, t]),
+    });
+    expect(calls).toHaveLength(0);
+    expect(feedback.some(([, t]) => t.includes('Usage'))).toBe(true);
+  });
+});
+
 // ── /connect ──────────────────────────────────────────────────────────────────
 
 describe('handleWebCommand — /connect', () => {
@@ -440,6 +534,34 @@ describe('handleWebCommand — /settings', () => {
     expect(body.value).toBe('bottom');
   });
 
+  test('/settings set chat.timestamps.visible false → POSTs false and emits settings event', async () => {
+    const { calls } = mockFetch(() => ({ ok: true, body: {} }));
+    const realWindow = (globalThis as any).window;
+    const dispatched: Event[] = [];
+    (globalThis as any).window = {
+      dispatchEvent: (event: Event) => {
+        dispatched.push(event);
+        return true;
+      },
+    };
+
+    try {
+      await handleWebCommand('/settings set chat.timestamps.visible false', { platforms: [] });
+    } finally {
+      (globalThis as any).window = realWindow;
+    }
+
+    const body = JSON.parse(calls[0]!.init!.body as string);
+    expect(body.key).toBe('chat.timestamps.visible');
+    expect(body.value).toBe(false);
+    expect(dispatched).toHaveLength(1);
+    expect((dispatched[0] as CustomEvent).type).toBe('yash:settings-changed');
+    expect((dispatched[0] as CustomEvent).detail).toEqual({
+      key: 'chat.timestamps.visible',
+      value: false,
+    });
+  });
+
   test('/settings with no op → usage hint, no fetch', async () => {
     const { calls } = mockFetch(() => ({ ok: true }));
     const feedback: Array<[string, string]> = [];
@@ -487,6 +609,16 @@ describe('handleWebCommand — case insensitivity', () => {
     const result = await handleWebCommand('/MARKER Intro', { platforms: [] });
     expect(result).toBe(true);
     expect(calls.some((c) => c.url === '/api/stream/marker')).toBe(true);
+  });
+
+  test('/MARKERS is treated the same as /markers', async () => {
+    const { calls } = mockFetch((url) => ({
+      ok: true,
+      body: url.startsWith('/api/stream/markers') ? { markers: [] } : {},
+    }));
+    const result = await handleWebCommand('/MARKERS 3', { platforms: [] });
+    expect(result).toBe(true);
+    expect(calls.some((c) => c.url.startsWith('/api/stream/markers'))).toBe(true);
   });
 
   test('/Help is treated the same as /help', async () => {

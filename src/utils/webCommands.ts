@@ -10,7 +10,7 @@
  *      pre-built bundle from `GET /api/js/commands.js` at runtime.
  *
  * TUI-only commands (/exit, /logs) are intentionally absent here.
- * Available commands: /help, /msg, /marker, /connect, /settings
+ * Available commands: /help, /msg, /marker, /markers, /connect, /settings
  */
 
 /** Callback used to surface system feedback inside the page UI. */
@@ -60,6 +60,33 @@ export function parseMarkerArgs(parts: string[]): { description?: string; timest
   return { description, timestamp };
 }
 
+export function parseMarkersArgs(
+  parts: string[],
+): { platforms?: string[]; limit?: number; error?: string } {
+  if (parts.length === 0) return {};
+
+  const first = (parts[0] ?? '').toLowerCase();
+  const validPlatforms = ['all', 'youtube', 'twitch', 'kick'];
+  let platforms: string[] | undefined;
+  let limitPart: string | undefined;
+
+  if (validPlatforms.includes(first)) {
+    platforms = first === 'all' ? undefined : [first];
+    limitPart = parts[1];
+  } else {
+    limitPart = parts[0];
+  }
+
+  if (limitPart === undefined) return { platforms };
+
+  const parsed = Number.parseInt(limitPart, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return { platforms, error: `Invalid limit "${limitPart}"` };
+  }
+
+  return { platforms, limit: parsed };
+}
+
 /**
  * Parse a settings value token: attempt JSON.parse, fall back to raw string.
  * Allows callers to write  `/settings set title.visible true`  (boolean) or
@@ -75,7 +102,15 @@ export function parseSettingsValue(raw: string): unknown {
 
 // ─── Autocomplete ─────────────────────────────────────────────────────────────
 
-const VALID_COMMANDS = ['/connect', '/help', '/marker', '/msg', '/settings', '/setup-youtube'];
+const VALID_COMMANDS = [
+  '/connect',
+  '/help',
+  '/marker',
+  '/markers',
+  '/msg',
+  '/settings',
+  '/setup-youtube',
+];
 
 /**
  * Returns a hint string for the current input value, or `null` if no hint
@@ -87,6 +122,7 @@ const VALID_COMMANDS = ['/connect', '/help', '/marker', '/msg', '/settings', '/s
  *   "/settings "        → "get | set"
  *   "/settings get "    → "<key>  e.g. title.visible"
  *   "/marker"           → "[description] [| timestamp_s]"
+ *   "/markers"          → "[all|youtube|twitch|kick] [limit]"
  */
 export function getWebAutocomplete(input: string): string | null {
   const trimmed = input.trimStart();
@@ -130,6 +166,10 @@ export function getWebAutocomplete(input: string): string | null {
     return '[description] [| timestamp_s]';
   }
 
+  if (cmd === '/markers') {
+    return '[all|youtube|twitch|kick] [limit]';
+  }
+
   if (cmd === '/settings') {
     if (parts.length === 0 || (parts.length === 1 && !rest.endsWith(' '))) {
       return 'get | set';
@@ -162,6 +202,7 @@ const SETTINGS_KEYS = [
   'viewers.visible',
   'viewers.mode',
   'messages.position',
+  'chat.timestamps.visible',
   'events.visible',
   'events.tail',
   'events.width',
@@ -259,6 +300,48 @@ export async function handleWebCommand(text: string, ctx: WebCommandContext): Pr
     return true;
   }
 
+  // ── /markers [all|youtube|twitch|kick] [limit] ───────────────────────────
+  if (cmd === '/markers') {
+    const parsed = parseMarkersArgs(parts.slice(1));
+    if (parsed.error) {
+      fb('markers', `Usage: /markers [all|youtube|twitch|kick] [limit] (${parsed.error})`);
+      return true;
+    }
+
+    const targetPlatforms =
+      parsed.platforms ?? (ctx.platforms.length > 0 ? ctx.platforms : [...VALID_PLATFORMS]);
+    const qs = new URLSearchParams();
+    for (const platform of targetPlatforms) qs.append('platform', platform);
+    if (parsed.limit !== undefined) qs.set('limit', String(parsed.limit));
+
+    try {
+      const res = await fetch(`/api/stream/markers?${qs.toString()}`);
+      if (!res.ok) {
+        fb('markers', 'Failed to fetch markers.');
+        return true;
+      }
+      const data = await res.json();
+      const groups = (data.markers as Array<{
+        platform: string;
+        markers?: Array<{ positionInSeconds: number; description: string }>;
+        error?: string;
+      }>)
+        .map((entry) => {
+          if (entry.error) return `${entry.platform}: ${entry.error}`;
+          const markers = entry.markers ?? [];
+          if (markers.length === 0) return `${entry.platform}: none`;
+          return `${entry.platform}: ${markers
+            .map((m) => `${m.positionInSeconds}s ${m.description || '(untitled)'}`)
+            .join(', ')}`;
+        })
+        .join(' | ');
+      fb('markers', groups || 'No markers found.');
+    } catch {
+      fb('markers', 'Failed to fetch markers.');
+    }
+    return true;
+  }
+
   // ── /connect <youtube|twitch|kick> ───────────────────────────────────────
   if (cmd === '/connect') {
     const platform = parts[1]?.toLowerCase();
@@ -314,6 +397,11 @@ export async function handleWebCommand(text: string, ctx: WebCommandContext): Pr
         });
         if (res.ok) {
           fb('settings', `set ${key} = ${JSON.stringify(value)}`);
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(
+              new CustomEvent('yash:settings-changed', { detail: { key, value } }),
+            );
+          }
         } else {
           fb('settings', 'Failed to write setting.');
         }

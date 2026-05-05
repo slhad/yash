@@ -22,6 +22,7 @@ describe('TUI_COMMANDS', () => {
       '/info',
       '/logs',
       '/marker',
+      '/markers',
       '/msg',
       '/settings',
     ];
@@ -89,19 +90,21 @@ describe('getAutocomplete', () => {
     expect(result.hints).toEqual(['/info']);
   });
 
-  test('/mark → completes to /marker', () => {
+  test('/mark → completes to shared prefix /marker', () => {
     const result = getAutocomplete('/mark');
     expect(result.completion).toBe('/marker');
-    expect(result.hints).toEqual(['/marker']);
+    expect(result.hints).toContain('/marker');
+    expect(result.hints).toContain('/markers');
   });
 
   // ── ambiguous prefix → partial completion to longest common prefix ──────────
 
-  test('/m → partial completion to /m (ambiguous: /marker, /msg)', () => {
+  test('/m → partial completion to /m (ambiguous: /marker, /markers, /msg)', () => {
     const result = getAutocomplete('/m');
     expect(result.hints).toContain('/marker');
+    expect(result.hints).toContain('/markers');
     expect(result.hints).toContain('/msg');
-    // The longest common prefix of /marker and /msg is "/m" which equals the
+    // The longest common prefix still equals the current input.
     // input, so completion should be null (no advance possible)
     expect(result.completion).toBeNull();
   });
@@ -131,10 +134,11 @@ describe('getAutocomplete', () => {
     expect(result.hints).toEqual(['/help']);
   });
 
-  test('exact /marker → completion is /marker (single match), hints [/marker]', () => {
+  test('exact /marker → ambiguous with /markers, so no advance but both hints remain', () => {
     const result = getAutocomplete('/marker');
-    expect(result.completion).toBe('/marker');
-    expect(result.hints).toEqual(['/marker']);
+    expect(result.completion).toBeNull();
+    expect(result.hints).toContain('/marker');
+    expect(result.hints).toContain('/markers');
   });
 
   // ── case insensitivity ───────────────────────────────────────────────────────

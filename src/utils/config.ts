@@ -1,22 +1,78 @@
 // Simple config loader used by services that need runtime configuration.
-// Returns parsed JSON from the repository root config.json with a safe fallback.
+// Runtime config lives under the data dir (~/.yash by default) and may be
+// migrated once from a legacy repo-root config.json.
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { defaultLogger } from './logger';
 
 // Cached config object after first load. Tests expect getConfig() to return
 // the same object that was returned by loadConfig().
 let cachedConfig: any;
 
+const CONFIG_FILENAME = 'config.json';
+
+export function getDataDir(): string {
+  return process.env.YASH_DATA_DIR || path.join(process.env.HOME || '.', '.yash');
+}
+
+export function getConfigPath(): string {
+  return path.join(getDataDir(), CONFIG_FILENAME);
+}
+
+export function getLegacyConfigPath(): string {
+  return path.join(process.cwd(), CONFIG_FILENAME);
+}
+
+function loadConfigFileSync(filePath: string): any {
+  const raw = fs.readFileSync(filePath, 'utf8');
+  return JSON.parse(raw);
+}
+
+async function loadConfigFile(filePath: string): Promise<any> {
+  const raw = await fs.promises.readFile(filePath, 'utf8');
+  return JSON.parse(raw);
+}
+
+function ensureConfigMigratedSync(): void {
+  const configPath = getConfigPath();
+  const legacyConfigPath = getLegacyConfigPath();
+  if (fs.existsSync(configPath) || !fs.existsSync(legacyConfigPath)) return;
+
+  fs.mkdirSync(path.dirname(configPath), { recursive: true });
+  fs.copyFileSync(legacyConfigPath, configPath);
+  defaultLogger.info(`Migrated legacy config.json to ${configPath}`);
+}
+
+async function ensureConfigMigrated(): Promise<void> {
+  const configPath = getConfigPath();
+  const legacyConfigPath = getLegacyConfigPath();
+  try {
+    await fs.promises.access(configPath, fs.constants.F_OK);
+    return;
+  } catch {}
+
+  try {
+    await fs.promises.access(legacyConfigPath, fs.constants.F_OK);
+  } catch {
+    return;
+  }
+
+  await fs.promises.mkdir(path.dirname(configPath), { recursive: true });
+  await fs.promises.copyFile(legacyConfigPath, configPath);
+  defaultLogger.info(`Migrated legacy config.json to ${configPath}`);
+}
+
 export function getConfig(): any {
   if (cachedConfig !== undefined) return cachedConfig;
   try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const cfg = require(`${process.cwd()}/config.json`);
+    ensureConfigMigratedSync();
+    const cfg = loadConfigFileSync(getConfigPath());
     // Allow environment variables to override config values so CI can inject secrets safely.
     const merged = applyEnvOverrides(cfg);
     cachedConfig = merged;
     return merged;
   } catch (err) {
-    defaultLogger.warn('Failed to load config.json from project root, returning empty config', err);
+    defaultLogger.warn('Failed to load config.json from data dir, returning empty config', err);
     const merged = applyEnvOverrides({});
     cachedConfig = merged;
     return merged;
@@ -24,15 +80,14 @@ export function getConfig(): any {
 }
 
 export async function loadConfig(): Promise<any> {
-  // Synchronous require is fine here; wrap in Promise to match test expectations.
   try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const cfg = require(`${process.cwd()}/config.json`);
+    await ensureConfigMigrated();
+    const cfg = await loadConfigFile(getConfigPath());
     const merged = applyEnvOverrides(cfg);
     cachedConfig = merged;
     return Promise.resolve(merged);
   } catch (err) {
-    defaultLogger.warn('Failed to load config.json from project root, returning empty config', err);
+    defaultLogger.warn('Failed to load config.json from data dir, returning empty config', err);
     const merged = applyEnvOverrides({});
     cachedConfig = merged;
     return Promise.resolve(merged);
@@ -40,15 +95,14 @@ export async function loadConfig(): Promise<any> {
 }
 
 export async function reloadConfig(): Promise<any> {
-  const fs = await import('node:fs/promises');
   try {
-    const raw = await fs.readFile(`${process.cwd()}/config.json`, 'utf8');
-    const cfg = JSON.parse(raw);
+    await ensureConfigMigrated();
+    const cfg = await loadConfigFile(getConfigPath());
     const merged = applyEnvOverrides(cfg);
     cachedConfig = merged;
     return merged;
   } catch (err) {
-    defaultLogger.warn('Failed to reload config.json, returning empty config', err);
+    defaultLogger.warn('Failed to reload config.json from data dir, returning empty config', err);
     const merged = applyEnvOverrides({});
     cachedConfig = merged;
     return merged;
@@ -105,27 +159,17 @@ function applyEnvOverrides(cfg: any): any {
 }
 
 export async function saveConfig(patch: any): Promise<void> {
-  const fs = await import('node:fs/promises');
-  const configPath = `${process.cwd()}/config.json`;
+  await ensureConfigMigrated();
+  const configPath = getConfigPath();
   let current: any = {};
   try {
-    const raw = await fs.readFile(configPath, 'utf8');
-    current = JSON.parse(raw);
+    current = await loadConfigFile(configPath);
   } catch {
     // file missing or unparseable — start fresh
   }
   const merged = deepMerge(current, patch);
-  await fs.writeFile(configPath, `${JSON.stringify(merged, null, 2)}\n`, 'utf8');
-  // Bust require cache so next getConfig() reads the new file
-  try {
-    const req = require;
-    if (req?.cache && req.resolve) {
-      const resolved = req.resolve(configPath);
-      if (req.cache[resolved]) delete req.cache[resolved];
-    }
-  } catch {
-    // ignore
-  }
+  await fs.promises.mkdir(path.dirname(configPath), { recursive: true });
+  await fs.promises.writeFile(configPath, `${JSON.stringify(merged, null, 2)}\n`, 'utf8');
   cachedConfig = undefined;
 }
 

@@ -41,6 +41,17 @@ function getCommandsJs(): string {
   return commandsJs;
 }
 
+function getSettingValue(key: string): unknown {
+  const value = settingsStore.get(key, null);
+  if (value !== null) return value;
+
+  if (key === 'chat.timestamps.visible') {
+    return getConfig()?.chat?.showTimestamps ?? true;
+  }
+
+  return null;
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const htmlRoutes: Record<string, any> = isTuiOnly
   ? {}
@@ -421,6 +432,43 @@ Bun.serve({
     },
 
     // ------------------------------------------------------------------
+    // Cross-platform marker read — GET /api/stream/markers
+    // Query params: ?platform=youtube&platform=twitch&limit=<n>
+    // Returns the latest markers for each requested platform.
+    // ------------------------------------------------------------------
+    '/api/stream/markers': {
+      GET: async (req) => {
+        const url = new URL(req.url);
+        const requestedPlatforms = url.searchParams.getAll('platform');
+        const targetPlatforms =
+          requestedPlatforms.length > 0 ? requestedPlatforms : ['youtube', 'twitch', 'kick'];
+        const limitRaw = url.searchParams.get('limit');
+        const limit = limitRaw ? Math.min(Math.max(1, Number.parseInt(limitRaw, 10)), 100) : 20;
+
+        const providerMap: Record<string, PlatformProvider> = { youtube, twitch, kick };
+        const results = await Promise.all(
+          targetPlatforms.map(async (platform) => {
+            const provider = providerMap[platform];
+            if (!provider) return { platform, markers: [], error: 'unknown platform' };
+            if (!provider.isAuthenticated() && platform !== 'youtube') {
+              return { platform, markers: [], error: 'not authenticated' };
+            }
+            try {
+              const markers = await provider.getMarkers({ limit });
+              return { platform, markers };
+            } catch (err) {
+              return { platform, markers: [], error: String(err) };
+            }
+          }),
+        );
+
+        return new Response(JSON.stringify({ markers: results }), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      },
+    },
+
+    // ------------------------------------------------------------------
     // Twitch stream markers — GET /api/twitch/markers
     // Query params: ?videoId=<id>&limit=<n>
     // Requires user:read:broadcast scope on the token.
@@ -527,7 +575,7 @@ Bun.serve({
         const url = new URL(req.url);
         const key = url.searchParams.get('key');
         if (key) {
-          const val = settingsStore.get(key, null);
+          const val = getSettingValue(key);
           return new Response(JSON.stringify({ key, value: val }), {
             headers: { 'Content-Type': 'application/json' },
           });
@@ -541,13 +589,14 @@ Bun.serve({
           'viewers.visible',
           'viewers.mode',
           'messages.position',
+          'chat.timestamps.visible',
           'events.visible',
           'events.tail',
           'events.width',
         ];
         const all: Record<string, unknown> = {};
         for (const k of knownKeys) {
-          all[k] = settingsStore.get(k, null);
+          all[k] = getSettingValue(k);
         }
         return new Response(JSON.stringify(all), {
           headers: { 'Content-Type': 'application/json' },
@@ -764,6 +813,12 @@ Bun.serve({
                 description: 'Place a stream marker on all platforms',
                 example: '/marker Intro | 0',
                 usage: '/marker [description] [| timestamp_s]',
+              },
+              {
+                command: '/markers',
+                description: 'List existing markers',
+                example: '/markers youtube 10',
+                usage: '/markers [all|youtube|twitch|kick] [limit]',
               },
               {
                 command: '/connect',

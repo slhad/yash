@@ -26,8 +26,13 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
     * Command /marker [description] [| timestamp_s] - places a stream marker on all platforms
         * Optional description (chapter label, max 140 chars on Twitch)
         * Optional pipe-delimited timestamp in seconds from stream start (used by YouTube for chapter generation; ignored by Twitch which sets position server-side; Kick does not support markers)
+        * When no timestamp is provided, YouTube derives the marker position from the current live stream elapsed time when available, falling back to a live API lookup after restart before using `0`
         * Examples: `/marker Intro | 0`, `/marker Q&A | 3723`, `/marker` (unnamed, no timestamp)
+    * Command /markers [all|youtube|twitch|kick] [limit] - lists existing markers per platform
+        * Default target is `all`; default limit is `20`
+        * Examples: `/markers`, `/markers youtube`, `/markers twitch 5`
     * Command /settings [get <key>|set <key> <value>] - get or set UI settings
+        * Includes `chat.timestamps.visible` for WebUI unified chat timestamp display
     * `/stream` modal: per-platform category autocomplete with ↑/↓ navigation — Twitch field (`twitchGame`) calls `/api/twitch/categories` with 300 ms debounce; Kick field (`kickCategory`) calls `/api/kick/categories` with 300 ms debounce; YouTube field uses a static `<select>` dropdown from `/api/youtube/categories`
     * Message box to send message to [all|youtube|twitch|kick] platform and receive command "/" (without sending to platforms)
         * Input history: Up/Down arrow keys navigate previously-sent messages (like a shell history)
@@ -53,10 +58,10 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
         * Platform-specific category fields: `twitchGame` with datalist autocomplete (calls `/api/twitch/categories`); `kickCategory` with datalist autocomplete (calls `/api/kick/categories`); YouTube category `<select>` dropdown (populated from `/api/youtube/categories`)
         * Status bar shows per-platform elapsed time + viewer counts, auto-refreshes every second
     * Route /unified to show unified view of all chats
-        * Message box supports all applicable / commands: `/help`, `/msg`, `/marker`, `/connect`, `/settings`
+        * Message box supports all applicable / commands: `/help`, `/msg`, `/marker`, `/markers`, `/connect`, `/settings`
         * Status bar shows per-platform elapsed time + viewer counts
     * Route /sidebyside to show view of chats side by side with config options to enable any platform (saved in browser)
-        * Message box supports all applicable / commands: `/help`, `/msg`, `/marker`, `/connect`, `/settings`
+        * Message box supports all applicable / commands: `/help`, `/msg`, `/marker`, `/markers`, `/connect`, `/settings`
     * All chats view must have a message box to send messages like TUI, display top/bottom/hide (saved in browser individually)
         * Input history: Up/Down arrow keys navigate previously-sent messages
         * Inline parameter hints while typing a `/` command (shows valid next tokens below input)
@@ -64,6 +69,7 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
         * `/help` — list available commands (fetched from `/api/help`)
         * `/msg <all|youtube|twitch|kick> <text>` — send targeted platform message
         * `/marker [description] [| timestamp_s]` — create stream marker on all (or selected) platforms
+        * `/markers [all|youtube|twitch|kick] [limit]` — list existing markers
         * `/connect <youtube|twitch|kick>` — authenticate a platform (all three redirect to real OAuth flows)
         * `/settings get <key>` — read a persistent setting via `/api/settings`
         * `/settings set <key> <value>` — write a persistent setting via `/api/settings`
@@ -116,7 +122,7 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
 - Event-driven architecture for real-time communication
 - Token storage for authentication credentials (file-backed). Encryption/keyring-based storage is considered out of scope for this build.
 - OBS-studio integration via obs-websocket library
-- Configuration is stored in [root]/config.json
+- Runtime configuration is stored in `YASH_DATA_DIR/config.json` (default `~/.yash/config.json`); if the runtime file does not exist yet and a legacy `[root]/config.json` is present, YASH migrates it once on startup
 - TUI and web server run as a single process (`bun run src/index.tsx`); `index.tsx` imports `index.ts` as a side-effect to start `Bun.serve` in the same process. Running them as separate processes causes port 3000 conflicts.
 - `Bun.serve` must use `development: false`. In development mode, Bun writes HTML bundle timing lines (e.g. `Bundled page in 31ms: index.html`) directly to fd 1 via native I/O, bypassing both `process.stdout` and the JS `console.*` API. Since `@opentui` renders the TUI on that same fd, these writes bleed into the TUI display and cannot be intercepted at the JS level. `development: false` suppresses this output; HMR is intentionally disabled as a result.
 
@@ -137,6 +143,8 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
     * `getChapterDescriptionBlock()` serialises chapters to YouTube timestamp format (`0:00 Intro\n1:23 Q&A\n...`)
     * `getMarkers(options?)` — returns last N markers (default limit 20), filterable by `videoId`
     * `clearMarkers()` resets the chapter store (e.g. at stream end)
+    * Each marker creation also re-syncs the current YouTube video/broadcast description so the timestamps block is persisted immediately while live
+    * Chapter markers are also persisted in the runtime `config.json` at `stream.chapters` and reloaded on startup so YASH keeps chapter context across restarts
     * `getChannelInfo()` — returns `{ channelId, channelTitle, broadcastId, liveChatId }`
 - Twitch: OAuth2-only integration (no RTMP stream key)
     * Real OAuth2 Authorization Code flow; tokens auto-refreshed and persisted to `~/.yash/twitch_tokens.json`
@@ -162,7 +170,7 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
     * `handleWebhookEvent(payload)` — dispatches incoming Kick chat webhook events into the chat stream
 
 ### Configuration
-Configuration is stored in `[root]/config.json`. Environment variables take precedence over file values.
+Configuration is stored in `YASH_DATA_DIR/config.json` (default `~/.yash/config.json`). If the runtime file does not exist yet and a legacy `[root]/config.json` is present, YASH migrates that legacy file once on startup. Environment variables take precedence over file values.
 
 ```json
 {
@@ -197,6 +205,17 @@ Configuration is stored in `[root]/config.json`. Environment variables take prec
       "redirectUri": "http://localhost:3000/api/kick/callback",
       "showViewers": true
     }
+  },
+  "stream": {
+    "chapters": [
+      {
+        "id": "yt_marker_example",
+        "createdAt": "2026-05-05T21:51:30.000Z",
+        "description": "Intro",
+        "positionInSeconds": 0,
+        "platform": "youtube"
+      }
+    ]
   }
 }
 ```
@@ -236,13 +255,13 @@ Configuration is stored in `[root]/config.json`. Environment variables take prec
     * `PlatformProvider.createMarker(description?, timestamp?)` — creates a marker on the platform
     * `PlatformProvider.getMarkers(options?)` — retrieves past markers (filterable by videoId)
     * `StreamMarker` type: `{ id, createdAt, description, positionInSeconds, platform, videoId?, url? }`
-    * YouTube: in-memory store with chapter description serialisation helper
+    * YouTube: in-memory store with chapter description serialisation helper; markers are also persisted in the runtime `config.json` under `stream.chapters`, and if no explicit timestamp is supplied, markers use the current live elapsed time when `streamStartTime` is known, fall back to a live API lookup when needed, and each marker immediately re-syncs the live description timestamp block
     * Twitch: real Helix API (stream must be live); includes position and VOD URL
     * Kick: returns `null` / `[]` gracefully (not supported by Kick API)
 - Webhook/event handling for real-time updates (Twitch EventSub WebSocket)
 - OBS-studio WebSocket integration
 - Platform selector for targeted messaging
-- Demo mode: all services report as connected/authenticated without real network connections. Enabled via `"demo": true` in `config.json` or `YASH_DEMO=true` env var. Disabled by default. TUI shows a `[DEMO MODE]` label in the status bar; `/api/obs/status` includes `"demo": true`.
+- Demo mode: all services report as connected/authenticated without real network connections. Enabled via `"demo": true` in the runtime `config.json` or `YASH_DEMO=true` env var. Disabled by default. TUI shows a `[DEMO MODE]` label in the status bar; `/api/obs/status` includes `"demo": true`.
 
 ### API Routes
 
@@ -254,9 +273,10 @@ Configuration is stored in `[root]/config.json`. Environment variables take prec
 | GET | `/api/status` | Platform + stream status for all platforms; each platform entry includes `viewerCount: number` and `streamStartTime: string\|null` |
 | GET | `/api/chat/history` | Full chat message history |
 | POST | `/api/chat/send` | Send message: `{ message, platforms? }` |
-| GET | `/api/stream` | Read persisted stream metadata from config |
-| POST | `/api/stream` | Update metadata on platforms: `{ platforms?, metadata? }` — also persists to `config.json`; response includes `{ success, platformResults }` with per-platform warnings/diagnostics |
+| GET | `/api/stream` | Read persisted stream metadata from the runtime config |
+| POST | `/api/stream` | Update metadata on platforms: `{ platforms?, metadata? }` — also persists to `YASH_DATA_DIR/config.json`; response includes `{ success, platformResults }` with per-platform warnings/diagnostics |
 | POST | `/api/stream/marker` | Cross-platform marker: `{ platforms?, description?, timestamp? }` |
+| GET | `/api/stream/markers` | Cross-platform marker list: `?platform=<name>&limit=<n>` |
 | GET | `/api/help` | List all available / commands (for WebUI consumption) |
 | GET | `/api/settings` | Read all settings or `?key=<k>` for a single key |
 | POST | `/api/settings` | Write a setting: `{ key, value }` |
@@ -267,7 +287,7 @@ Configuration is stored in `[root]/config.json`. Environment variables take prec
 | GET | `/api/twitch/auth` | Redirect to Twitch OAuth consent screen |
 | GET | `/api/twitch/callback` | Twitch OAuth callback (exchanges code for tokens) |
 | GET | `/api/twitch/channel` | Read channel title, game, tags from Helix |
-| PATCH | `/api/twitch/channel` | Update channel: `{ title?, game?, tags? }` — also persists to `config.json` |
+| PATCH | `/api/twitch/channel` | Update channel: `{ title?, game?, tags? }` — also persists to `YASH_DATA_DIR/config.json` |
 | POST | `/api/twitch/marker` | Create Twitch stream marker: `{ description? }` |
 | GET | `/api/twitch/markers` | Read Twitch markers: `?videoId=<id>&limit=<n>` |
 | GET | `/api/youtube/auth` | Redirect to Google OAuth consent screen |
@@ -280,7 +300,7 @@ Configuration is stored in `[root]/config.json`. Environment variables take prec
 | GET | `/api/kick/auth` | Redirect to Kick OAuth consent screen |
 | GET | `/api/kick/callback` | Kick OAuth callback (exchanges code for tokens via PKCE) |
 | GET | `/api/kick/channel` | Kick channel info: `{ title, slug, category, categoryId, followers, verified }` |
-| PATCH | `/api/kick/channel` | Update Kick channel: `{ title?, game?, tags? }` — also persists to `config.json` |
+| PATCH | `/api/kick/channel` | Update Kick channel: `{ title?, game?, tags? }` — also persists to `YASH_DATA_DIR/config.json` |
 | GET | `/api/kick/categories` | Search Kick categories: `?q=<query>` → `{ categories: string[] }` |
 | GET | `/api/kick/webhook` | Returns smee.io relay URL: `{ url: string \| null }` |
 | POST | `/api/kick/webhook` | Receives direct Kick webhook events (non-smee tunnels) |
@@ -376,7 +396,7 @@ interface PlatformProvider {
 ## Integration tests
 - Chats webview with `playwright-cli` skill, record screenshots in [tmp]/web/
 - TUI with `vhs` skill, record demos in [tmp]/tui/
-- Use [root]/config.json (actual working) configuration to execute integration tests
+- Use `YASH_DATA_DIR/config.json` (actual working runtime configuration) to execute integration tests
 - Test websocket communication with obs-studio (ignore if connection refused, aka obs-studio is off)
 
 ## Development Commands

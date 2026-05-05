@@ -59,6 +59,17 @@ function numSetting(value: unknown, def: number): number {
   return parseInt(String(value), 10) || def;
 }
 
+function getSettingValue(key: string): unknown {
+  const value = settings.get(key, null);
+  if (value !== null) return value;
+
+  if (key === 'chat.timestamps.visible') {
+    return getConfig()?.chat?.showTimestamps ?? true;
+  }
+
+  return null;
+}
+
 function formatElapsed(start: Date): string {
   const secs = Math.floor((Date.now() - start.getTime()) / 1000);
   const h = Math.floor(secs / 3600);
@@ -67,14 +78,42 @@ function formatElapsed(start: Date): string {
   return h > 0 ? `${h}h${m}m${s}s` : `${m}m${s}s`;
 }
 
+function formatMarkerPosition(positionInSeconds: number): string {
+  const h = Math.floor(positionInSeconds / 3600);
+  const m = Math.floor((positionInSeconds % 3600) / 60);
+  const s = positionInSeconds % 60;
+  return h > 0
+    ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+    : `${m}:${String(s).padStart(2, '0')}`;
+}
+
 function formatPlatformStatusLabel(
   status: { authenticated: boolean; streamStatus: string },
   viewers: string,
 ): string {
   if (!status.authenticated) {
-    return `LOGGED OUT${viewers}`;
+    return `✗${viewers}`;
+  }
+  if (status.streamStatus === 'ONLINE') {
+    return `✓${viewers}`;
+  }
+  if (status.streamStatus === 'OFFLINE') {
+    return `✗${viewers}`;
   }
   return `${status.streamStatus}${viewers}`;
+}
+
+function getPlatformStatusColor(status: { authenticated: boolean; streamStatus: string }): string {
+  if (!status.authenticated) {
+    return 'red';
+  }
+  if (status.streamStatus === 'ONLINE') {
+    return 'green';
+  }
+  if (status.streamStatus === 'OFFLINE') {
+    return 'red';
+  }
+  return 'yellow';
 }
 
 function clearScrollBox(scroll: ScrollBoxRenderable): void {
@@ -259,7 +298,7 @@ function initUI(renderer: CliRenderer, messages: string[]): UINodes {
         : '';
     const t = new TextRenderable(renderer, {
       content: `${platform}: ${formatPlatformStatusLabel(status, viewers)}  `,
-      fg: status.authenticated ? 'green' : 'red',
+      fg: getPlatformStatusColor(status),
     });
     platformTexts.set(platform, t);
     platformRow.add(t);
@@ -274,7 +313,7 @@ function initUI(renderer: CliRenderer, messages: string[]): UINodes {
   platformRow.add(totalViewersText);
 
   const obsText = new TextRenderable(renderer, {
-    content: `OBS: ${obsService.isConnected() ? 'Connected' : 'Disconnected'}  `,
+    content: `OBS: ${obsService.isConnected() ? '✓' : '✗'}  `,
     fg: obsService.isConnected() ? 'green' : 'gray',
   });
   platformRow.add(obsText);
@@ -300,7 +339,7 @@ function initUI(renderer: CliRenderer, messages: string[]): UINodes {
     stickyScroll: true,
     stickyStart: 'bottom',
   });
-  for (const msg of messages.slice(-15)) {
+  for (const msg of messages) {
     chatScroll.add(renderChatLine(renderer, msg));
   }
 
@@ -495,12 +534,12 @@ function updateUI(messages: string[]): void {
             : ` (${viewerCount})`
           : '';
       node.content = `${platform}: ${formatPlatformStatusLabel(status, viewers)}  `;
-      node.fg = status.authenticated ? 'green' : 'red';
+      node.fg = getPlatformStatusColor(status);
     }
   }
 
-  obsText.content = `  OBS: ${obsService.isConnected() ? '[Connected]' : '[Disconnected]'}`;
-  obsText.fg = obsService.isConnected() ? 'green' : 'gray';
+  obsText.content = `  OBS: ${obsService.isConnected() ? '✓' : '✗'}`;
+  obsText.fg = obsService.isConnected() ? 'green' : 'red';
   demoText.visible = isDemoMode();
   totalViewersText.content = `  Total viewers: ${totalViewers}`;
   totalViewersText.visible =
@@ -508,7 +547,7 @@ function updateUI(messages: string[]): void {
 
   // Chat: clear and refill
   clearScrollBox(chatScroll);
-  for (const msg of messages.slice(-15)) {
+  for (const msg of messages) {
     chatScroll.add(renderChatLine(renderer, msg));
   }
 
@@ -2337,11 +2376,45 @@ async function handleCommand(trimmed: string): Promise<void> {
     } catch (err) {
       lastMessages.push(`[marker] Error: ${String(err)}`);
     }
+  } else if (cmd === '/markers') {
+    const platformArg =
+      parts[1] && ['all', 'youtube', 'twitch', 'kick'].includes(parts[1].toLowerCase())
+        ? parts[1].toLowerCase()
+        : 'all';
+    const limitToken = platformArg === 'all' ? parts[1] : parts[2];
+    const limit = limitToken ? Number.parseInt(limitToken, 10) : 20;
+
+    if (limitToken && (Number.isNaN(limit) || limit <= 0)) {
+      lastMessages.push('[markers] Usage: /markers [all|youtube|twitch|kick] [limit]');
+      updateUI(lastMessages);
+      return;
+    }
+
+    const targets = platformArg === 'all' ? ['youtube', 'twitch', 'kick'] : [platformArg];
+    for (const target of targets) {
+      try {
+        const provider =
+          target === 'youtube' ? youtube : target === 'twitch' ? twitch : kick;
+        const markers = await provider.getMarkers({ limit });
+        if (markers.length === 0) {
+          lastMessages.push(`[markers] ${target}: none`);
+          continue;
+        }
+        lastMessages.push(`[markers] ${target}:`);
+        for (const marker of markers) {
+          lastMessages.push(
+            `[markers]   ${formatMarkerPosition(marker.positionInSeconds)}  ${marker.description || '(untitled)'}  [${marker.id}]`,
+          );
+        }
+      } catch (err) {
+        lastMessages.push(`[markers] ${target}: error: ${String(err)}`);
+      }
+    }
   } else if (cmd === '/settings') {
     const op = parts[1];
     if (op === 'get' && parts[2]) {
       const key = parts[2];
-      const val = settings.get(key, null);
+      const val = getSettingValue(key);
       lastMessages.push(`[settings] ${key} = ${JSON.stringify(val)}`);
     } else if (op === 'set' && parts[2] && parts[3]) {
       const key = parts[2];
@@ -2358,7 +2431,7 @@ async function handleCommand(trimmed: string): Promise<void> {
     } else {
       lastMessages.push('[system] Usage: /settings get <key> | /settings set <key> <json-value>');
       lastMessages.push(
-        '[system] Keys: title.visible, logs.visible, logs.height, logs.tail, viewers.visible, viewers.mode, messages.position (top|bottom|hide), events.visible, events.tail, events.width',
+        '[system] Keys: title.visible, logs.visible, logs.height, logs.tail, viewers.visible, viewers.mode, messages.position (top|bottom|hide), chat.timestamps.visible, events.visible, events.tail, events.width',
       );
     }
   } else if (cmd === '/logs') {
@@ -2429,6 +2502,9 @@ async function handleCommand(trimmed: string): Promise<void> {
     lastMessages.push('[help]       e.g.  /marker Intro | 0');
     lastMessages.push(
       '[help]       e.g.  /marker Q&A | 3723    (timestamp in seconds, YouTube only)',
+    );
+    lastMessages.push(
+      '[help]   /markers [all|youtube|twitch|kick] [limit]  — list saved markers',
     );
     lastMessages.push('[help]   /info  — show current stream/channel info from all providers');
     lastMessages.push('[help]   /settings get <key>  — get a setting value');
