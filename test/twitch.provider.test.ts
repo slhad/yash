@@ -6,8 +6,10 @@
  * are absent from the config (which is the case in CI).
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import type { ChatMessage } from '../src/platforms/base';
 import { StreamStatus } from '../src/platforms/base';
 import { TwitchProvider } from '../src/platforms/twitch';
+import { settingsStore } from '../src/utils/settings';
 import { makeRepoTempDir, removeRepoTempDir } from './helpers/testDataDir';
 
 const originalYashDataDir = process.env.YASH_DATA_DIR;
@@ -140,7 +142,7 @@ describe('TwitchProvider — sendMessage', () => {
     };
 
     let received: any = null;
-    p.onMessage((msg) => {
+    p.onMessage((msg: ChatMessage) => {
       received = msg;
     });
 
@@ -164,7 +166,7 @@ describe('TwitchProvider — onMessage', () => {
   test('registers a callback and receives simulated messages', () => {
     const p = makeProvider();
     const received: string[] = [];
-    p.onMessage((msg) => received.push(msg.message));
+    p.onMessage((msg: ChatMessage) => received.push(msg.message));
 
     p._simulateMessage('Hello from Twitch!');
     expect(received).toHaveLength(1);
@@ -174,7 +176,7 @@ describe('TwitchProvider — onMessage', () => {
   test('unsubscribe function removes the callback', () => {
     const p = makeProvider();
     const received: string[] = [];
-    const unsub = p.onMessage((msg) => received.push(msg.message));
+    const unsub = p.onMessage((msg: ChatMessage) => received.push(msg.message));
 
     p._simulateMessage('first');
     unsub();
@@ -188,8 +190,8 @@ describe('TwitchProvider — onMessage', () => {
     const p = makeProvider();
     const a: string[] = [];
     const b: string[] = [];
-    p.onMessage((m) => a.push(m.message));
-    p.onMessage((m) => b.push(m.message));
+    p.onMessage((m: ChatMessage) => a.push(m.message));
+    p.onMessage((m: ChatMessage) => b.push(m.message));
 
     p._simulateMessage('ping');
     expect(a).toHaveLength(1);
@@ -199,7 +201,7 @@ describe('TwitchProvider — onMessage', () => {
   test('simulated message has correct platform and fields', () => {
     const p = makeProvider();
     let received: any = null;
-    p.onMessage((m) => {
+    p.onMessage((m: ChatMessage) => {
       received = m;
     });
 
@@ -509,11 +511,12 @@ describe('TwitchProvider — getMarkers', () => {
 });
 
 // ---------------------------------------------------------------------------
-// getMarkers — YouTube and Kick stubs
+// getMarkers — YouTube and Kick cross-provider checks
 // ---------------------------------------------------------------------------
-describe('YouTubeProvider — getMarkers stub', () => {
-  test('returns [] (not yet implemented)', async () => {
+describe('YouTubeProvider — getMarkers', () => {
+  test('returns [] when no chapter markers exist', async () => {
     const { YouTubeProvider } = await import('../src/platforms/youtube');
+    await settingsStore.replaceAll({});
     const p = new YouTubeProvider();
     const result = await p.getMarkers();
     expect(result).toEqual([]);

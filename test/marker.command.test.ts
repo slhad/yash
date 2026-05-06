@@ -5,10 +5,11 @@
  *  - Kick createMarker returns null gracefully
  *  - PlatformProvider interface satisfied by all three providers
  */
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
 import { KickProvider } from '../src/platforms/kick';
 import { TwitchProvider } from '../src/platforms/twitch';
 import { YouTubeProvider } from '../src/platforms/youtube';
+import { settingsStore } from '../src/utils/settings';
 import { makeRepoTempDirSync, removeRepoTempDirSync } from './helpers/testDataDir';
 
 const originalYashDataDir = process.env.YASH_DATA_DIR;
@@ -16,6 +17,10 @@ const markerTestDataDir = makeRepoTempDirSync('yash-marker-command');
 
 beforeAll(() => {
   process.env.YASH_DATA_DIR = markerTestDataDir;
+});
+
+beforeEach(async () => {
+  await settingsStore.replaceAll({});
 });
 
 afterAll(() => {
