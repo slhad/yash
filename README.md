@@ -1,5 +1,7 @@
 # Yet Another Streamer Helper (YASH)
 
+Disclaimer : I used to stream on Windows with some scripts but when I stared to stream on Linux, it was painful to make Streamer.Bot even works normally that it gave me the idea to replace it with some app on linux. After some failed configuration to run my custom scripts (bash/powershell/typescript within wine) and some AI tests, I decided to give it a shot directly with an app seeing that the Kick api was finally available (it was my last blocker for some tries already on Windows....)
+
 Small toolkit to manage streaming across YouTube, Twitch, and Kick with a unified interface. Written to run on Bun. This repository contains:
 
 - `src/`: TypeScript source (platform providers, services, UI)
