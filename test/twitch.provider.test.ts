@@ -129,6 +129,32 @@ describe('TwitchProvider — sendMessage', () => {
     // No real chatClient — should warn and return gracefully
     await expect(p.sendMessage('hello')).resolves.toBeUndefined();
   });
+
+  test('dispatches a local self-echo after a successful send', async () => {
+    const p = makeProvider() as any;
+    forceAuth(p);
+    p.userLogin = 'streamer42';
+    p.userId = 'user-42';
+    p.chatClient = {
+      say: async () => undefined,
+    };
+
+    let received: any = null;
+    p.onMessage((msg) => {
+      received = msg;
+    });
+
+    await p.sendMessage('hello self echo');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(received).not.toBeNull();
+    expect(received.platform).toBe('twitch');
+    expect(received.userId).toBe('user-42');
+    expect(received.username).toBe('streamer42');
+    expect(received.message).toBe('hello self echo');
+    expect(typeof received.id).toBe('string');
+    expect(typeof received.timestamp).toBe('number');
+  });
 });
 
 // ---------------------------------------------------------------------------

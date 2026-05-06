@@ -544,6 +544,16 @@ export class TwitchProvider implements PlatformProvider {
     }
     try {
       await this.chatClient.say(this.userLogin, message);
+      setTimeout(() => {
+        this._dispatch({
+          id: `twitch_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+          platform: 'twitch',
+          userId: this.userId ?? `self_${this.userLogin}`,
+          username: this.userLogin ?? 'twitch',
+          message,
+          timestamp: Date.now(),
+        });
+      }, 0);
     } catch (err) {
       this.lastError = err instanceof Error ? err.message : String(err);
       defaultLogger.error('[Twitch] sendMessage error:', err);
