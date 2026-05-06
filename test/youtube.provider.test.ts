@@ -367,6 +367,147 @@ describe('YouTubeProvider — chat', () => {
     expect(scheduledDelay).toBe(0);
   });
 
+  test('_pollStatus clears chapter markers when broadcast changes and clearMarkersOnNewStream is enabled', async () => {
+    const p = makeProvider() as any;
+    p.isAuthenticatedFlag = true;
+    p.tokenData = {
+      accessToken: 'token',
+      refreshToken: 'refresh',
+      expiresIn: 3600,
+      obtainmentTimestamp: Date.now(),
+      channelId: 'chan',
+      channelTitle: 'title',
+    };
+    p.broadcastId = 'broadcast-1';
+    p.liveChatId = null;
+    p.chatStream = null;
+    p.chapterMarkers = [
+      {
+        id: 'yt_marker_1',
+        createdAt: new Date(),
+        description: 'Intro',
+        positionInSeconds: 0,
+        platform: 'youtube',
+      },
+    ];
+    let cleared = false;
+    p.clearPersistedMarkers = async () => {
+      cleared = true;
+      p.chapterMarkers = [];
+    };
+    p._findActiveBroadcast = async () => ({ id: 'broadcast-2', liveChatId: null });
+    p._startChatPoll = () => {};
+    p._request = async () =>
+      new Response(
+        JSON.stringify({ items: [{ liveStreamingDetails: { concurrentViewers: '0' } }] }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      );
+
+    await settingsStore.set('platforms.youtube.setup', {
+      clearMarkersOnNewStream: { enabled: true },
+    });
+    await p._pollStatus();
+
+    expect(cleared).toBe(true);
+    expect(p.broadcastId).toBe('broadcast-2');
+  });
+
+  test('_pollStatus does not clear markers when clearMarkersOnNewStream is disabled', async () => {
+    const p = makeProvider() as any;
+    p.isAuthenticatedFlag = true;
+    p.tokenData = {
+      accessToken: 'token',
+      refreshToken: 'refresh',
+      expiresIn: 3600,
+      obtainmentTimestamp: Date.now(),
+      channelId: 'chan',
+      channelTitle: 'title',
+    };
+    p.broadcastId = 'broadcast-1';
+    p.liveChatId = null;
+    p.chatStream = null;
+    p.chapterMarkers = [
+      {
+        id: 'yt_marker_1',
+        createdAt: new Date(),
+        description: 'Intro',
+        positionInSeconds: 0,
+        platform: 'youtube',
+      },
+    ];
+    let cleared = false;
+    p.clearPersistedMarkers = async () => {
+      cleared = true;
+    };
+    p._findActiveBroadcast = async () => ({ id: 'broadcast-2', liveChatId: null });
+    p._startChatPoll = () => {};
+    p._request = async () =>
+      new Response(
+        JSON.stringify({ items: [{ liveStreamingDetails: { concurrentViewers: '0' } }] }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      );
+
+    await settingsStore.set('platforms.youtube.setup', {
+      clearMarkersOnNewStream: { enabled: false },
+    });
+    await p._pollStatus();
+
+    expect(cleared).toBe(false);
+  });
+
+  test('_pollStatus does not clear markers on initial broadcast detection (null → id)', async () => {
+    const p = makeProvider() as any;
+    p.isAuthenticatedFlag = true;
+    p.tokenData = {
+      accessToken: 'token',
+      refreshToken: 'refresh',
+      expiresIn: 3600,
+      obtainmentTimestamp: Date.now(),
+      channelId: 'chan',
+      channelTitle: 'title',
+    };
+    p.broadcastId = null;
+    p.liveChatId = null;
+    p.chatStream = null;
+    p.chapterMarkers = [
+      {
+        id: 'yt_marker_1',
+        createdAt: new Date(),
+        description: 'Intro',
+        positionInSeconds: 0,
+        platform: 'youtube',
+      },
+    ];
+    let cleared = false;
+    p.clearPersistedMarkers = async () => {
+      cleared = true;
+    };
+    p._findActiveBroadcast = async () => ({ id: 'broadcast-1', liveChatId: null });
+    p._startChatPoll = () => {};
+    p._request = async () =>
+      new Response(
+        JSON.stringify({ items: [{ liveStreamingDetails: { concurrentViewers: '0' } }] }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      );
+
+    await settingsStore.set('platforms.youtube.setup', {
+      clearMarkersOnNewStream: { enabled: true },
+    });
+    await p._pollStatus();
+
+    expect(cleared).toBe(false);
+    expect(p.broadcastId).toBe('broadcast-1');
+  });
+
   test('status poll starts chat when the same broadcast later gains a liveChatId', async () => {
     const p = makeProvider() as any;
     p.isAuthenticatedFlag = true;

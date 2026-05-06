@@ -173,4 +173,37 @@ describe('getAutocomplete', () => {
     const { hints } = getAutocomplete('/settings');
     expect(hints).toEqual(['/settings']);
   });
+
+  test('/markers  → hints clear, all, and providers', () => {
+    const result = getAutocomplete('/markers ');
+    expect(result.hints).toContain('clear');
+    expect(result.hints).toContain('all');
+    expect(result.hints).toContain('youtube');
+    expect(result.hints).toContain('twitch');
+    expect(result.hints).toContain('kick');
+  });
+
+  test('/markers y → completes to /markers youtube', () => {
+    const result = getAutocomplete('/markers y');
+    expect(result.completion).toBe('/markers youtube');
+    expect(result.hints).toEqual(['youtube']);
+  });
+
+  test('/markers clear → only clear hint, no extra completion', () => {
+    const result = getAutocomplete('/markers clear');
+    expect(result.completion).toBeNull();
+    expect(result.hints).toEqual(['clear']);
+  });
+
+  test('/markers youtube  → hints limit placeholder', () => {
+    const result = getAutocomplete('/markers youtube ');
+    expect(result.completion).toBeNull();
+    expect(result.hints).toEqual(['<limit>']);
+  });
+
+  test('/markers all  → hints limit placeholder', () => {
+    const result = getAutocomplete('/markers all ');
+    expect(result.completion).toBeNull();
+    expect(result.hints).toEqual(['<limit>']);
+  });
 });

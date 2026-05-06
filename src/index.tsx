@@ -1464,6 +1464,7 @@ function openYouTubeSetupModal(): void {
     | 'defaultPlaylist'
     | 'subjectPlaylist'
     | 'chaptering'
+    | 'clearMarkersOnNewStream'
     | 'tags'
     | 'description'
     | 'subjectTitle';
@@ -1471,6 +1472,7 @@ function openYouTubeSetupModal(): void {
     defaultPlaylist: saved.defaultPlaylist.enabled,
     subjectPlaylist: saved.subjectPlaylist.enabled,
     chaptering: saved.chaptering.enabled,
+    clearMarkersOnNewStream: saved.clearMarkersOnNewStream.enabled,
     tags: saved.tags.enabled,
     description: saved.description.enabled,
     subjectTitle: saved.subjectTitle.enabled,
@@ -1481,6 +1483,7 @@ function openYouTubeSetupModal(): void {
     defaultPlaylist: 'Default Playlist ',
     subjectPlaylist: 'Subject Playlist ',
     chaptering: 'Chaptering       ',
+    clearMarkersOnNewStream: 'Clear Markers    ',
     tags: 'Tags             ',
     description: 'Description      ',
     subjectTitle: 'Subject in Title ',
@@ -1502,6 +1505,10 @@ function openYouTubeSetupModal(): void {
       fg: 'white',
     }),
     chaptering: new TextRenderable(renderer, { content: badge('chaptering', false), fg: 'white' }),
+    clearMarkersOnNewStream: new TextRenderable(renderer, {
+      content: badge('clearMarkersOnNewStream', false),
+      fg: 'white',
+    }),
     tags: new TextRenderable(renderer, { content: badge('tags', false), fg: 'white' }),
     description: new TextRenderable(renderer, {
       content: badge('description', false),
@@ -1531,6 +1538,10 @@ function openYouTubeSetupModal(): void {
     content: '  ↳ appends a Timestamps block to the description when /marker is used',
     fg: 'gray',
   });
+  const clearMarkersHint = new TextRenderable(renderer, {
+    content: '  ↳ clears chapter markers automatically when a new broadcast is detected',
+    fg: 'gray',
+  });
   const tagsHint = new TextRenderable(renderer, {
     content: '  ↳ appends tags from /stream as #hashtags to the description',
     fg: 'gray',
@@ -1557,9 +1568,10 @@ function openYouTubeSetupModal(): void {
     { kind: 'input', node: playlistInput }, // 1
     { kind: 'toggle', key: 'subjectPlaylist' }, // 2
     { kind: 'toggle', key: 'chaptering' }, // 3
-    { kind: 'toggle', key: 'tags' }, // 4
-    { kind: 'toggle', key: 'description' }, // 5
-    { kind: 'toggle', key: 'subjectTitle' }, // 6
+    { kind: 'toggle', key: 'clearMarkersOnNewStream' }, // 4
+    { kind: 'toggle', key: 'tags' }, // 5
+    { kind: 'toggle', key: 'description' }, // 6
+    { kind: 'toggle', key: 'subjectTitle' }, // 7
   ];
 
   const box = new BoxRenderable(renderer, {
@@ -1586,6 +1598,8 @@ function openYouTubeSetupModal(): void {
   box.add(subjectHint);
   box.add(toggleNodes.chaptering);
   box.add(chapteringHint);
+  box.add(toggleNodes.clearMarkersOnNewStream);
+  box.add(clearMarkersHint);
   box.add(toggleNodes.tags);
   box.add(tagsHint);
   box.add(toggleNodes.description);
@@ -1675,6 +1689,7 @@ function openYouTubeSetupModal(): void {
       },
       subjectPlaylist: { enabled: state.subjectPlaylist },
       chaptering: { enabled: state.chaptering },
+      clearMarkersOnNewStream: { enabled: state.clearMarkersOnNewStream },
       tags: { enabled: state.tags },
       description: { enabled: state.description },
       subjectTitle: { enabled: state.subjectTitle },
@@ -2371,15 +2386,31 @@ async function handleCommand(trimmed: string): Promise<void> {
       lastMessages.push(`[marker] Error: ${String(err)}`);
     }
   } else if (cmd === '/markers') {
-    const platformArg =
-      parts[1] && ['all', 'youtube', 'twitch', 'kick'].includes(parts[1].toLowerCase())
-        ? parts[1].toLowerCase()
-        : 'all';
-    const limitToken = platformArg === 'all' ? parts[1] : parts[2];
+    if ((parts[1] ?? '').toLowerCase() === 'clear') {
+      if (parts.length > 2) {
+        lastMessages.push('[markers] Usage: /markers clear | [all|youtube|twitch|kick] [limit]');
+        updateUI(lastMessages);
+        return;
+      }
+
+      try {
+        await youtube.clearPersistedMarkers();
+        lastMessages.push('[markers] youtube: cleared persisted markers');
+      } catch (err) {
+        lastMessages.push(`[markers] youtube: clear error: ${String(err)}`);
+      }
+      updateUI(lastMessages);
+      return;
+    }
+
+    const firstArg = (parts[1] ?? '').toLowerCase();
+    const hasExplicitPlatform = ['all', 'youtube', 'twitch', 'kick'].includes(firstArg);
+    const platformArg = hasExplicitPlatform ? firstArg : 'all';
+    const limitToken = hasExplicitPlatform ? parts[2] : parts[1];
     const limit = limitToken ? Number.parseInt(limitToken, 10) : 20;
 
     if (limitToken && (Number.isNaN(limit) || limit <= 0)) {
-      lastMessages.push('[markers] Usage: /markers [all|youtube|twitch|kick] [limit]');
+      lastMessages.push('[markers] Usage: /markers clear | [all|youtube|twitch|kick] [limit]');
       updateUI(lastMessages);
       return;
     }
@@ -2500,7 +2531,9 @@ async function handleCommand(trimmed: string): Promise<void> {
     lastMessages.push(
       '[help]       e.g.  /marker Q&A | 3723    (timestamp in seconds, YouTube only)',
     );
-    lastMessages.push('[help]   /markers [all|youtube|twitch|kick] [limit]  — list saved markers');
+    lastMessages.push(
+      '[help]   /markers clear | [all|youtube|twitch|kick] [limit]  — list markers or clear YouTube chapters',
+    );
     lastMessages.push('[help]   /info  — show current stream/channel info from all providers');
     lastMessages.push('[help]   /settings get <key>  — get a setting value');
     lastMessages.push('[help]   /settings set <key> <value>  — set a setting value');

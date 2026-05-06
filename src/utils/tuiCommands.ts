@@ -24,6 +24,7 @@ export type TuiCommand = (typeof TUI_COMMANDS)[number];
 
 const PLATFORMS = ['youtube', 'twitch', 'kick', 'obs'];
 const MSG_TARGETS = ['all', 'youtube', 'twitch', 'kick'];
+const MARKERS_ARGS = ['clear', 'all', 'youtube', 'twitch', 'kick'];
 const SETTINGS_KEYS = [
   'chat.maxHistorySize',
   'demo',
@@ -44,6 +45,7 @@ const SETTINGS_KEYS = [
   'platforms.twitch.showViewers',
   'platforms.kick.showViewers',
   'platforms.youtube.setup.chaptering.enabled',
+  'platforms.youtube.setup.clearMarkersOnNewStream.enabled',
 ];
 const LOGS_ARGS = ['clear', 'tail', 'visible'];
 const SETTINGS_OPS = ['get', 'set'];
@@ -113,6 +115,31 @@ export function getAutocomplete(input: string): { completion: string | null; hin
 
   if (cmd === '/logs') {
     return completeToken(LOGS_ARGS, restLower);
+  }
+
+  if (cmd === '/markers') {
+    if (rest.endsWith(' ')) {
+      const first = restLower.trim();
+      if (['all', 'youtube', 'twitch', 'kick'].includes(first)) {
+        return { completion: null, hints: ['<limit>'] };
+      }
+      if (first === '') {
+        return { completion: null, hints: MARKERS_ARGS };
+      }
+      if (first === 'clear') return { completion: null, hints: [] };
+    }
+
+    if (!rest.includes(' ')) {
+      return completeToken(MARKERS_ARGS, restLower);
+    }
+
+    const parts = restLower.split(/\s+/).filter(Boolean);
+    const first = parts[0] ?? '';
+    if (first === 'clear') return { completion: null, hints: [] };
+    if (['all', 'youtube', 'twitch', 'kick'].includes(first) && parts.length === 1) {
+      return { completion: null, hints: ['<limit>'] };
+    }
+    return { completion: null, hints: [] };
   }
 
   if (cmd === '/stream') {

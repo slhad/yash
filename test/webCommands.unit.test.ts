@@ -97,6 +97,14 @@ describe('parseMarkersArgs', () => {
   test('invalid limit → error', () => {
     expect(parseMarkersArgs(['youtube', 'nope']).error).toContain('Invalid limit');
   });
+
+  test('clear → clear action', () => {
+    expect(parseMarkersArgs(['clear'])).toEqual({ action: 'clear' });
+  });
+
+  test('clear with extra args → error', () => {
+    expect(parseMarkersArgs(['clear', 'youtube']).error).toContain('Clear does not accept');
+  });
 });
 
 // ─── parseSettingsValue ───────────────────────────────────────────────────────
@@ -452,6 +460,116 @@ describe('handleWebCommand — /markers', () => {
       feedback: (l, t) => feedback.push([l, t]),
     });
     expect(calls).toHaveLength(0);
+    expect(feedback.some(([, t]) => t.includes('Usage'))).toBe(true);
+  });
+
+  test('/markers clear → POSTs clear request and reports success', async () => {
+    const { calls } = mockFetch((url, init) => {
+      if (url === '/api/stream/markers/clear' && init?.method === 'POST') {
+        return { ok: true, body: { success: true, platform: 'youtube' } };
+      }
+      return { ok: false };
+    });
+    const feedback: Array<[string, string]> = [];
+
+    const result = await handleWebCommand('/markers clear', {
+      platforms: [],
+      feedback: (l, t) => feedback.push([l, t]),
+    });
+
+    expect(result).toBe(true);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe('/api/stream/markers/clear');
+    expect(calls[0]?.init?.method).toBe('POST');
+    expect(feedback).toContainEqual(['markers', 'youtube: cleared persisted markers']);
+  });
+
+  test('/markers clear extra → usage feedback without fetch', async () => {
+    const { calls } = mockFetch(() => ({ ok: true, body: {} }));
+    const feedback: Array<[string, string]> = [];
+
+    await handleWebCommand('/markers clear extra', {
+      platforms: [],
+      feedback: (l, t) => feedback.push([l, t]),
+    });
+
+    expect(calls).toHaveLength(0);
+    expect(feedback.some(([, t]) => t.includes('Usage'))).toBe(true);
+  });
+});
+
+// ── /setup-youtube ────────────────────────────────────────────────────────────
+
+describe('handleWebCommand — /setup-youtube', () => {
+  test('/setup-youtube (no args) fetches and displays current setup', async () => {
+    const setup = {
+      chaptering: { enabled: true },
+      clearMarkersOnNewStream: { enabled: false },
+      tags: { enabled: false },
+      description: { enabled: false },
+    };
+    mockFetch(() => ({ ok: true, body: setup }));
+    const feedback: Array<[string, string]> = [];
+
+    const result = await handleWebCommand('/setup-youtube', {
+      platforms: [],
+      feedback: (l, t) => feedback.push([l, t]),
+    });
+
+    expect(result).toBe(true);
+    expect(feedback.some(([, t]) => t.includes('Chaptering'))).toBe(true);
+    expect(feedback.some(([, t]) => t.includes('Clear Markers'))).toBe(true);
+  });
+
+  test('/setup-youtube clear-markers on → POSTs updated setup', async () => {
+    const current = { clearMarkersOnNewStream: { enabled: false } };
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const { calls: fetchCalls } = mockFetch((url, init) => {
+      calls.push({ url, init });
+      return { ok: true, body: current };
+    });
+    const feedback: Array<[string, string]> = [];
+
+    const result = await handleWebCommand('/setup-youtube clear-markers on', {
+      platforms: [],
+      feedback: (l, t) => feedback.push([l, t]),
+    });
+
+    expect(result).toBe(true);
+    const post = fetchCalls.find(
+      (c) => c.init?.method === 'POST' && c.url === '/api/youtube/setup',
+    );
+    expect(post).toBeDefined();
+    const body = JSON.parse(post!.init!.body as string);
+    expect(body.clearMarkersOnNewStream?.enabled).toBe(true);
+    expect(feedback.some(([, t]) => t.includes('enabled'))).toBe(true);
+  });
+
+  test('/setup-youtube clear-markers off → POSTs updated setup', async () => {
+    const current = { clearMarkersOnNewStream: { enabled: true } };
+    const { calls } = mockFetch(() => ({ ok: true, body: current }));
+    const feedback: Array<[string, string]> = [];
+
+    await handleWebCommand('/setup-youtube clear-markers off', {
+      platforms: [],
+      feedback: (l, t) => feedback.push([l, t]),
+    });
+
+    const post = calls.find((c) => c.init?.method === 'POST');
+    const body = JSON.parse(post!.init!.body as string);
+    expect(body.clearMarkersOnNewStream?.enabled).toBe(false);
+    expect(feedback.some(([, t]) => t.includes('disabled'))).toBe(true);
+  });
+
+  test('/setup-youtube unknown → shows usage', async () => {
+    mockFetch(() => ({ ok: true, body: {} }));
+    const feedback: Array<[string, string]> = [];
+
+    await handleWebCommand('/setup-youtube badkey on', {
+      platforms: [],
+      feedback: (l, t) => feedback.push([l, t]),
+    });
+
     expect(feedback.some(([, t]) => t.includes('Usage'))).toBe(true);
   });
 });

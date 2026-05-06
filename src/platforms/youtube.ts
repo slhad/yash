@@ -161,6 +161,7 @@ export interface YouTubeStreamSetup {
   defaultPlaylist: { enabled: boolean; playlistId: string; playlistTitle: string };
   subjectPlaylist: { enabled: boolean };
   chaptering: { enabled: boolean };
+  clearMarkersOnNewStream: { enabled: boolean };
   tags: { enabled: boolean };
   description: { enabled: boolean };
   subjectTitle: { enabled: boolean };
@@ -170,6 +171,7 @@ const DEFAULT_SETUP: YouTubeStreamSetup = {
   defaultPlaylist: { enabled: false, playlistId: '', playlistTitle: '' },
   subjectPlaylist: { enabled: false },
   chaptering: { enabled: true },
+  clearMarkersOnNewStream: { enabled: false },
   tags: { enabled: false },
   description: { enabled: false },
   subjectTitle: { enabled: false },
@@ -1228,6 +1230,18 @@ export class YouTubeProvider implements PlatformProvider {
             this.chatStream === null);
         if (shouldStartChatPoll) this._startChatPoll();
 
+        if (broadcastChanged && previousBroadcastId !== null) {
+          const setup = this.getSetup();
+          if (setup.clearMarkersOnNewStream.enabled) {
+            await this.clearPersistedMarkers().catch((err) =>
+              defaultLogger.error('[YouTube] auto-clear markers error:', err),
+            );
+            defaultLogger.info(
+              '[YouTube] broadcast changed — chapter markers cleared automatically',
+            );
+          }
+        }
+
         // Viewer count from liveStreamingDetails
         const videoResp = await this._request(
           `${YT_API}/videos?part=liveStreamingDetails&id=${this.broadcastId}`,
@@ -1500,9 +1514,13 @@ export class YouTubeProvider implements PlatformProvider {
     return result.slice(-limit);
   }
 
-  clearMarkers(): void {
+  async clearPersistedMarkers(): Promise<void> {
     this.chapterMarkers = [];
-    void this.persistChapters().catch((err) =>
+    await this.persistChapters();
+  }
+
+  clearMarkers(): void {
+    void this.clearPersistedMarkers().catch((err) =>
       defaultLogger.error('[YouTube] clearMarkers persist error:', err),
     );
   }
@@ -1571,6 +1589,10 @@ export class YouTubeProvider implements PlatformProvider {
       defaultPlaylist: { ...DEFAULT_SETUP.defaultPlaylist, ...(cfg.defaultPlaylist ?? {}) },
       subjectPlaylist: { ...DEFAULT_SETUP.subjectPlaylist, ...(cfg.subjectPlaylist ?? {}) },
       chaptering: { ...DEFAULT_SETUP.chaptering, ...(cfg.chaptering ?? {}) },
+      clearMarkersOnNewStream: {
+        ...DEFAULT_SETUP.clearMarkersOnNewStream,
+        ...(cfg.clearMarkersOnNewStream ?? {}),
+      },
       tags: { ...DEFAULT_SETUP.tags, ...(cfg.tags ?? {}) },
       description: { ...DEFAULT_SETUP.description, ...(cfg.description ?? {}) },
       subjectTitle: { ...DEFAULT_SETUP.subjectTitle, ...(cfg.subjectTitle ?? {}) },

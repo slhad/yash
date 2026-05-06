@@ -61,6 +61,7 @@ export function parseMarkerArgs(parts: string[]): { description?: string; timest
 }
 
 export function parseMarkersArgs(parts: string[]): {
+  action?: 'clear';
   platforms?: string[];
   limit?: number;
   error?: string;
@@ -68,6 +69,13 @@ export function parseMarkersArgs(parts: string[]): {
   if (parts.length === 0) return {};
 
   const first = (parts[0] ?? '').toLowerCase();
+  if (first === 'clear') {
+    if (parts.length > 1) {
+      return { action: 'clear', error: 'Clear does not accept additional arguments' };
+    }
+    return { action: 'clear' };
+  }
+
   const validPlatforms = ['all', 'youtube', 'twitch', 'kick'];
   let platforms: string[] | undefined;
   let limitPart: string | undefined;
@@ -124,7 +132,7 @@ const VALID_COMMANDS = [
  *   "/settings "        → "get | set"
  *   "/settings get "    → "<key>  e.g. title.visible"
  *   "/marker"           → "[description] [| timestamp_s]"
- *   "/markers"          → "[all|youtube|twitch|kick] [limit]"
+ *   "/markers"          → "clear | [all|youtube|twitch|kick] [limit]"
  */
 export function getWebAutocomplete(input: string): string | null {
   const trimmed = input.trimStart();
@@ -169,7 +177,7 @@ export function getWebAutocomplete(input: string): string | null {
   }
 
   if (cmd === '/markers') {
-    return '[all|youtube|twitch|kick] [limit]';
+    return 'clear | [all|youtube|twitch|kick] [limit]';
   }
 
   if (cmd === '/settings') {
@@ -310,11 +318,25 @@ export async function handleWebCommand(text: string, ctx: WebCommandContext): Pr
     return true;
   }
 
-  // ── /markers [all|youtube|twitch|kick] [limit] ───────────────────────────
+  // ── /markers clear | [all|youtube|twitch|kick] [limit] ───────────────────
   if (cmd === '/markers') {
     const parsed = parseMarkersArgs(parts.slice(1));
     if (parsed.error) {
-      fb('markers', `Usage: /markers [all|youtube|twitch|kick] [limit] (${parsed.error})`);
+      fb('markers', `Usage: /markers clear | [all|youtube|twitch|kick] [limit] (${parsed.error})`);
+      return true;
+    }
+
+    if (parsed.action === 'clear') {
+      try {
+        const res = await fetch('/api/stream/markers/clear', { method: 'POST' });
+        if (!res.ok) {
+          fb('markers', 'Failed to clear YouTube markers.');
+          return true;
+        }
+        fb('markers', 'youtube: cleared persisted markers');
+      } catch {
+        fb('markers', 'Failed to clear YouTube markers.');
+      }
       return true;
     }
 
@@ -450,6 +472,10 @@ export async function handleWebCommand(text: string, ctx: WebCommandContext): Pr
           fb('youtube-setup', `  Chaptering       : ${s.chaptering?.enabled ? 'ON' : 'OFF'}`);
           fb(
             'youtube-setup',
+            `  Clear Markers    : ${s.clearMarkersOnNewStream?.enabled ? 'ON  — clears chapters on new broadcast' : 'OFF'}`,
+          );
+          fb(
+            'youtube-setup',
             `  Tags             : ${s.tags?.enabled ? 'ON  — uses tags from /stream' : 'OFF'}`,
           );
           fb(
@@ -469,6 +495,7 @@ export async function handleWebCommand(text: string, ctx: WebCommandContext): Pr
 
     const toggleMap: Record<string, string> = {
       chaptering: 'chaptering',
+      'clear-markers': 'clearMarkersOnNewStream',
       tags: 'tags',
       description: 'description',
       subject: 'subjectPlaylist',
@@ -495,7 +522,7 @@ export async function handleWebCommand(text: string, ctx: WebCommandContext): Pr
 
     fb(
       'youtube-setup',
-      'Usage: /setup-youtube [chaptering|tags|description|subject|playlist] [on|off]',
+      'Usage: /setup-youtube [chaptering|clear-markers|tags|description|subject|playlist] [on|off]',
     );
     return true;
   }

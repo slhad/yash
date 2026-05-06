@@ -432,6 +432,20 @@ Bun.serve({
     },
 
     // ------------------------------------------------------------------
+    // Clear persisted YouTube chapter markers — POST /api/stream/markers/clear
+    // This only clears YouTube's chapter store persisted in settings.json.
+    // Twitch/Kick markers are unaffected.
+    // ------------------------------------------------------------------
+    '/api/stream/markers/clear': {
+      POST: async () => {
+        await youtube.clearPersistedMarkers();
+        return new Response(JSON.stringify({ success: true, platform: 'youtube' }), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      },
+    },
+
+    // ------------------------------------------------------------------
     // Cross-platform marker read — GET /api/stream/markers
     // Query params: ?platform=youtube&platform=twitch&limit=<n>
     // Returns the latest markers for each requested platform.
@@ -819,9 +833,9 @@ Bun.serve({
               },
               {
                 command: '/markers',
-                description: 'List existing markers',
-                example: '/markers youtube 10',
-                usage: '/markers [all|youtube|twitch|kick] [limit]',
+                description: 'List markers or clear persisted YouTube markers',
+                example: '/markers clear',
+                usage: '/markers clear | [all|youtube|twitch|kick] [limit]',
               },
               {
                 command: '/connect',
