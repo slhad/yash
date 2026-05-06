@@ -35,230 +35,243 @@
   <script type="module">
     import { getWebAutocomplete, handleWebCommand } from '/api/js/commands.js';
 
-                                                                                                                            function formatElapsed(isoStart) {
-                                                                                                                              const secs = Math.floor((Date.now() - new Date(isoStart).getTime()) / 1000);
-                                                                                                                              const h = Math.floor(secs / 3600);
-                                                                                                                              const m = Math.floor((secs % 3600) / 60);
-                                                                                                                              const s = secs % 60;
-                                                                                                                              return h > 0 ? `${h}h${m}m${s}s` : `${m}m${s}s`;
-                                                                                                                            }
+                                                                                                                                                    function formatElapsed(isoStart) {
+                                                                                                                                                      const secs = Math.floor((Date.now() - new Date(isoStart).getTime()) / 1000);
+                                                                                                                                                      const h = Math.floor(secs / 3600);
+                                                                                                                                                      const m = Math.floor((secs % 3600) / 60);
+                                                                                                                                                      const s = secs % 60;
+                                                                                                                                                      return h > 0 ? `${h}h${m}m${s}s` : `${m}m${s}s`;
+                                                                                                                                                    }
 
-                                                                                                                            const STORAGE_KEY = 'yash_msgbox_position';
-                                                                                                                                    const POSITIONS = ['bottom', 'top', 'hide'];
+                                                                                                                                                    const STORAGE_KEY = 'yash_msgbox_position';
+                                                                                                                                                            const POSITIONS = ['bottom', 'top', 'hide'];
+                                                                                                                                                            const VALID_PLATFORMS = ['all', 'youtube', 'twitch', 'kick'];
 
-                                                                                                                                    const messagesEl = document.getElementById('messages');
-                                                                                                                                    const msgboxEl = document.getElementById('msgbox');
-                                                                                                                                    const positionBtn = document.getElementById('position-btn');
-                                                                                                                                    const platformSelect = document.getElementById('platform-select');
-                                                                                                                                    const messageInput = document.getElementById('message-input');
-                                                                                                                                    const sendBtn = document.getElementById('send-btn');
-                                                                                                                                    const autocompleteHint = document.getElementById('autocomplete-hint');
+                                                                                                                                                            const messagesEl = document.getElementById('messages');
+                                                                                                                                                            const msgboxEl = document.getElementById('msgbox');
+                                                                                                                                                            const positionBtn = document.getElementById('position-btn');
+                                                                                                                                                            const platformSelect = document.getElementById('platform-select');
+                                                                                                                                                            const messageInput = document.getElementById('message-input');
+                                                                                                                                                            const sendBtn = document.getElementById('send-btn');
+                                                                                                                                                            const autocompleteHint = document.getElementById('autocomplete-hint');
 
-                                                                                                                                    const inputHistory = [];
-                                                                                                                                    let historyIdx = -1;
+                                                                                                                                                            const inputHistory = [];
+                                                                                                                                                            let historyIdx = -1;
 
-                                                                                                                                    const knownIds = new Set();
-                                                                                                                                    let currentPosition = localStorage.getItem(STORAGE_KEY) || 'bottom';
+                                                                                                                                                            const knownIds = new Set();
 
-                                                                                                                                    function applyPosition(pos) {
-                                                                                                                                      currentPosition = pos;
-                                                                                                                                      localStorage.setItem(STORAGE_KEY, pos);
+                                                                                                                                                            // Querystring overrides: ?position=top|bottom|hide  ?platform=all|youtube|twitch|kick
+                                                                                                                                                            const qs = new URLSearchParams(location.search);
+                                                                                                                                                            const qsPosition = qs.get('position');
+                                                                                                                                                            const qsPlatform = qs.get('platform');
 
-                                                                                                                                      msgboxEl.classList.remove('position-top');
+                                                                                                                                                            let currentPosition = (qsPosition && POSITIONS.includes(qsPosition))
+                                                                                                                                                              ? qsPosition
+                                                                                                                                                              : (localStorage.getItem(STORAGE_KEY) || 'bottom');
 
-                                                                                                                                      if (pos === 'hide') {
-                                                                                                                                        msgboxEl.style.display = 'none';
-                                                                                                                                        positionBtn.textContent = 'position: hide ●';
-                                                                                                                                      } else if (pos === 'top') {
-                                                                                                                                        msgboxEl.style.display = 'flex';
-                                                                                                                                        msgboxEl.classList.add('position-top');
-                                                                                                                                        positionBtn.textContent = 'position: top ▲';
-                                                                                                                                      } else {
-                                                                                                                                        msgboxEl.style.display = 'flex';
-                                                                                                                                        positionBtn.textContent = 'position: bottom ▼';
-                                                                                                                                      }
-                                                                                                                                    }
+                                                                                                                                                            function applyPosition(pos) {
+                                                                                                                                                              currentPosition = pos;
+                                                                                                                                                              localStorage.setItem(STORAGE_KEY, pos);
 
-                                                                                                                                    positionBtn.addEventListener('click', () => {
-                                                                                                                                      const idx = POSITIONS.indexOf(currentPosition);
-                                                                                                                                      const next = POSITIONS[(idx + 1) % POSITIONS.length];
-                                                                                                                                      applyPosition(next);
-                                                                                                                                    });
+                                                                                                                                                              msgboxEl.classList.remove('position-top');
 
-                                                                                                                                    applyPosition(currentPosition);
+                                                                                                                                                              if (pos === 'hide') {
+                                                                                                                                                                msgboxEl.style.display = 'none';
+                                                                                                                                                                positionBtn.textContent = 'position: hide ●';
+                                                                                                                                                              } else if (pos === 'top') {
+                                                                                                                                                                msgboxEl.style.display = 'flex';
+                                                                                                                                                                msgboxEl.classList.add('position-top');
+                                                                                                                                                                positionBtn.textContent = 'position: top ▲';
+                                                                                                                                                              } else {
+                                                                                                                                                                msgboxEl.style.display = 'flex';
+                                                                                                                                                                positionBtn.textContent = 'position: bottom ▼';
+                                                                                                                                                              }
+                                                                                                                                                            }
 
-                                                                                                                                    function platformTag(platform) {
-                                                                                                                                      const cls = ['youtube', 'twitch', 'kick'].includes(platform)
-                                                                                                                                        ? `tag-${platform}`
-                                                                                                                                        : 'tag-unknown';
-                                                                                                                                      return `<span class="platform-tag ${cls}">${platform}</span>`;
-                                                                                                                                    }
+                                                                                                                                                            positionBtn.addEventListener('click', () => {
+                                                                                                                                                              const idx = POSITIONS.indexOf(currentPosition);
+                                                                                                                                                              const next = POSITIONS[(idx + 1) % POSITIONS.length];
+                                                                                                                                                              applyPosition(next);
+                                                                                                                                                            });
 
-                                                                                                                                    function renderMessage(msg) {
-                                                                                                                                      const div = document.createElement('div');
-                                                                                                                                      div.className = 'msg';
-                                                                                                                                      div.innerHTML =
-                                                                                                                                        platformTag(msg.platform) +
-                                                                                                                                        `<span class="username">${escapeHtml(msg.username)}:</span>` +
-                                                                                                                                        `<span class="text">${escapeHtml(msg.message)}</span>`;
-                                                                                                                                      return div;
-                                                                                                                                    }
+                                                                                                                                                            applyPosition(currentPosition);
 
-                                                                                                                                    function escapeHtml(str) {
-                                                                                                                                      return String(str)
-                                                                                                                                        .replace(/&/g, '&amp;')
-                                                                                                                                        .replace(/</g, '&lt;')
-                                                                                                                                        .replace(/>/g, '&gt;')
-                                                                                                                                        .replace(/"/g, '&quot;');
-                                                                                                                                    }
+                                                                                                                                                            if (qsPlatform && VALID_PLATFORMS.includes(qsPlatform)) {
+                                                                                                                                                              platformSelect.value = qsPlatform;
+                                                                                                                                                            }
 
-                                                                                                                                    let isAtBottom = true;
-                                                                                                                                    messagesEl.addEventListener('scroll', () => {
-                                                                                                                                      isAtBottom = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 32;
-                                                                                                                                    });
+                                                                                                                                                            function platformTag(platform) {
+                                                                                                                                                              const cls = ['youtube', 'twitch', 'kick'].includes(platform)
+                                                                                                                                                                ? `tag-${platform}`
+                                                                                                                                                                : 'tag-unknown';
+                                                                                                                                                              return `<span class="platform-tag ${cls}">${platform}</span>`;
+                                                                                                                                                            }
 
-                                                                                                                                    function appendMessages(msgs) {
-                                                                                                                                      let added = false;
-                                                                                                                                      for (const msg of msgs) {
-                                                                                                                                        if (knownIds.has(msg.id)) continue;
-                                                                                                                                        knownIds.add(msg.id);
-                                                                                                                                        messagesEl.appendChild(renderMessage(msg));
-                                                                                                                                        added = true;
-                                                                                                                                      }
-                                                                                                                                      if (added && isAtBottom) {
-                                                                                                                                        messagesEl.scrollTop = messagesEl.scrollHeight;
-                                                                                                                                      }
-                                                                                                                                    }
+                                                                                                                                                            function renderMessage(msg) {
+                                                                                                                                                              const div = document.createElement('div');
+                                                                                                                                                              div.className = 'msg';
+                                                                                                                                                              div.innerHTML =
+                                                                                                                                                                platformTag(msg.platform) +
+                                                                                                                                                                `<span class="username">${escapeHtml(msg.username)}:</span>` +
+                                                                                                                                                                `<span class="text">${escapeHtml(msg.message)}</span>`;
+                                                                                                                                                              return div;
+                                                                                                                                                            }
 
-                                                                                                                                    async function fetchHistory() {
-                                                                                                                                      try {
-                                                                                                                                        const res = await fetch('/api/chat/history');
-                                                                                                                                        if (!res.ok) return;
-                                                                                                                                        const msgs = await res.json();
-                                                                                                                                        appendMessages(msgs);
-                                                                                                                                      } catch (_) {}
-                                                                                                                                    }
+                                                                                                                                                            function escapeHtml(str) {
+                                                                                                                                                              return String(str)
+                                                                                                                                                                .replace(/&/g, '&amp;')
+                                                                                                                                                                .replace(/</g, '&lt;')
+                                                                                                                                                                .replace(/>/g, '&gt;')
+                                                                                                                                                                .replace(/"/g, '&quot;');
+                                                                                                                                                            }
 
-                                                                                                                                    fetchHistory();
-                                                                                                                                    setInterval(fetchHistory, 2000);
+                                                                                                                                                            let isAtBottom = true;
+                                                                                                                                                            messagesEl.addEventListener('scroll', () => {
+                                                                                                                                                              isAtBottom = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 32;
+                                                                                                                                                            });
 
-                                                                                                                                    const statusPlatformsEl = document.getElementById('status-platforms');
-                                                                                                                                    async function fetchStatus() {
-                                                                                                                                      try {
-                                                                                                                                        const res = await fetch('/api/status');
-                                                                                                                                        if (!res.ok) return;
-                                                                                                                                        const data = await res.json();
-                                                                                                                                        const parts = [];
-                                                                                                                                        for (const [name, info] of Object.entries(data)) {
-                                                                                                                                          if (!info || typeof info !== 'object') continue;
-                                                                                                                                          const { streamStatus, viewerCount, streamStartTime } = info;
-                                                                                                                                          if (streamStatus === 'ONLINE') {
-                                                                                                                                            let detail = '';
-                                                                                                                                            if (streamStartTime) detail += formatElapsed(streamStartTime);
-                                                                                                                                            if (viewerCount != null) detail += `${detail ? ' / ' : ''}${viewerCount} viewers`;
-                                                                                                                                            const label = name.charAt(0).toUpperCase() + name.slice(1);
-                                                                                                                                            parts.push(`<span class="online">${escapeHtml(label)}: ONLINE${detail ? ` (${escapeHtml(detail)})` : ''}</span>`);
-                                                                                                                                          } else {
-                                                                                                                                            const label = name.charAt(0).toUpperCase() + name.slice(1);
-                                                                                                                                            parts.push(`<span class="offline">${escapeHtml(label)}: offline</span>`);
-                                                                                                                                          }
-                                                                                                                                        }
-                                                                                                                                        statusPlatformsEl.innerHTML = parts.join('<span class="yash-status-separator"> | </span>') || 'no platforms';
-                                                                                                                                      } catch (_) {}
-                                                                                                                                    }
+                                                                                                                                                            function appendMessages(msgs) {
+                                                                                                                                                              let added = false;
+                                                                                                                                                              for (const msg of msgs) {
+                                                                                                                                                                if (knownIds.has(msg.id)) continue;
+                                                                                                                                                                knownIds.add(msg.id);
+                                                                                                                                                                messagesEl.appendChild(renderMessage(msg));
+                                                                                                                                                                added = true;
+                                                                                                                                                              }
+                                                                                                                                                              if (added && isAtBottom) {
+                                                                                                                                                                messagesEl.scrollTop = messagesEl.scrollHeight;
+                                                                                                                                                              }
+                                                                                                                                                            }
 
-                                                                                                                                    fetchStatus();
-                                                                                                                                    setInterval(fetchStatus, 3000);
+                                                                                                                                                            async function fetchHistory() {
+                                                                                                                                                              try {
+                                                                                                                                                                const res = await fetch('/api/chat/history');
+                                                                                                                                                                if (!res.ok) return;
+                                                                                                                                                                const msgs = await res.json();
+                                                                                                                                                                appendMessages(msgs);
+                                                                                                                                                              } catch (_) {}
+                                                                                                                                                            }
 
-                                                                                                                                    // Append a system feedback line to the message feed (UI-only, stays local)
-                                                                                                                                    function appendSystem(label, text) {
-                                                                                                                                      const div = document.createElement('div');
-                                                                                                                                      div.className = 'msg';
-                                                                                                                                      div.innerHTML = `<span class="platform-tag tag-unknown">${escapeHtml(label)}</span><span class="text">${escapeHtml(text)}</span>`;
-                                                                                                                                      messagesEl.appendChild(div);
-                                                                                                                                      if (isAtBottom) messagesEl.scrollTop = messagesEl.scrollHeight;
-                                                                                                                                    }
+                                                                                                                                                            fetchHistory();
+                                                                                                                                                            setInterval(fetchHistory, 2000);
 
-                                                                                                                                    async function sendMessage() {
-                                                                                                                                      const text = messageInput.value.trim();
-                                                                                                                                      if (!text) return;
+                                                                                                                                                            const statusPlatformsEl = document.getElementById('status-platforms');
+                                                                                                                                                            async function fetchStatus() {
+                                                                                                                                                              try {
+                                                                                                                                                                const res = await fetch('/api/status');
+                                                                                                                                                                if (!res.ok) return;
+                                                                                                                                                                const data = await res.json();
+                                                                                                                                                                const parts = [];
+                                                                                                                                                                for (const [name, info] of Object.entries(data)) {
+                                                                                                                                                                  if (!info || typeof info !== 'object') continue;
+                                                                                                                                                                  const { streamStatus, viewerCount, streamStartTime } = info;
+                                                                                                                                                                  if (streamStatus === 'ONLINE') {
+                                                                                                                                                                    let detail = '';
+                                                                                                                                                                    if (streamStartTime) detail += formatElapsed(streamStartTime);
+                                                                                                                                                                    if (viewerCount != null) detail += `${detail ? ' / ' : ''}${viewerCount} viewers`;
+                                                                                                                                                                    const label = name.charAt(0).toUpperCase() + name.slice(1);
+                                                                                                                                                                    parts.push(`<span class="online">${escapeHtml(label)}: ONLINE${detail ? ` (${escapeHtml(detail)})` : ''}</span>`);
+                                                                                                                                                                  } else {
+                                                                                                                                                                    const label = name.charAt(0).toUpperCase() + name.slice(1);
+                                                                                                                                                                    parts.push(`<span class="offline">${escapeHtml(label)}: offline</span>`);
+                                                                                                                                                                  }
+                                                                                                                                                                }
+                                                                                                                                                                statusPlatformsEl.innerHTML = parts.join('<span class="yash-status-separator"> | </span>') || 'no platforms';
+                                                                                                                                                              } catch (_) {}
+                                                                                                                                                            }
 
-                                                                                                                                      const platform = platformSelect.value;
-                                                                                                                                      const platforms = platform === 'all' ? [] : [platform];
+                                                                                                                                                            fetchStatus();
+                                                                                                                                                            setInterval(fetchStatus, 3000);
 
-                                                                                                                                      inputHistory.push(text);
-                                                                                                                                      historyIdx = -1;
+                                                                                                                                                            // Append a system feedback line to the message feed (UI-only, stays local)
+                                                                                                                                                            function appendSystem(label, text) {
+                                                                                                                                                              const div = document.createElement('div');
+                                                                                                                                                              div.className = 'msg';
+                                                                                                                                                              div.innerHTML = `<span class="platform-tag tag-unknown">${escapeHtml(label)}</span><span class="text">${escapeHtml(text)}</span>`;
+                                                                                                                                                              messagesEl.appendChild(div);
+                                                                                                                                                              if (isAtBottom) messagesEl.scrollTop = messagesEl.scrollHeight;
+                                                                                                                                                            }
 
-                                                                                                                                      sendBtn.disabled = true;
+                                                                                                                                                            async function sendMessage() {
+                                                                                                                                                              const text = messageInput.value.trim();
+                                                                                                                                                              if (!text) return;
 
-                                                                                                                                      // Delegate / commands to the shared handler from /api/js/commands.js
-                                                                                                                                      const handled = await handleWebCommand(text, { platforms, feedback: appendSystem });
-                                                                                                                                      if (handled) {
-                                                                                                                                        messageInput.value = '';
-                                                                                                                                        messageInput.style.height = 'auto';
-                                                                                                                                        autocompleteHint.textContent = '';
-                                                                                                                                        sendBtn.disabled = false;
-                                                                                                                                        messageInput.focus();
-                                                                                                                                        return;
-                                                                                                                                      }
+                                                                                                                                                              const platform = platformSelect.value;
+                                                                                                                                                              const platforms = platform === 'all' ? [] : [platform];
 
-                                                                                                                                      try {
-                                                                                                                                        const res = await fetch('/api/chat/send', {
-                                                                                                                                          method: 'POST',
-                                                                                                                                          headers: { 'Content-Type': 'application/json' },
-                                                                                                                                          body: JSON.stringify({ message: text, platforms }),
-                                                                                                                                        });
-                                                                                                                                        if (res.ok) {
-                                                                                                                                          messageInput.value = '';
-                                                                                                                                          messageInput.style.height = 'auto';
-                                                                                                                                          autocompleteHint.textContent = '';
-                                                                                                                                          await fetchHistory();
-                                                                                                                                        }
-                                                                                                                                      } catch (_) {}
-                                                                                                                                      sendBtn.disabled = false;
-                                                                                                                                      messageInput.focus();
-                                                                                                                                    }
+                                                                                                                                                              inputHistory.push(text);
+                                                                                                                                                              historyIdx = -1;
 
-                                                                                                                                    sendBtn.addEventListener('click', sendMessage);
-                                                                                                                                    messageInput.addEventListener('keydown', (e) => {
-                                                                                                                                      if (e.key === 'ArrowUp') {
-                                                                                                                                        e.preventDefault();
-                                                                                                                                        if (inputHistory.length === 0) return;
-                                                                                                                                        if (historyIdx === -1) historyIdx = inputHistory.length - 1;
-                                                                                                                                        else if (historyIdx > 0) historyIdx--;
-                                                                                                                                        messageInput.value = inputHistory[historyIdx];
-                                                                                                                                        messageInput.style.height = 'auto';
-                                                                                                                                        messageInput.style.height = `${Math.min(messageInput.scrollHeight, 80)}px`;
-                                                                                                                                        return;
-                                                                                                                                      }
-                                                                                                                                      if (e.key === 'ArrowDown') {
-                                                                                                                                        e.preventDefault();
-                                                                                                                                        if (historyIdx === -1) return;
-                                                                                                                                        historyIdx++;
-                                                                                                                                        if (historyIdx >= inputHistory.length) {
-                                                                                                                                          historyIdx = -1;
-                                                                                                                                          messageInput.value = '';
-                                                                                                                                        } else {
-                                                                                                                                          messageInput.value = inputHistory[historyIdx];
-                                                                                                                                        }
-                                                                                                                                        messageInput.style.height = 'auto';
-                                                                                                                                        messageInput.style.height = `${Math.min(messageInput.scrollHeight, 80)}px`;
-                                                                                                                                        return;
-                                                                                                                                      }
-                                                                                                                                      if (e.key === 'Enter' && !e.shiftKey) {
-                                                                                                                                        e.preventDefault();
-                                                                                                                                        sendMessage();
-                                                                                                                                      }
-                                                                                                                                    });
+                                                                                                                                                              sendBtn.disabled = true;
 
-                                                                                                                                    // Auto-resize textarea + live autocomplete hint
-                                                                                                                                    messageInput.addEventListener('input', () => {
-                                                                                                                                      historyIdx = -1;
-                                                                                                                                      messageInput.style.height = 'auto';
-                                                                                                                                      messageInput.style.height = `${Math.min(messageInput.scrollHeight, 80)}px`;
-                                                                                                                                      const hint = getWebAutocomplete(messageInput.value);
-                                                                                                                                      autocompleteHint.textContent = hint ?? '';
-                                                                                                                                    });
+                                                                                                                                                              // Delegate / commands to the shared handler from /api/js/commands.js
+                                                                                                                                                              const handled = await handleWebCommand(text, { platforms, feedback: appendSystem });
+                                                                                                                                                              if (handled) {
+                                                                                                                                                                messageInput.value = '';
+                                                                                                                                                                messageInput.style.height = 'auto';
+                                                                                                                                                                autocompleteHint.textContent = '';
+                                                                                                                                                                sendBtn.disabled = false;
+                                                                                                                                                                messageInput.focus();
+                                                                                                                                                                return;
+                                                                                                                                                              }
+
+                                                                                                                                                              try {
+                                                                                                                                                                const res = await fetch('/api/chat/send', {
+                                                                                                                                                                  method: 'POST',
+                                                                                                                                                                  headers: { 'Content-Type': 'application/json' },
+                                                                                                                                                                  body: JSON.stringify({ message: text, platforms }),
+                                                                                                                                                                });
+                                                                                                                                                                if (res.ok) {
+                                                                                                                                                                  messageInput.value = '';
+                                                                                                                                                                  messageInput.style.height = 'auto';
+                                                                                                                                                                  autocompleteHint.textContent = '';
+                                                                                                                                                                  await fetchHistory();
+                                                                                                                                                                }
+                                                                                                                                                              } catch (_) {}
+                                                                                                                                                              sendBtn.disabled = false;
+                                                                                                                                                              messageInput.focus();
+                                                                                                                                                            }
+
+                                                                                                                                                            sendBtn.addEventListener('click', sendMessage);
+                                                                                                                                                            messageInput.addEventListener('keydown', (e) => {
+                                                                                                                                                              if (e.key === 'ArrowUp') {
+                                                                                                                                                                e.preventDefault();
+                                                                                                                                                                if (inputHistory.length === 0) return;
+                                                                                                                                                                if (historyIdx === -1) historyIdx = inputHistory.length - 1;
+                                                                                                                                                                else if (historyIdx > 0) historyIdx--;
+                                                                                                                                                                messageInput.value = inputHistory[historyIdx];
+                                                                                                                                                                messageInput.style.height = 'auto';
+                                                                                                                                                                messageInput.style.height = `${Math.min(messageInput.scrollHeight, 80)}px`;
+                                                                                                                                                                return;
+                                                                                                                                                              }
+                                                                                                                                                              if (e.key === 'ArrowDown') {
+                                                                                                                                                                e.preventDefault();
+                                                                                                                                                                if (historyIdx === -1) return;
+                                                                                                                                                                historyIdx++;
+                                                                                                                                                                if (historyIdx >= inputHistory.length) {
+                                                                                                                                                                  historyIdx = -1;
+                                                                                                                                                                  messageInput.value = '';
+                                                                                                                                                                } else {
+                                                                                                                                                                  messageInput.value = inputHistory[historyIdx];
+                                                                                                                                                                }
+                                                                                                                                                                messageInput.style.height = 'auto';
+                                                                                                                                                                messageInput.style.height = `${Math.min(messageInput.scrollHeight, 80)}px`;
+                                                                                                                                                                return;
+                                                                                                                                                              }
+                                                                                                                                                              if (e.key === 'Enter' && !e.shiftKey) {
+                                                                                                                                                                e.preventDefault();
+                                                                                                                                                                sendMessage();
+                                                                                                                                                              }
+                                                                                                                                                            });
+
+                                                                                                                                                            // Auto-resize textarea + live autocomplete hint
+                                                                                                                                                            messageInput.addEventListener('input', () => {
+                                                                                                                                                              historyIdx = -1;
+                                                                                                                                                              messageInput.style.height = 'auto';
+                                                                                                                                                              messageInput.style.height = `${Math.min(messageInput.scrollHeight, 80)}px`;
+                                                                                                                                                              const hint = getWebAutocomplete(messageInput.value);
+                                                                                                                                                              autocompleteHint.textContent = hint ?? '';
+                                                                                                                                                            });
   </script>
 </body>
 </html>

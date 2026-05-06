@@ -28,11 +28,13 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
         * Optional pipe-delimited timestamp in seconds from stream start (used by YouTube for chapter generation; ignored by Twitch which sets position server-side; Kick does not support markers)
         * When no timestamp is provided, YouTube derives the marker position from the current live stream elapsed time when available, falling back to a live API lookup after restart before using `0`
         * Examples: `/marker Intro | 0`, `/marker Q&A | 3723`, `/marker` (unnamed, no timestamp)
-    * Command /markers [all|youtube|twitch|kick] [limit] - lists existing markers per platform
-        * Default target is `all`; default limit is `20`
-        * Examples: `/markers`, `/markers youtube`, `/markers twitch 5`
+    * Command `/markers clear | [all|youtube|twitch|kick] [limit]` - lists existing markers per platform or clears persisted YouTube chapters
+        * `clear` removes only YouTube chapter markers persisted under `stream.chapters` in `YASH_DATA_DIR/settings.json`
+        * Default list target is `all`; default list limit is `20`
+        * Examples: `/markers`, `/markers youtube`, `/markers twitch 5`, `/markers clear`
     * Command /settings [get <key>|set <key> <value>] - get or set UI settings
         * Includes `chat.timestamps.visible` for WebUI unified chat timestamp display
+    * Command `/setup-youtube [chaptering|clear-markers|tags|description|subject|playlist] [on|off]` — configure YouTube stream options; `clear-markers` enables automatic chapter clearing when a new broadcast is detected
     * `/stream` modal: per-platform category autocomplete with ↑/↓ navigation — Twitch field (`twitchGame`) calls `/api/twitch/categories` with 300 ms debounce; Kick field (`kickCategory`) calls `/api/kick/categories` with 300 ms debounce; YouTube field uses a static `<select>` dropdown from `/api/youtube/categories`
     * Message box to send message to [all|youtube|twitch|kick] platform and receive command "/" (without sending to platforms)
         * Input history: Up/Down arrow keys navigate previously-sent messages (like a shell history)
@@ -61,6 +63,7 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
     * Route /unified to show unified view of all chats
         * Message box supports all applicable / commands: `/help`, `/msg`, `/marker`, `/markers`, `/connect`, `/settings`
         * Status bar shows per-platform elapsed time + viewer counts
+        * URL querystring configures initial state: `?position=top|bottom|hide` overrides stored position; `?platform=all|youtube|twitch|kick` sets initial target platform
     * Route /sidebyside to show view of chats side by side with config options to enable any platform (saved in browser)
         * Message box supports all applicable / commands: `/help`, `/msg`, `/marker`, `/markers`, `/connect`, `/settings`
     * All chats view must have a message box to send messages like TUI, display top/bottom/hide (saved in browser individually)
@@ -70,7 +73,7 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
         * `/help` — list available commands (fetched from `/api/help`)
         * `/msg <all|youtube|twitch|kick> <text>` — send targeted platform message
         * `/marker [description] [| timestamp_s]` — create stream marker on all (or selected) platforms
-        * `/markers [all|youtube|twitch|kick] [limit]` — list existing markers
+        * `/markers clear | [all|youtube|twitch|kick] [limit]` — list existing markers or clear persisted YouTube chapters
         * `/connect <youtube|twitch|kick>` — authenticate a platform (all three redirect to real OAuth flows)
         * `/settings get <key>` — read a persistent setting via `/api/settings`
         * `/settings set <key> <value>` — write a persistent setting via `/api/settings`
@@ -272,6 +275,7 @@ Mutable settings live in `settings.json`, including `demo`, `chat.*`, `stream.*`
 | POST | `/api/stream` | Update metadata on platforms: `{ platforms?, metadata? }` — also persists to `YASH_DATA_DIR/settings.json`; response includes `{ success, platformResults }` with per-platform warnings/diagnostics |
 | POST | `/api/stream/marker` | Cross-platform marker: `{ platforms?, description?, timestamp? }` |
 | GET | `/api/stream/markers` | Cross-platform marker list: `?platform=<name>&limit=<n>` |
+| POST | `/api/stream/markers/clear` | Clear persisted YouTube chapter markers from `settings.json`; Twitch/Kick unaffected |
 | GET | `/api/help` | List all available / commands (for WebUI consumption) |
 | GET | `/api/settings` | Read all settings or `?key=<k>` for a single key |
 | POST | `/api/settings` | Write a setting via `{ key, value }` or merge a nested settings patch |
