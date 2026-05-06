@@ -1,49 +1,219 @@
-import * as fs from 'node:fs/promises';
+import * as fs from 'node:fs';
+import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import { defaultLogger } from './logger';
 
 const DEFAULT_FILENAME = 'settings.json';
 
+function clone<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value));
+}
+
+export function getDataDir(): string {
+  return process.env.YASH_DATA_DIR || path.join(process.env.HOME || '.', '.yash');
+}
+
+export function getSettingsPath(dataDir?: string): string {
+  return path.join(dataDir || getDataDir(), DEFAULT_FILENAME);
+}
+
+export function deepMerge(target: any, source: any): any {
+  const out = Array.isArray(target) ? [...target] : { ...(target ?? {}) };
+  for (const key of Object.keys(source ?? {})) {
+    const sourceValue = source[key];
+    if (
+      sourceValue &&
+      typeof sourceValue === 'object' &&
+      !Array.isArray(sourceValue) &&
+      target?.[key] &&
+      typeof target[key] === 'object' &&
+      !Array.isArray(target[key])
+    ) {
+      out[key] = deepMerge(target[key], sourceValue);
+    } else {
+      out[key] = clone(sourceValue);
+    }
+  }
+  return out;
+}
+
+function getPathSegments(key: string): string[] {
+  return key
+    .split('.')
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+}
+
+export function getValueAtPath(data: unknown, key: string, defaultValue: any = null): any {
+  if (!key) return data ?? defaultValue;
+  let current: any = data;
+  for (const segment of getPathSegments(key)) {
+    if (!current || typeof current !== 'object' || !(segment in current)) {
+      return defaultValue;
+    }
+    current = current[segment];
+  }
+  return current ?? defaultValue;
+}
+
+export function setValueAtPath(data: Record<string, any>, key: string, value: unknown): void {
+  const segments = getPathSegments(key);
+  if (segments.length === 0) {
+    throw new Error('settings key required');
+  }
+
+  let current: Record<string, any> = data;
+  for (const segment of segments.slice(0, -1)) {
+    const next = current[segment];
+    if (!next || typeof next !== 'object' || Array.isArray(next)) {
+      current[segment] = {};
+    }
+    current = current[segment];
+  }
+
+  current[segments[segments.length - 1] as string] = clone(value);
+}
+
+function loadSettingsFileSync(filePath: string): Record<string, any> {
+  try {
+    const content = fs.readFileSync(filePath, 'utf8');
+    const parsed = JSON.parse(content);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException)?.code !== 'ENOENT') {
+      defaultLogger.warn('Corrupt settings file, starting fresh');
+    }
+    return {};
+  }
+}
+
+function writeSettingsFileSync(filePath: string, data: Record<string, any>): void {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
+}
+
+function normalizeLegacySettingsShape(input: Record<string, any>): {
+  data: Record<string, any>;
+  changed: boolean;
+} {
+  const data: Record<string, any> = {};
+  const missing = Symbol('missing');
+  let changed = false;
+
+  for (const [key, value] of Object.entries(input ?? {})) {
+    if (key.includes('.')) continue;
+    data[key] = clone(value);
+  }
+
+  for (const [key, value] of Object.entries(input ?? {})) {
+    if (!key.includes('.')) continue;
+    if (getValueAtPath(data, key, missing) === missing) {
+      setValueAtPath(data, key, value);
+    }
+    changed = true;
+  }
+
+  const legacyShowTimestamps = getValueAtPath(data, 'chat.showTimestamps', missing);
+  if (legacyShowTimestamps !== missing) {
+    if (getValueAtPath(data, 'chat.timestamps.visible', missing) === missing) {
+      setValueAtPath(data, 'chat.timestamps.visible', legacyShowTimestamps);
+    }
+    if (data.chat && typeof data.chat === 'object' && 'showTimestamps' in data.chat) {
+      delete data.chat.showTimestamps;
+      changed = true;
+    }
+  }
+
+  return { data, changed };
+}
+
+async function writeSettingsFile(filePath: string, data: Record<string, any>): Promise<void> {
+  await fsp.mkdir(path.dirname(filePath), { recursive: true });
+  await fsp.writeFile(filePath, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
+}
+
 export class SettingsStore {
   private data: Record<string, any> = {};
   private filePath: string;
 
-  constructor(dataDir?: string) {
-    const dir = dataDir || process.env.YASH_DATA_DIR || path.join(process.env.HOME || '.', '.yash');
-    this.filePath = path.join(dir, DEFAULT_FILENAME);
-    // ensure data dir exists and load existing settings
-    void this.init();
+  constructor(private readonly fixedDataDir?: string) {
+    this.filePath = getSettingsPath(fixedDataDir);
+    this.loadSync();
   }
 
-  private async init() {
+  private resolveFilePath(): string {
+    return getSettingsPath(this.fixedDataDir);
+  }
+
+  private ensureCurrentPathSync(): void {
+    if (this.fixedDataDir) return;
+    const nextPath = this.resolveFilePath();
+    if (nextPath === this.filePath) return;
+    this.filePath = nextPath;
+    this.loadSync();
+  }
+
+  private loadSync(): void {
     try {
-      await fs.mkdir(path.dirname(this.filePath), { recursive: true });
-      const content = await fs.readFile(this.filePath, 'utf8');
-      try {
-        this.data = JSON.parse(content);
-      } catch {
-        defaultLogger.warn('Corrupt settings file, starting fresh');
-        this.data = {};
+      fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
+      const normalized = normalizeLegacySettingsShape(loadSettingsFileSync(this.filePath));
+      this.data = normalized.data;
+      if (normalized.changed) {
+        writeSettingsFileSync(this.filePath, this.data);
+        defaultLogger.info(`Migrated legacy settings keys in ${this.filePath}`);
       }
-    } catch (err) {
-      // File may not exist; start with empty settings
+    } catch {
       this.data = {};
     }
   }
 
-  get(key: string, defaultValue: any = null) {
-    return this.data[key] ?? defaultValue;
+  get(key: string, defaultValue: any = null): any {
+    this.ensureCurrentPathSync();
+    return getValueAtPath(this.data, key, defaultValue);
   }
 
-  async set(key: string, value: any) {
-    this.data[key] = value;
+  getAll(): Record<string, any> {
+    this.ensureCurrentPathSync();
+    return clone(this.data);
+  }
+
+  async reload(): Promise<Record<string, any>> {
+    this.ensureCurrentPathSync();
+    this.loadSync();
+    return this.getAll();
+  }
+
+  async set(key: string, value: unknown): Promise<void> {
+    this.ensureCurrentPathSync();
+    setValueAtPath(this.data, key, value);
     try {
-      await fs.mkdir(path.dirname(this.filePath), { recursive: true });
-      await fs.writeFile(this.filePath, JSON.stringify(this.data, null, 2), 'utf8');
+      await writeSettingsFile(this.filePath, this.data);
+    } catch (err) {
+      defaultLogger.error('Failed to persist settings', err);
+    }
+  }
+
+  async merge(patch: Record<string, any>): Promise<void> {
+    this.ensureCurrentPathSync();
+    this.data = deepMerge(this.data, patch);
+    try {
+      await writeSettingsFile(this.filePath, this.data);
+    } catch (err) {
+      defaultLogger.error('Failed to persist settings', err);
+    }
+  }
+
+  async replaceAll(nextData: Record<string, any>): Promise<void> {
+    this.ensureCurrentPathSync();
+    this.data = clone(nextData ?? {});
+    try {
+      await writeSettingsFile(this.filePath, this.data);
     } catch (err) {
       defaultLogger.error('Failed to persist settings', err);
     }
   }
 }
+
+export const settingsStore = new SettingsStore();
 
 export default SettingsStore;

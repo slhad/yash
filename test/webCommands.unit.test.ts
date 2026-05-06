@@ -203,6 +203,43 @@ describe('handleWebCommand — /help', () => {
     expect(feedback.filter(([l]) => l === 'help').length).toBeGreaterThanOrEqual(2);
   });
 
+  test('renders a status symbol legend when the API includes it', async () => {
+    mockFetch((url) => {
+      if (url === '/api/help')
+        return {
+          ok: true,
+          body: {
+            commands: [
+              {
+                command: 'status legend',
+                description:
+                  'Status symbols: ✓ = authenticated and online, ○ = authenticated but offline, ✗ = not authenticated',
+              },
+            ],
+          },
+        };
+      return { ok: false };
+    });
+
+    const feedback: Array<[string, string]> = [];
+    const result = await handleWebCommand('/help', {
+      platforms: [],
+      feedback: (l, t) => feedback.push([l, t]),
+    });
+
+    expect(result).toBe(true);
+    expect(
+      feedback.some(
+        ([label, text]) =>
+          label === 'help' &&
+          text.includes('Status symbols:') &&
+          text.includes('✓') &&
+          text.includes('○') &&
+          text.includes('✗'),
+      ),
+    ).toBe(true);
+  });
+
   test('shows error feedback when /api/help fails', async () => {
     mockFetch(() => ({ ok: false }));
     const feedback: Array<[string, string]> = [];

@@ -1,8 +1,12 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { EventEmitter } from 'node:events';
 import * as fs from 'node:fs/promises';
+import { status as GrpcStatus } from '@grpc/grpc-js';
+import type { ChatMessage } from '../src/platforms/base';
 import { StreamStatus } from '../src/platforms/base';
 import { YouTubeProvider } from '../src/platforms/youtube';
-import { getConfigPath, reloadConfig } from '../src/utils/config';
+import { reloadConfig } from '../src/utils/config';
+import { getSettingsPath, settingsStore } from '../src/utils/settings';
 import {
   makeRepoTempDir,
   makeRepoTempDirSync,
@@ -33,6 +37,14 @@ function makeProvider() {
   provider.chapterMarkers = [];
   provider.persistChapters = async () => {};
   return provider as YouTubeProvider;
+}
+
+class FakeChatStream extends EventEmitter {
+  cancelled = false;
+
+  cancel() {
+    this.cancelled = true;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -190,6 +202,206 @@ describe('YouTubeProvider — chat', () => {
     });
     p._simulateMessage('hi');
     expect(username).toBe('TestUser');
+  });
+
+  test('chat stream skips historical messages before the initial cutoff', () => {
+    const p = makeProvider() as any;
+    const received: string[] = [];
+    p.onMessage((msg: ChatMessage) => received.push(msg.message));
+    p.chatInitialized = false;
+    p.chatHistoryCutoffMs = Date.parse('2026-05-06T20:00:00.000Z');
+
+    p._dispatchStreamItems(
+      [
+        {
+          id: 'old-msg',
+          snippet: {
+            type: 'textMessageEvent',
+            displayMessage: 'old',
+            publishedAt: '2026-05-06T19:59:00.000Z',
+          },
+          authorDetails: { channelId: 'chan-old', displayName: 'OldUser' },
+        },
+        {
+          id: 'new-msg',
+          snippet: {
+            type: 'textMessageEvent',
+            displayMessage: 'new',
+            publishedAt: '2026-05-06T20:00:05.000Z',
+          },
+          authorDetails: { channelId: 'chan-new', displayName: 'NewUser' },
+        },
+      ],
+      false,
+    );
+
+    expect(received).toEqual(['new']);
+    expect(p.chatInitialized).toBe(true);
+    expect(p.chatHistoryCutoffMs).toBeNull();
+  });
+
+  test('chat stream accepts text messages when YouTube omits snippet.type', () => {
+    const p = makeProvider() as any;
+    const received: string[] = [];
+    p.onMessage((msg: ChatMessage) => received.push(msg.message));
+
+    p._dispatchStreamItems(
+      [
+        {
+          id: 'msg-without-type',
+          snippet: {
+            displayMessage: 'message without explicit type',
+            publishedAt: '2026-05-06T21:10:37.392674+00:00',
+          },
+          authorDetails: { channelId: 'chan-1', displayName: '@SlashTheKey' },
+        },
+      ],
+      true,
+    );
+
+    expect(received).toEqual(['message without explicit type']);
+  });
+
+  test('chat stream pauses reconnects for a long backoff window after quota exhaustion', async () => {
+    const p = makeProvider() as any;
+    p.isAuthenticatedFlag = true;
+    p.tokenData = {
+      accessToken: 'token',
+      refreshToken: 'refresh',
+      expiresIn: 3600,
+      obtainmentTimestamp: Date.now(),
+      channelId: 'chan',
+      channelTitle: 'title',
+    };
+    p.liveChatId = 'chat-live';
+    const stream = new FakeChatStream();
+    p._createChatStreamCall = () => stream;
+
+    const originalSetTimeout = globalThis.setTimeout;
+    let scheduledDelay = 0;
+    (globalThis as any).setTimeout = ((_callback: (...args: any[]) => void, delay?: number) => {
+      scheduledDelay = Number(delay ?? 0);
+      return 1;
+    }) as typeof setTimeout;
+
+    try {
+      await p._doChatPoll();
+      stream.emit('error', {
+        code: GrpcStatus.RESOURCE_EXHAUSTED,
+        details: 'Resource has been exhausted (e.g. check quota)',
+      });
+    } finally {
+      globalThis.setTimeout = originalSetTimeout;
+    }
+
+    expect(scheduledDelay).toBe(3_600_000);
+  });
+
+  test('chat stream stops immediately when the live chat is gone', async () => {
+    const p = makeProvider() as any;
+    p.isAuthenticatedFlag = true;
+    p.tokenData = {
+      accessToken: 'token',
+      refreshToken: 'refresh',
+      expiresIn: 3600,
+      obtainmentTimestamp: Date.now(),
+      channelId: 'chan',
+      channelTitle: 'title',
+    };
+    p.liveChatId = 'chat-live';
+    const stream = new FakeChatStream();
+    p._createChatStreamCall = () => stream;
+
+    const originalSetTimeout = globalThis.setTimeout;
+    let scheduled = false;
+    (globalThis as any).setTimeout = ((_callback: (...args: any[]) => void, _delay?: number) => {
+      scheduled = true;
+      return 1;
+    }) as typeof setTimeout;
+
+    try {
+      await p._doChatPoll();
+      stream.emit('error', {
+        code: GrpcStatus.NOT_FOUND,
+        details: 'Requested entity was not found',
+      });
+    } finally {
+      globalThis.setTimeout = originalSetTimeout;
+    }
+
+    expect(scheduled).toBe(false);
+    expect(p.liveChatId).toBeNull();
+  });
+
+  test('chat stream reconnects immediately with the next page token after end', async () => {
+    const p = makeProvider() as any;
+    p.isAuthenticatedFlag = true;
+    p.tokenData = {
+      accessToken: 'token',
+      refreshToken: 'refresh',
+      expiresIn: 3600,
+      obtainmentTimestamp: Date.now(),
+      channelId: 'chan',
+      channelTitle: 'title',
+    };
+    p.liveChatId = 'chat-live';
+    const stream = new FakeChatStream();
+    p._createChatStreamCall = () => stream;
+
+    const originalSetTimeout = globalThis.setTimeout;
+    let scheduledDelay = -1;
+    (globalThis as any).setTimeout = ((_callback: (...args: any[]) => void, delay?: number) => {
+      scheduledDelay = Number(delay ?? 0);
+      return 1;
+    }) as typeof setTimeout;
+
+    try {
+      await p._doChatPoll();
+      stream.emit('data', { nextPageToken: 'next-page', items: [] });
+      stream.emit('end');
+    } finally {
+      globalThis.setTimeout = originalSetTimeout;
+    }
+
+    expect(p.chatNextPageToken).toBe('next-page');
+    expect(scheduledDelay).toBe(0);
+  });
+
+  test('status poll starts chat when the same broadcast later gains a liveChatId', async () => {
+    const p = makeProvider() as any;
+    p.isAuthenticatedFlag = true;
+    p.tokenData = {
+      accessToken: 'token',
+      refreshToken: 'refresh',
+      expiresIn: 3600,
+      obtainmentTimestamp: Date.now(),
+      channelId: 'chan',
+      channelTitle: 'title',
+    };
+    p.broadcastId = 'broadcast-1';
+    p.liveChatId = null;
+    p.chatStream = null;
+    p._findActiveBroadcast = async () => ({ id: 'broadcast-1', liveChatId: 'chat-live' });
+    p._request = async () =>
+      new Response(
+        JSON.stringify({ items: [{ liveStreamingDetails: { concurrentViewers: '42' } }] }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      );
+
+    let started = 0;
+    p._startChatPoll = () => {
+      started += 1;
+    };
+
+    await p._pollStatus();
+
+    expect(started).toBe(1);
+    expect(p.liveChatId).toBe('chat-live');
+    expect(p.getStreamStatus()).toBe(StreamStatus.ONLINE);
+    expect(p.getViewerCount()).toBe(42);
   });
 });
 
@@ -455,28 +667,30 @@ describe('YouTubeProvider — markers', () => {
     expect(all).toHaveLength(2);
   });
 
-  test('createMarker persists chapters into config.json and a new provider reloads them', async () => {
+  test('createMarker persists chapters into settings.json and a new provider reloads them', async () => {
     const tempDir = await makeRepoTempDir('yash-youtube-chapters-persist');
     const originalYashDataDir = process.env.YASH_DATA_DIR;
 
     try {
       process.env.YASH_DATA_DIR = tempDir;
       await fs.writeFile(
-        getConfigPath(),
+        getSettingsPath(),
         `${JSON.stringify({ stream: { title: 'Persisted title', chapters: [] } }, null, 2)}\n`,
         'utf8',
       );
 
       await reloadConfig();
+      await settingsStore.reload();
       const p = new YouTubeProvider();
       await p.createMarker('Persisted Intro', 42);
 
-      const savedConfig = JSON.parse(await fs.readFile(getConfigPath(), 'utf8'));
-      expect(savedConfig.stream.chapters).toHaveLength(1);
-      expect(savedConfig.stream.chapters[0].description).toBe('Persisted Intro');
-      expect(savedConfig.stream.chapters[0].positionInSeconds).toBe(42);
+      const savedSettings = JSON.parse(await fs.readFile(getSettingsPath(), 'utf8'));
+      expect(savedSettings.stream.chapters).toHaveLength(1);
+      expect(savedSettings.stream.chapters[0].description).toBe('Persisted Intro');
+      expect(savedSettings.stream.chapters[0].positionInSeconds).toBe(42);
 
       await reloadConfig();
+      await settingsStore.reload();
       const reloaded = new YouTubeProvider();
       const markers = await reloaded.getMarkers({ limit: 10 });
       expect(markers).toHaveLength(1);
@@ -489,14 +703,14 @@ describe('YouTubeProvider — markers', () => {
     }
   });
 
-  test('clearMarkers removes persisted chapters from config.json', async () => {
+  test('clearMarkers removes persisted chapters from settings.json', async () => {
     const tempDir = await makeRepoTempDir('yash-youtube-chapters-clear');
     const originalYashDataDir = process.env.YASH_DATA_DIR;
 
     try {
       process.env.YASH_DATA_DIR = tempDir;
       await fs.writeFile(
-        getConfigPath(),
+        getSettingsPath(),
         `${JSON.stringify(
           {
             stream: {
@@ -518,13 +732,14 @@ describe('YouTubeProvider — markers', () => {
       );
 
       await reloadConfig();
+      await settingsStore.reload();
       const p = new YouTubeProvider();
       expect(await p.getMarkers({ limit: 10 })).toHaveLength(1);
       p.clearMarkers();
       await new Promise((resolve) => setTimeout(resolve, 25));
 
-      const savedConfig = JSON.parse(await fs.readFile(getConfigPath(), 'utf8'));
-      expect(savedConfig.stream.chapters).toEqual([]);
+      const savedSettings = JSON.parse(await fs.readFile(getSettingsPath(), 'utf8'));
+      expect(savedSettings.stream.chapters).toEqual([]);
     } finally {
       if (originalYashDataDir === undefined) delete process.env.YASH_DATA_DIR;
       else process.env.YASH_DATA_DIR = originalYashDataDir;

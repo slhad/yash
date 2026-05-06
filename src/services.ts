@@ -6,7 +6,9 @@ import { ChatService } from './services/chat.service';
 import { ObsService } from './services/obs.service';
 import { StreamService } from './services/stream.service';
 import { defaultLogger } from './utils/logger';
-import SettingsStore from './utils/settings';
+import { settingsStore } from './utils/settings';
+
+export { settingsStore } from './utils/settings';
 
 export const youtube = new YouTubeProvider();
 export const twitch = new TwitchProvider();
@@ -21,9 +23,13 @@ export const obsService = new ObsService(
   true, // real WebSocket transport (OBS WebSocket v5)
 );
 export const authService = new AuthService();
-export const settingsStore = new SettingsStore();
 
 export const platforms = ['youtube', 'twitch', 'kick'];
+
+const configuredHistorySize = Number(settingsStore.get('chat.maxHistorySize', 1000));
+if (Number.isFinite(configuredHistorySize) && configuredHistorySize > 0) {
+  chatService.setMaxHistorySize(configuredHistorySize);
+}
 
 chatService.registerProvider('youtube', youtube);
 chatService.registerProvider('twitch', twitch);

@@ -1,0 +1,74 @@
+{
+  "demo": false,
+  "chat": {
+    "maxHistorySize": 1000,
+    "showTimestamps": true,
+    "timestamps": {
+      "visible": true
+    }
+  },
+  "stream": {
+    "title": "",
+    "description": "",
+    "game": "",
+    "youtubeCategory": "",
+    "twitchGame": "",
+    "kickCategory": "",
+    "notification": "",
+    "tags": [],
+    "chapters": []
+  },
+  "platforms": {
+    "youtube": {
+      "showViewers": true,
+      "setup": {
+        "defaultPlaylist": {
+          "enabled": false,
+          "playlistId": "",
+          "playlistTitle": ""
+        },
+        "subjectPlaylist": {
+          "enabled": false
+        },
+        "chaptering": {
+          "enabled": true
+        },
+        "tags": {
+          "enabled": true
+        },
+        "description": {
+          "enabled": true
+        },
+        "subjectTitle": {
+          "enabled": false
+        }
+      }
+    },
+    "twitch": {
+      "showViewers": true
+    },
+    "kick": {
+      "showViewers": true
+    }
+  },
+  "title": {
+    "visible": false
+  },
+  "logs": {
+    "visible": true,
+    "height": 15,
+    "tail": 20
+  },
+  "viewers": {
+    "visible": true,
+    "mode": "per-platform"
+  },
+  "messages": {
+    "position": "bottom"
+  },
+  "events": {
+    "visible": true,
+    "tail": 15,
+    "width": "30%"
+  }
+}

@@ -1,5 +1,4 @@
 {
-  "demo": false,
   "obs": {
     "websocket": {
       "server": "127.0.0.1",
@@ -10,6 +9,9 @@
   "platforms": {
     "youtube": {
       "enabled": true,
+      "clientId": "",
+      "clientSecret": "",
+      "redirectUri": "http://localhost:3000/api/youtube/callback",
       "streamKey": ""
     },
     "twitch": {
@@ -21,11 +23,11 @@
     },
     "kick": {
       "enabled": true,
-      "streamKey": ""
+      "streamKey": "",
+      "clientId": "",
+      "clientSecret": "",
+      "redirectUri": "http://localhost:3000/api/kick/callback"
     }
-  },
-  "chat": {
-    "maxHistorySize": 1000
   },
   "server": {
     "port": 3000,

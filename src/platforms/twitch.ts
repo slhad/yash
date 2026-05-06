@@ -25,6 +25,7 @@
 
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { type LoggerOptions, LogLevel } from '@d-fischer/logger';
 import { ApiClient } from '@twurple/api';
 import { RefreshingAuthProvider } from '@twurple/auth';
 import { ChatClient } from '@twurple/chat';
@@ -123,6 +124,29 @@ export class TwitchProvider implements PlatformProvider {
     } catch {
       return null;
     }
+  }
+
+  private getTwurpleLoggerOptions(scope: string): Partial<LoggerOptions> {
+    return {
+      name: `twurple:${scope}`,
+      minLevel: LogLevel.WARNING,
+      custom: (level, message) => {
+        const text = `[Twitch:${scope}] ${message}`;
+        if (level <= LogLevel.ERROR) {
+          defaultLogger.error(text);
+          return;
+        }
+        if (level <= LogLevel.WARNING) {
+          defaultLogger.warn(text);
+          return;
+        }
+        if (level <= LogLevel.INFO) {
+          defaultLogger.info(text);
+          return;
+        }
+        defaultLogger.debug(text);
+      },
+    };
   }
 
   private async writeTokenFile(data: TwitchTokenFile): Promise<void> {
@@ -249,7 +273,10 @@ export class TwitchProvider implements PlatformProvider {
   // ---------------------------------------------------------------------------
   private async _initFromToken(token: TwitchTokenFile): Promise<void> {
     this.authProvider = this.buildAuthProvider(token);
-    this.apiClient = new ApiClient({ authProvider: this.authProvider });
+    this.apiClient = new ApiClient({
+      authProvider: this.authProvider,
+      logger: this.getTwurpleLoggerOptions('api'),
+    });
     this.userId = token.userId;
 
     // Resolve display login name
@@ -584,6 +611,7 @@ export class TwitchProvider implements PlatformProvider {
     this.chatClient = new ChatClient({
       authProvider: this.authProvider,
       channels: [this.userLogin],
+      logger: this.getTwurpleLoggerOptions('chat'),
     });
 
     this.chatClient.onMessage((_channel, user, text, msg) => {
@@ -632,7 +660,10 @@ export class TwitchProvider implements PlatformProvider {
       }
     }
 
-    this.eventSubListener = new EventSubWsListener({ apiClient: this.apiClient });
+    this.eventSubListener = new EventSubWsListener({
+      apiClient: this.apiClient,
+      logger: this.getTwurpleLoggerOptions('eventsub'),
+    });
 
     // stream.online
     await this.eventSubListener.onStreamOnline(this.userId, (e) => {

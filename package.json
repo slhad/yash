@@ -29,6 +29,8 @@
     "typescript": "^6.0.2"
   },
   "dependencies": {
+    "@grpc/grpc-js": "^1.14.3",
+    "@grpc/proto-loader": "^0.8.0",
     "@nekiro/kick-api": "^2.1.2",
     "@opentui/core": "^0.1.97",
     "@opentui/react": "^0.1.97",

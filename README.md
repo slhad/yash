@@ -7,14 +7,16 @@ unified interface. Written to run on Bun. This repository contains:
 
 - src/: TypeScript source (platform providers, services, UI)
 - test/: Unit and integration tests (run with `bun test`)
-- config.example.json: Template for the runtime config stored at `YASH_DATA_DIR/config.json` (defaults to `~/.yash/config.json`)
+- config.example.json: Template for bootstrap config stored at `YASH_DATA_DIR/config.json`
+- settings.example.json: Template for mutable runtime settings stored at `YASH_DATA_DIR/settings.json`
 
 Quickstart
 
 1. Install dependencies: `bun install`
 2. Copy `config.example.json` to `${YASH_DATA_DIR:-$HOME/.yash}/config.json`
-3. Run checks: `bun test` or `bun typecheck`
-4. Launch the full app: `bun run start`
+3. Copy `settings.example.json` to `${YASH_DATA_DIR:-$HOME/.yash}/settings.json`
+4. Run checks: `bun test` or `bun typecheck`
+5. Launch the full app: `bun run start`
 
 Runtime entrypoints
 -------------------
@@ -29,15 +31,17 @@ Important: running the TUI process and web server as separate long-lived process
 
 Configuration
 -------------
-This project reads runtime configuration from `YASH_DATA_DIR/config.json`; when `YASH_DATA_DIR` is unset, the default path is `~/.yash/config.json`. Do NOT commit secrets.
+This project splits runtime state across two files under `YASH_DATA_DIR` (default `~/.yash`). Do NOT commit either file.
 
-On startup, YASH performs a one-time migration from the legacy repository-root `config.json` when that legacy file exists and the runtime config file does not yet exist.
+On startup, YASH performs a one-time migration from the legacy repository-root `config.json` when that legacy file exists and the runtime config file does not yet exist. It also performs a one-time split migration that moves mutable runtime settings out of `config.json` into `settings.json`.
 
-1. Copy `config.example.json` to your runtime config location and update values that are local-only (OBS websocket password, stream keys, etc.).
+1. Copy `config.example.json` to your runtime config location and update bootstrap values that are local-only (OBS websocket password, provider credentials, stream keys, etc.).
    - `mkdir -p "${YASH_DATA_DIR:-$HOME/.yash}" && cp config.example.json "${YASH_DATA_DIR:-$HOME/.yash}/config.json"`
-2. If you already have a legacy repo-root `config.json`, YASH will migrate it once automatically the first time it starts without an existing runtime config file.
+2. Copy `settings.example.json` to your runtime settings location and update mutable defaults such as stream metadata, UI preferences, and YouTube setup flags.
+   - `mkdir -p "${YASH_DATA_DIR:-$HOME/.yash}" && cp settings.example.json "${YASH_DATA_DIR:-$HOME/.yash}/settings.json"`
+3. If you already have a legacy repo-root `config.json`, YASH will migrate it once automatically the first time it starts without an existing runtime config file.
 
-UI display preferences are stored separately in `settings.json` under `YASH_DATA_DIR` or, by default, `~/.yash/settings.json`. That includes TUI/WebUI display toggles such as sidebar visibility, message placement, and chat timestamp visibility.
+`config.json` now holds rarely edited bootstrap data such as OBS, server, and provider credentials/setup fields. `settings.json` holds mutable runtime state such as `stream.*`, `platforms.youtube.setup`, chat/UI preferences, demo mode, and per-platform viewer display settings.
 
 Security posture
 ----------------
@@ -51,7 +55,7 @@ This build uses file-backed local configuration and token storage. The following
 
 Operationally, that means:
 
-- `YASH_DATA_DIR/config.json` and the other files under `YASH_DATA_DIR` (default `~/.yash/`) should be treated as sensitive local secrets
+- `YASH_DATA_DIR/config.json`, `YASH_DATA_DIR/settings.json`, and the other files under `YASH_DATA_DIR` (default `~/.yash/`) should be treated as sensitive local secrets
 - this repository is suitable for local or otherwise controlled environments, not as-is for broad public multi-tenant deployment
 - if you expose the web server beyond localhost, you should add a reverse proxy / network ACL layer and explicit authentication controls around any sensitive endpoints
 
@@ -73,7 +77,7 @@ flowchart TD
     A["User runs /stream in TUI or submits stream form in WebUI"] --> B["Collect selected platforms and metadata fields"]
     B --> C{"Any metadata changed?"}
     C -- No --> C1["Stop: no-op, report 'No changes'"]
-    C -- Yes --> D["Persist merged stream metadata to YASH_DATA_DIR/config.json"]
+    C -- Yes --> D["Persist merged stream metadata to YASH_DATA_DIR/settings.json"]
     D --> E["Call StreamService.setStreamMetadata(targetPlatforms, mergedMetadata)"]
 
     E --> F{"For each selected provider"}

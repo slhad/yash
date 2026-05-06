@@ -21,7 +21,7 @@ import {
   twitch,
   youtube,
 } from './services';
-import { getConfig, isDemoMode, saveConfig } from './utils/config';
+import { isDemoMode } from './utils/config';
 import { defaultLogger } from './utils/logger';
 import { apiMetricsHandler, prometheusMetricsHandler } from './utils/metricsHandlers';
 
@@ -42,14 +42,15 @@ function getCommandsJs(): string {
 }
 
 function getSettingValue(key: string): unknown {
-  const value = settingsStore.get(key, null);
-  if (value !== null) return value;
+  return settingsStore.get(key, null);
+}
 
-  if (key === 'chat.timestamps.visible') {
-    return getConfig()?.chat?.showTimestamps ?? true;
+function applySettingSideEffects(key: string, value: unknown): void {
+  if (key !== 'chat.maxHistorySize') return;
+  const parsed = typeof value === 'number' ? value : Number.parseInt(String(value), 10);
+  if (Number.isFinite(parsed) && parsed > 0) {
+    chatService.setMaxHistorySize(parsed);
   }
-
-  return null;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -101,8 +102,7 @@ Bun.serve({
     },
     '/api/stream': {
       GET: () => {
-        const cfg = getConfig();
-        const meta = cfg.stream ?? {};
+        const meta = settingsStore.get('stream', {});
         return new Response(JSON.stringify(meta), {
           headers: { 'Content-Type': 'application/json' },
         });
@@ -116,8 +116,7 @@ Bun.serve({
             .map((t: string) => t.trim().replace(/\s+/g, ''))
             .filter(Boolean);
         }
-        const cfg = getConfig();
-        const current = cfg.stream ?? {};
+        const current = settingsStore.get('stream', {});
         const changed: Record<string, any> = {};
         let platformResults: Awaited<ReturnType<typeof streamService.setStreamMetadata>> = [];
         for (const key of Object.keys(metadata ?? {})) {
@@ -126,7 +125,7 @@ Bun.serve({
           }
         }
         if (Object.keys(changed).length > 0) {
-          await saveConfig({ stream: { ...current, ...changed } });
+          await settingsStore.set('stream', { ...current, ...changed });
           try {
             platformResults = await streamService.setStreamMetadata(
               targetPlatforms ?? platforms,
@@ -313,6 +312,7 @@ Bun.serve({
 
         const result = await youtube.handleOAuthCallback(code);
         if (result.success) {
+          await youtube.setupWebhooks({ url: '', topics: [] });
           return new Response(
             `<html><body><h2>✅ YouTube connected successfully!</h2><p>You can close this tab.</p></body></html>`,
             { status: 200, headers: { 'Content-Type': 'text/html' } },
@@ -368,7 +368,7 @@ Bun.serve({
       },
       POST: async (req) => {
         const body = await req.json().catch(() => ({}));
-        await saveConfig({ platforms: { youtube: { setup: body } } });
+        await settingsStore.set('platforms.youtube.setup', body);
         return new Response(JSON.stringify({ ok: true }), {
           headers: { 'Content-Type': 'application/json' },
         });
@@ -550,9 +550,8 @@ Bun.serve({
         try {
           const body = await req.json();
           await twitch.updateStreamMetadata(body);
-          const cfg = getConfig();
-          const current = cfg.stream ?? {};
-          await saveConfig({ stream: { ...current, ...body } });
+          const current = settingsStore.get('stream', {});
+          await settingsStore.set('stream', { ...current, ...body });
           return new Response(JSON.stringify({ success: true }), {
             headers: { 'Content-Type': 'application/json' },
           });
@@ -580,39 +579,39 @@ Bun.serve({
             headers: { 'Content-Type': 'application/json' },
           });
         }
-        // Return all known setting keys
-        const knownKeys = [
-          'title.visible',
-          'logs.visible',
-          'logs.height',
-          'logs.tail',
-          'viewers.visible',
-          'viewers.mode',
-          'messages.position',
-          'chat.timestamps.visible',
-          'events.visible',
-          'events.tail',
-          'events.width',
-        ];
-        const all: Record<string, unknown> = {};
-        for (const k of knownKeys) {
-          all[k] = getSettingValue(k);
-        }
-        return new Response(JSON.stringify(all), {
+        return new Response(JSON.stringify(settingsStore.getAll()), {
           headers: { 'Content-Type': 'application/json' },
         });
       },
       POST: async (req) => {
         const body = await req.json().catch(() => ({}));
         const { key, value } = body as { key?: string; value?: unknown };
-        if (!key) {
+        if (key) {
+          await settingsStore.set(key, value);
+          applySettingSideEffects(key, value);
+          return new Response(JSON.stringify({ success: true, key, value }), {
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        if (
+          !body ||
+          typeof body !== 'object' ||
+          Array.isArray(body) ||
+          Object.keys(body).length === 0
+        ) {
           return new Response(JSON.stringify({ error: 'key required' }), {
             status: 400,
             headers: { 'Content-Type': 'application/json' },
           });
         }
-        await settingsStore.set(key, value);
-        return new Response(JSON.stringify({ success: true, key, value }), {
+        await settingsStore.merge(body);
+        if ('chat' in body && body.chat && typeof body.chat === 'object') {
+          applySettingSideEffects(
+            'chat.maxHistorySize',
+            (body.chat as Record<string, unknown>).maxHistorySize,
+          );
+        }
+        return new Response(JSON.stringify({ success: true }), {
           headers: { 'Content-Type': 'application/json' },
         });
       },
@@ -751,9 +750,8 @@ Bun.serve({
         try {
           const body = await req.json();
           await kick.updateStreamMetadata(body);
-          const cfg = getConfig();
-          const current = cfg.stream ?? {};
-          await saveConfig({ stream: { ...current, ...body } });
+          const current = settingsStore.get('stream', {});
+          await settingsStore.set('stream', { ...current, ...body });
           return new Response(JSON.stringify({ success: true }), {
             headers: { 'Content-Type': 'application/json' },
           });
@@ -801,6 +799,11 @@ Bun.serve({
                 command: '/help',
                 description: 'Show available commands',
                 example: '/help',
+              },
+              {
+                command: 'status legend',
+                description:
+                  'Status symbols: ✓ = authenticated and online, ○ = authenticated but offline, ✗ = not authenticated',
               },
               {
                 command: '/msg',

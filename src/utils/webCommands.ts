@@ -60,9 +60,11 @@ export function parseMarkerArgs(parts: string[]): { description?: string; timest
   return { description, timestamp };
 }
 
-export function parseMarkersArgs(
-  parts: string[],
-): { platforms?: string[]; limit?: number; error?: string } {
+export function parseMarkersArgs(parts: string[]): {
+  platforms?: string[];
+  limit?: number;
+  error?: string;
+} {
   if (parts.length === 0) return {};
 
   const first = (parts[0] ?? '').toLowerCase();
@@ -195,6 +197,10 @@ export function getWebAutocomplete(input: string): string | null {
 // ─── Dispatcher ───────────────────────────────────────────────────────────────
 
 const SETTINGS_KEYS = [
+  'chat.maxHistorySize',
+  'demo',
+  'stream.title',
+  'stream.description',
   'title.visible',
   'logs.visible',
   'logs.height',
@@ -206,6 +212,10 @@ const SETTINGS_KEYS = [
   'events.visible',
   'events.tail',
   'events.width',
+  'platforms.youtube.showViewers',
+  'platforms.twitch.showViewers',
+  'platforms.kick.showViewers',
+  'platforms.youtube.setup.chaptering.enabled',
 ];
 
 const VALID_PLATFORMS = ['youtube', 'twitch', 'kick'] as const;
@@ -321,11 +331,13 @@ export async function handleWebCommand(text: string, ctx: WebCommandContext): Pr
         return true;
       }
       const data = await res.json();
-      const groups = (data.markers as Array<{
-        platform: string;
-        markers?: Array<{ positionInSeconds: number; description: string }>;
-        error?: string;
-      }>)
+      const groups = (
+        data.markers as Array<{
+          platform: string;
+          markers?: Array<{ positionInSeconds: number; description: string }>;
+          error?: string;
+        }>
+      )
         .map((entry) => {
           if (entry.error) return `${entry.platform}: ${entry.error}`;
           const markers = entry.markers ?? [];

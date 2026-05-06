@@ -25,6 +25,10 @@ export type TuiCommand = (typeof TUI_COMMANDS)[number];
 const PLATFORMS = ['youtube', 'twitch', 'kick', 'obs'];
 const MSG_TARGETS = ['all', 'youtube', 'twitch', 'kick'];
 const SETTINGS_KEYS = [
+  'chat.maxHistorySize',
+  'demo',
+  'stream.title',
+  'stream.description',
   'title.visible',
   'logs.visible',
   'logs.height',
@@ -36,6 +40,10 @@ const SETTINGS_KEYS = [
   'events.visible',
   'events.tail',
   'events.width',
+  'platforms.youtube.showViewers',
+  'platforms.twitch.showViewers',
+  'platforms.kick.showViewers',
+  'platforms.youtube.setup.chaptering.enabled',
 ];
 const LOGS_ARGS = ['clear', 'tail', 'visible'];
 const SETTINGS_OPS = ['get', 'set'];

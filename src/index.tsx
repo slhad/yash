@@ -1,10 +1,6 @@
 // Suppress EventTarget MaxListeners warning from OpenTUI's CliRenderer
 process.setMaxListeners(0);
 
-// Silence stderr so logger output doesn't bleed into the TUI.
-// Log entries are still captured by logCollector for the sidebar.
-process.stderr.write = () => true;
-
 import {
   BoxRenderable,
   type CliRenderer,
@@ -23,21 +19,24 @@ import {
   kick,
   obsService,
   platforms,
+  settingsStore,
   streamService,
   twitch,
   youtube,
 } from './services';
-import { getConfig, isDemoMode, saveConfig } from './utils/config';
+import { isDemoMode, saveConfig } from './utils/config';
 import logCollector from './utils/logCollector';
 import { defaultLogger } from './utils/logger';
-import SettingsStore from './utils/settings';
 import { buildTargetedStreamMetadataUpdate } from './utils/streamMetadata';
 import { getAutocomplete } from './utils/tuiCommands';
+import { installTuiErrorCapture } from './utils/tuiErrorCapture';
 import { type MessageTarget } from './utils/tuiMessageInput';
 import { parseMarkerArgs, parseSettingsValue } from './utils/webCommands';
 import './index.ts'; // start Bun.serve web server in the same process
 
-const settings = new SettingsStore();
+const settings = settingsStore;
+
+installTuiErrorCapture();
 
 // In-memory event log for the sidebar
 const eventLog: Array<{ ts: number; platform: string; type: string; message: string }> = [];
@@ -60,14 +59,15 @@ function numSetting(value: unknown, def: number): number {
 }
 
 function getSettingValue(key: string): unknown {
-  const value = settings.get(key, null);
-  if (value !== null) return value;
+  return settings.get(key, null);
+}
 
-  if (key === 'chat.timestamps.visible') {
-    return getConfig()?.chat?.showTimestamps ?? true;
+function applySettingSideEffects(key: string, value: unknown): void {
+  if (key !== 'chat.maxHistorySize') return;
+  const parsed = typeof value === 'number' ? value : Number.parseInt(String(value), 10);
+  if (Number.isFinite(parsed) && parsed > 0) {
+    chatService.setMaxHistorySize(parsed);
   }
-
-  return null;
 }
 
 function formatElapsed(start: Date): string {
@@ -98,7 +98,7 @@ function formatPlatformStatusLabel(
     return `✓${viewers}`;
   }
   if (status.streamStatus === 'OFFLINE') {
-    return `✗${viewers}`;
+    return `○${viewers}`;
   }
   return `${status.streamStatus}${viewers}`;
 }
@@ -111,7 +111,7 @@ function getPlatformStatusColor(status: { authenticated: boolean; streamStatus: 
     return 'green';
   }
   if (status.streamStatus === 'OFFLINE') {
-    return 'red';
+    return 'yellow';
   }
   return 'yellow';
 }
@@ -286,7 +286,7 @@ function initUI(renderer: CliRenderer, messages: string[]): UINodes {
     const status = provider.getStatus();
     const viewerCount = provider.getViewerCount();
     totalViewers += viewerCount;
-    const showViewers = getConfig()?.platforms?.[platform]?.showViewers !== false;
+    const showViewers = settings.get(`platforms.${platform}.showViewers`, true) !== false;
     const isOnline = status.streamStatus === 'ONLINE';
     const startTime = provider.getStreamStartTime();
     const elapsed = isOnline && startTime ? formatElapsed(startTime) : null;
@@ -523,7 +523,7 @@ function updateUI(messages: string[]): void {
     totalViewers += viewerCount;
     const node = platformTexts.get(platform);
     if (node) {
-      const showViewers = getConfig()?.platforms?.[platform]?.showViewers !== false;
+      const showViewers = settings.get(`platforms.${platform}.showViewers`, true) !== false;
       const isOnline = status.streamStatus === 'ONLINE';
       const startTime = provider.getStreamStartTime();
       const elapsed = isOnline && startTime ? formatElapsed(startTime) : null;
@@ -1667,23 +1667,17 @@ function openYouTubeSetupModal(): void {
       return;
     }
 
-    await saveConfig({
-      platforms: {
-        youtube: {
-          setup: {
-            defaultPlaylist: {
-              enabled: state.defaultPlaylist,
-              playlistId,
-              playlistTitle: playlistInput.value.trim(),
-            },
-            subjectPlaylist: { enabled: state.subjectPlaylist },
-            chaptering: { enabled: state.chaptering },
-            tags: { enabled: state.tags },
-            description: { enabled: state.description },
-            subjectTitle: { enabled: state.subjectTitle },
-          },
-        },
+    await settings.set('platforms.youtube.setup', {
+      defaultPlaylist: {
+        enabled: state.defaultPlaylist,
+        playlistId,
+        playlistTitle: playlistInput.value.trim(),
       },
+      subjectPlaylist: { enabled: state.subjectPlaylist },
+      chaptering: { enabled: state.chaptering },
+      tags: { enabled: state.tags },
+      description: { enabled: state.description },
+      subjectTitle: { enabled: state.subjectTitle },
     });
     lastMessages.push('[system] YouTube setup saved.');
     updateUI(lastMessages);
@@ -1733,7 +1727,7 @@ function openStreamModal(preselected: string[]): void {
   const { renderer } = uiNodes;
 
   const selectedPlatforms = new Set(preselected.length > 0 ? preselected : [...platforms]);
-  const savedStream = getConfig().stream ?? {};
+  const savedStream = settings.get('stream', {});
 
   function makeLabel(text: string): TextRenderable {
     return new TextRenderable(renderer, { content: text, fg: 'gray' });
@@ -2024,7 +2018,7 @@ function openStreamModal(preselected: string[]): void {
     lastMessages.push(`[stream] Updating on: ${targetPlatforms.join(', ')}…`);
     updateUI(lastMessages);
     try {
-      await saveConfig({ stream: merged });
+      await settings.set('stream', merged);
       let platformResults: {
         platform: string;
         skipped?: string[];
@@ -2393,8 +2387,7 @@ async function handleCommand(trimmed: string): Promise<void> {
     const targets = platformArg === 'all' ? ['youtube', 'twitch', 'kick'] : [platformArg];
     for (const target of targets) {
       try {
-        const provider =
-          target === 'youtube' ? youtube : target === 'twitch' ? twitch : kick;
+        const provider = target === 'youtube' ? youtube : target === 'twitch' ? twitch : kick;
         const markers = await provider.getMarkers({ limit });
         if (markers.length === 0) {
           lastMessages.push(`[markers] ${target}: none`);
@@ -2421,6 +2414,7 @@ async function handleCommand(trimmed: string): Promise<void> {
       const rawValue = parts.slice(3).join(' ');
       const value = parseSettingsValue(rawValue);
       await settings.set(key, value);
+      applySettingSideEffects(key, value);
       lastMessages.push(`[settings] set ${key} = ${JSON.stringify(value)}`);
       // Structural changes require a full layout rebuild
       const structuralKeys = ['messages.position', 'events.width', 'logs.height'];
@@ -2431,7 +2425,7 @@ async function handleCommand(trimmed: string): Promise<void> {
     } else {
       lastMessages.push('[system] Usage: /settings get <key> | /settings set <key> <json-value>');
       lastMessages.push(
-        '[system] Keys: title.visible, logs.visible, logs.height, logs.tail, viewers.visible, viewers.mode, messages.position (top|bottom|hide), chat.timestamps.visible, events.visible, events.tail, events.width',
+        '[system] Common keys: stream.title, stream.description, chat.maxHistorySize, demo, title.visible, logs.visible, logs.height, logs.tail, viewers.visible, viewers.mode, messages.position, chat.timestamps.visible, events.visible, events.tail, events.width, platforms.<provider>.showViewers, platforms.youtube.setup.*',
       );
     }
   } else if (cmd === '/logs') {
@@ -2487,6 +2481,9 @@ async function handleCommand(trimmed: string): Promise<void> {
   } else if (cmd === '/help') {
     lastMessages.push('[help] Available commands:');
     lastMessages.push(
+      '[help] Status symbols: ✓ = authenticated and online, ○ = authenticated but offline, ✗ = not authenticated',
+    );
+    lastMessages.push(
       '[help]   /connect <youtube|twitch|kick|obs>  — authenticate a platform or configure OBS',
     );
     lastMessages.push(
@@ -2503,9 +2500,7 @@ async function handleCommand(trimmed: string): Promise<void> {
     lastMessages.push(
       '[help]       e.g.  /marker Q&A | 3723    (timestamp in seconds, YouTube only)',
     );
-    lastMessages.push(
-      '[help]   /markers [all|youtube|twitch|kick] [limit]  — list saved markers',
-    );
+    lastMessages.push('[help]   /markers [all|youtube|twitch|kick] [limit]  — list saved markers');
     lastMessages.push('[help]   /info  — show current stream/channel info from all providers');
     lastMessages.push('[help]   /settings get <key>  — get a setting value');
     lastMessages.push('[help]   /settings set <key> <value>  — set a setting value');
@@ -2821,10 +2816,14 @@ async function main() {
   });
 
   await initializeServices();
-  pushEvent('youtube', 'auth', 'Authenticated');
-  pushEvent('twitch', 'auth', 'Authenticated');
-  pushEvent('kick', 'auth', 'Authenticated');
-  pushEvent('system', 'obs.connect', 'OBS connected');
+  if (youtube.isAuthenticated()) pushEvent('youtube', 'auth', 'Authenticated');
+  if (twitch.isAuthenticated()) pushEvent('twitch', 'auth', 'Authenticated');
+  if (kick.isAuthenticated()) pushEvent('kick', 'auth', 'Authenticated');
+  pushEvent(
+    'system',
+    'obs.connect',
+    obsService.isConnected() ? 'OBS connected' : 'OBS unavailable',
+  );
 
   // Build UI tree once — no flicker on periodic updates
   uiNodes = initUI(renderer, lastMessages);
