@@ -729,7 +729,7 @@ export class KickProvider implements PlatformProvider {
       if (streams.length > 0) {
         this.streamStatus = StreamStatus.ONLINE;
         this.viewerCount = streams[0]?.viewer_count ?? 0;
-        this.streamStartTime ??= new Date();
+        this.streamStartTime = new Date(streams[0].started_at);
       } else {
         this.streamStatus = StreamStatus.OFFLINE;
         this.viewerCount = 0;
