@@ -26,18 +26,25 @@
 
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import {
   type ClientReadableStream,
   credentials,
   status as GrpcStatus,
-  loadPackageDefinition,
   Metadata,
+  type MethodDefinition,
+  makeGenericClientConstructor,
+  type ServiceDefinition,
 } from '@grpc/grpc-js';
-import { loadSync } from '@grpc/proto-loader';
 import { getConfig, reloadConfig } from '../utils/config';
 import { defaultLogger } from '../utils/logger';
 import { settingsStore } from '../utils/settings';
+import {
+  deserializeYouTubeLiveChatResponse,
+  serializeYouTubeLiveChatRequest,
+  serializeYouTubeLiveChatResponse,
+  type YouTubeLiveChatGrpcRequest,
+  type YouTubeLiveChatGrpcResponse,
+} from '../utils/youtubeLiveChatGrpc';
 import type {
   AuthResult,
   ChatMessage,
@@ -133,17 +140,32 @@ type YouTubeLiveChatStreamCall = ClientReadableStream<YouTubeLiveChatStreamRespo
 };
 
 type YouTubeLiveChatGrpcClient = {
-  streamList(
-    request: {
-      part: string[];
-      liveChatId: string;
-      maxResults: number;
-      pageToken?: string;
-    },
-    metadata: Metadata,
-  ): YouTubeLiveChatStreamCall;
+  streamList(request: YouTubeLiveChatGrpcRequest, metadata: Metadata): YouTubeLiveChatStreamCall;
   close(): void;
 };
+
+const liveChatServiceDefinition: ServiceDefinition = {
+  StreamList: {
+    path: '/youtube.api.v3.V3DataLiveChatMessageService/StreamList',
+    requestStream: false,
+    responseStream: true,
+    requestSerialize: serializeYouTubeLiveChatRequest,
+    requestDeserialize: (_buffer: Buffer) => ({}),
+    responseSerialize: serializeYouTubeLiveChatResponse,
+    responseDeserialize: deserializeYouTubeLiveChatResponse as (
+      buffer: Buffer,
+    ) => YouTubeLiveChatGrpcResponse,
+    originalName: 'streamList',
+  } as MethodDefinition<YouTubeLiveChatGrpcRequest, YouTubeLiveChatGrpcResponse>,
+};
+
+const LiveChatGrpcClient = makeGenericClientConstructor(
+  liveChatServiceDefinition,
+  'V3DataLiveChatMessageService',
+) as unknown as new (
+  address: string,
+  creds: ReturnType<typeof credentials.createSsl>,
+) => YouTubeLiveChatGrpcClient;
 
 function describeError(err: unknown): string {
   if (err instanceof Error) return err.message;
@@ -447,32 +469,10 @@ export class YouTubeProvider implements PlatformProvider {
   private _getLiveChatGrpcClient(): YouTubeLiveChatGrpcClient {
     if (this.liveChatGrpcClient) return this.liveChatGrpcClient;
 
-    const protoPath = fileURLToPath(new URL('./youtube-live-chat.proto', import.meta.url));
-    const packageDefinition = loadSync(protoPath, {
-      keepCase: false,
-      longs: String,
-      enums: String,
-      defaults: false,
-      oneofs: false,
-    });
-    const loaded = loadPackageDefinition(packageDefinition) as {
-      youtube?: {
-        api?: {
-          v3?: {
-            V3DataLiveChatMessageService?: new (
-              address: string,
-              creds: ReturnType<typeof credentials.createSsl>,
-            ) => YouTubeLiveChatGrpcClient;
-          };
-        };
-      };
-    };
-    const Service = loaded.youtube?.api?.v3?.V3DataLiveChatMessageService;
-    if (!Service) {
-      throw new Error('YouTube live chat gRPC service definition failed to load');
-    }
-
-    this.liveChatGrpcClient = new Service('youtube.googleapis.com:443', credentials.createSsl());
+    this.liveChatGrpcClient = new LiveChatGrpcClient(
+      'youtube.googleapis.com:443',
+      credentials.createSsl(),
+    );
     return this.liveChatGrpcClient;
   }
 
