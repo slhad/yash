@@ -761,7 +761,10 @@ export class YouTubeProvider implements PlatformProvider {
     })[0]!;
   }
 
-  private async _resolveMetadataTargetBroadcast(metadata: StreamMetadata): Promise<{
+  private async _resolveMetadataTargetBroadcast(
+    metadata: StreamMetadata = {},
+    options: { allowFallback?: boolean } = {},
+  ): Promise<{
     id: string;
     liveChatId: string | null;
     warning?: {
@@ -790,7 +793,7 @@ export class YouTubeProvider implements PlatformProvider {
       return { id: chosen.id, liveChatId: chosen.snippet.liveChatId ?? null };
     }
 
-    if (streamId) {
+    if (options.allowFallback !== false && streamId) {
       const fallback = await this._createFallbackBroadcastForStream(streamId, metadata, items);
       if (fallback) {
         return {

@@ -2635,7 +2635,7 @@ async function fetchYoutubeInfo(): Promise<Record<string, unknown>> {
   const provider = youtube as any;
   const baseInfo = provider.getChannelInfo?.() ?? {};
   const target =
-    (await provider._resolveMetadataTargetBroadcast?.()) ??
+    (await provider._resolveMetadataTargetBroadcast?.({}, { allowFallback: false })) ??
     (baseInfo.broadcastId ? { id: baseInfo.broadcastId, liveChatId: baseInfo.liveChatId } : null);
 
   if (!target?.id || !provider._request) {

@@ -1355,6 +1355,56 @@ describe('YouTubeProvider — updateStreamMetadata target selection', () => {
     expect(videoPutBodies[0].id).toBe('fallback-created');
     expect(result.warnings?.[0]?.code).toBe('youtube_fallback_broadcast_created');
   });
+
+  test('metadata target resolution does not create a fallback broadcast when disabled for read-only lookups', async () => {
+    const p = makeProvider() as any;
+    p.isAuthenticatedFlag = true;
+    p.tokenData = {
+      accessToken: 'token',
+      refreshToken: 'refresh',
+      expiresIn: 3600,
+      obtainmentTimestamp: Date.now(),
+      channelId: 'chan',
+      channelTitle: 'title',
+    };
+    p.streamKey = 'saved_stream_key';
+
+    let fallbackAttempted = false;
+    p._findStreamIdByKey = async () => 'stream-saved';
+    p._createFallbackBroadcastForStream = async () => {
+      fallbackAttempted = true;
+      throw new Error('fallback should not be attempted');
+    };
+    p._request = async (url: string) => {
+      if (url.includes('/liveBroadcasts?part=id,snippet,status,contentDetails&mine=true')) {
+        return new Response(
+          JSON.stringify({
+            items: [
+              {
+                id: 'completed-broadcast',
+                snippet: {
+                  title: 'Finished stream',
+                  publishedAt: '2026-05-07T10:00:00.000Z',
+                },
+                status: { lifeCycleStatus: 'complete' },
+                contentDetails: { boundStreamId: 'stream-saved' },
+              },
+            ],
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        );
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    };
+
+    const result = await p._resolveMetadataTargetBroadcast({}, { allowFallback: false });
+    expect(result).toBeNull();
+    expect(fallbackAttempted).toBe(false);
+  });
 });
 
 describe('YouTubeProvider — active broadcast detection', () => {
