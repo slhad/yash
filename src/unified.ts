@@ -1,0 +1,262 @@
+import { getWebAutocomplete, handleWebCommand } from './utils/webCommands';
+
+function byId<T extends HTMLElement>(id: string): T {
+  const el = document.getElementById(id);
+  if (!el) {
+    throw new Error(`Missing element: ${id}`);
+  }
+  return el as T;
+}
+
+function escapeHtml(str: unknown): string {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function formatElapsed(isoStart: string): string {
+  const secs = Math.floor((Date.now() - new Date(isoStart).getTime()) / 1000);
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  const s = secs % 60;
+  return h > 0 ? `${h}h${m}m${s}s` : `${m}m${s}s`;
+}
+
+type ChatMessage = {
+  id: string;
+  platform: string;
+  username: string;
+  message: string;
+};
+
+type StatusInfo = {
+  streamStatus?: string;
+  viewerCount?: number;
+  streamStartTime?: string | null;
+};
+
+const STORAGE_KEY = 'yash_msgbox_position';
+const POSITIONS = ['bottom', 'top', 'hide'] as const;
+const VALID_PLATFORMS = ['all', 'youtube', 'twitch', 'kick'] as const;
+
+const messagesEl = byId<HTMLDivElement>('messages');
+const msgboxEl = byId<HTMLDivElement>('msgbox');
+const positionBtn = byId<HTMLButtonElement>('position-btn');
+const platformSelect = byId<HTMLSelectElement>('platform-select');
+const messageInput = byId<HTMLTextAreaElement>('message-input');
+const sendBtn = byId<HTMLButtonElement>('send-btn');
+const autocompleteHint = byId<HTMLDivElement>('autocomplete-hint');
+const statusPlatformsEl = byId<HTMLSpanElement>('status-platforms');
+
+const inputHistory: string[] = [];
+let historyIdx = -1;
+const knownIds = new Set<string>();
+let isAtBottom = true;
+
+const qs = new URLSearchParams(location.search);
+const qsPosition = qs.get('position');
+const qsPlatform = qs.get('platform');
+
+let currentPosition: (typeof POSITIONS)[number] =
+  qsPosition && POSITIONS.includes(qsPosition as (typeof POSITIONS)[number])
+    ? (qsPosition as (typeof POSITIONS)[number])
+    : ((localStorage.getItem(STORAGE_KEY) || 'bottom') as (typeof POSITIONS)[number]);
+
+function applyPosition(pos: (typeof POSITIONS)[number]): void {
+  currentPosition = pos;
+  localStorage.setItem(STORAGE_KEY, pos);
+
+  msgboxEl.classList.remove('position-top');
+
+  if (pos === 'hide') {
+    msgboxEl.style.display = 'none';
+    positionBtn.textContent = 'position: hide ●';
+  } else if (pos === 'top') {
+    msgboxEl.style.display = 'flex';
+    msgboxEl.classList.add('position-top');
+    positionBtn.textContent = 'position: top ▲';
+  } else {
+    msgboxEl.style.display = 'flex';
+    positionBtn.textContent = 'position: bottom ▼';
+  }
+}
+
+function platformTag(platform: string): string {
+  const cls = ['youtube', 'twitch', 'kick'].includes(platform) ? `tag-${platform}` : 'tag-unknown';
+  return `<span class="platform-tag ${cls}">${platform}</span>`;
+}
+
+function renderMessage(msg: ChatMessage): HTMLDivElement {
+  const div = document.createElement('div');
+  div.className = 'msg';
+  div.innerHTML =
+    platformTag(msg.platform) +
+    `<span class="username">${escapeHtml(msg.username)}:</span>` +
+    `<span class="text">${escapeHtml(msg.message)}</span>`;
+  return div;
+}
+
+function appendMessages(msgs: ChatMessage[]): void {
+  let added = false;
+  for (const msg of msgs) {
+    if (knownIds.has(msg.id)) continue;
+    knownIds.add(msg.id);
+    messagesEl.appendChild(renderMessage(msg));
+    added = true;
+  }
+  if (added && isAtBottom) {
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+}
+
+async function fetchHistory(): Promise<void> {
+  try {
+    const res = await fetch('/api/chat/history');
+    if (!res.ok) return;
+    const msgs = (await res.json()) as ChatMessage[];
+    appendMessages(msgs);
+  } catch {}
+}
+
+async function fetchStatus(): Promise<void> {
+  try {
+    const res = await fetch('/api/status');
+    if (!res.ok) return;
+    const data = (await res.json()) as Record<string, StatusInfo>;
+    const parts: string[] = [];
+    for (const [name, info] of Object.entries(data)) {
+      if (!info || typeof info !== 'object') continue;
+      const { streamStatus, viewerCount, streamStartTime } = info;
+      const label = name.charAt(0).toUpperCase() + name.slice(1);
+      if (streamStatus === 'ONLINE') {
+        let detail = '';
+        if (streamStartTime) detail += formatElapsed(streamStartTime);
+        if (viewerCount != null) detail += `${detail ? ' / ' : ''}${viewerCount} viewers`;
+        parts.push(
+          `<span class="online">${escapeHtml(label)}: ONLINE${detail ? ` (${escapeHtml(detail)})` : ''}</span>`,
+        );
+      } else {
+        parts.push(`<span class="offline">${escapeHtml(label)}: offline</span>`);
+      }
+    }
+    statusPlatformsEl.innerHTML =
+      parts.join('<span class="yash-status-separator"> | </span>') || 'no platforms';
+  } catch {}
+}
+
+function appendSystem(label: string, text: string): void {
+  const div = document.createElement('div');
+  div.className = 'msg';
+  div.innerHTML = `<span class="platform-tag tag-unknown">${escapeHtml(label)}</span><span class="text">${escapeHtml(text)}</span>`;
+  messagesEl.appendChild(div);
+  if (isAtBottom) messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+async function sendMessage(): Promise<void> {
+  const text = messageInput.value.trim();
+  if (!text) return;
+
+  const platform = platformSelect.value;
+  const platforms = platform === 'all' ? [] : [platform];
+
+  inputHistory.push(text);
+  historyIdx = -1;
+  sendBtn.disabled = true;
+
+  const handled = await handleWebCommand(text, { platforms, feedback: appendSystem });
+  if (handled) {
+    messageInput.value = '';
+    messageInput.style.height = 'auto';
+    autocompleteHint.textContent = '';
+    sendBtn.disabled = false;
+    messageInput.focus();
+    return;
+  }
+
+  try {
+    const res = await fetch('/api/chat/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: text, platforms }),
+    });
+    if (res.ok) {
+      messageInput.value = '';
+      messageInput.style.height = 'auto';
+      autocompleteHint.textContent = '';
+      await fetchHistory();
+    }
+  } catch {}
+
+  sendBtn.disabled = false;
+  messageInput.focus();
+}
+
+positionBtn.addEventListener('click', () => {
+  const idx = POSITIONS.indexOf(currentPosition);
+  applyPosition(POSITIONS[(idx + 1) % POSITIONS.length] ?? 'bottom');
+});
+
+messagesEl.addEventListener('scroll', () => {
+  isAtBottom = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 32;
+});
+
+sendBtn.addEventListener('click', () => {
+  void sendMessage();
+});
+
+messageInput.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    if (inputHistory.length === 0) return;
+    if (historyIdx === -1) historyIdx = inputHistory.length - 1;
+    else if (historyIdx > 0) historyIdx--;
+    messageInput.value = inputHistory[historyIdx] ?? '';
+    messageInput.style.height = 'auto';
+    messageInput.style.height = `${Math.min(messageInput.scrollHeight, 80)}px`;
+    return;
+  }
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    if (historyIdx === -1) return;
+    historyIdx++;
+    if (historyIdx >= inputHistory.length) {
+      historyIdx = -1;
+      messageInput.value = '';
+    } else {
+      messageInput.value = inputHistory[historyIdx] ?? '';
+    }
+    messageInput.style.height = 'auto';
+    messageInput.style.height = `${Math.min(messageInput.scrollHeight, 80)}px`;
+    return;
+  }
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    void sendMessage();
+  }
+});
+
+messageInput.addEventListener('input', () => {
+  historyIdx = -1;
+  messageInput.style.height = 'auto';
+  messageInput.style.height = `${Math.min(messageInput.scrollHeight, 80)}px`;
+  const hint = getWebAutocomplete(messageInput.value);
+  autocompleteHint.textContent = hint ?? '';
+});
+
+applyPosition(currentPosition);
+
+if (qsPlatform && VALID_PLATFORMS.includes(qsPlatform as (typeof VALID_PLATFORMS)[number])) {
+  platformSelect.value = qsPlatform;
+}
+
+void fetchHistory();
+setInterval(() => {
+  void fetchHistory();
+}, 2000);
+
+void fetchStatus();
+setInterval(() => {
+  void fetchStatus();
+}, 3000);
