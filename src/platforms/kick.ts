@@ -726,10 +726,11 @@ export class KickProvider implements PlatformProvider {
       const streams = await this.client.livestreams.getLivestreams({
         broadcaster_user_id: [this.broadcasterId],
       });
-      if (streams.length > 0) {
+      const stream = streams[0];
+      if (stream) {
         this.streamStatus = StreamStatus.ONLINE;
-        this.viewerCount = streams[0]?.viewer_count ?? 0;
-        this.streamStartTime = new Date(streams[0].started_at);
+        this.viewerCount = stream.viewer_count ?? 0;
+        this.streamStartTime = new Date(stream.started_at);
       } else {
         this.streamStatus = StreamStatus.OFFLINE;
         this.viewerCount = 0;

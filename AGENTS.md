@@ -30,7 +30,9 @@ When beginning work in this repository:
 Default to using Bun instead of Node.js.
 
 - Use `bun <file>` instead of `node <file>` or `ts-node <file>`
-- Use `bun test` instead of `jest` or `vitest`
+- Use `bun run <script>` for package scripts so Bun lifecycle hooks such as `pretest`, `prestart`, and `post*` actually run
+- Do not replace `bun run test` with `bun test` when you expect package-script checks to run; `bun test` bypasses `package.json` lifecycle hooks
+- Use `bun test` only when you intentionally want the raw Bun test runner without script hooks
 - Use `bun build <file.html|file.ts|file.css>` instead of `webpack` or `esbuild`
 - Use `bun install` instead of `npm install` or `yarn install` or `pnpm install`
 - Use `bun run <script>` instead of `npm run <script>` or `yarn run <script>` or `pnpm run <script>`
@@ -49,7 +51,7 @@ Default to using Bun instead of Node.js.
 
 ### Testing
 
-Use `bun test` to run tests.
+Prefer `bun run test` for the normal repo test flow so `pretest` checks run first. Use `bun test` only for intentionally targeted raw test-runner invocations when skipping lifecycle hooks is acceptable.
 
 - Any test that can read, write, clear, or mutate persisted runtime state must isolate itself under repository-local `tmp/tests/...`.
 - Tests must never read from or write to the real user data directory such as `~/.yash`, even indirectly through default provider/service paths.
