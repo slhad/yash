@@ -406,3 +406,8 @@ interface PlatformProvider {
 - `bun run test` - Full check: lint → typecheck → tests
 - `bun typecheck` - Type-check only (`bun --bun tsc --noEmit`)
 - `biome check --write` - Lint and format code
+
+## Release Automation
+- GitHub Actions builds a Linux x86_64 AppImage on pushed tags matching `v*`
+- Tag-triggered AppImage builds publish the resulting `.AppImage` file to the matching GitHub release
+- GitHub Actions also runs one nightly AppImage build per day on a schedule and uploads the `.AppImage` as a workflow artifact

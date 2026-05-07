@@ -1,48 +1,23 @@
-name: Release
+name: Build AppImage
 
 on:
   push:
-    branches: [main, master]
-    paths:
-      - package.json
+    tags:
+      - "v*"
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: write
 
+concurrency:
+  group: appimage-${{ github.workflow }}-${{ github.ref_name || github.run_id }}
+  cancel-in-progress: false
+
 jobs:
-  check-version:
-    name: Check version bump
-    runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.read.outputs.version }}
-      tag: ${{ steps.read.outputs.tag }}
-      exists: ${{ steps.check.outputs.exists }}
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Read version from package.json
-        id: read
-        run: |
-          VERSION=$(jq -r '.version' package.json)
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
-
-      - name: Check if tag already exists
-        id: check
-        run: |
-          if git tag --list "${{ steps.read.outputs.tag }}" | grep -q .; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-          fi
-
   build-appimage:
     name: Build AppImage (Linux x86_64)
-    needs: check-version
-    if: needs.check-version.outputs.exists == 'false'
     runs-on: ubuntu-latest
 
     steps:
@@ -52,48 +27,78 @@ jobs:
         with:
           bun-version: stable
 
+      - name: Resolve build metadata
+        id: meta
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            version="${GITHUB_REF_NAME#v}"
+            release_tag="${GITHUB_REF_NAME}"
+            artifact_name="yash-${GITHUB_REF_NAME}-x86_64.AppImage"
+            is_release=true
+          else
+            version="nightly-$(date -u +%Y%m%d)"
+            release_tag=""
+            artifact_name="yash-${version}-${GITHUB_SHA::7}-x86_64.AppImage"
+            is_release=false
+          fi
+
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "release_tag=${release_tag}" >> "$GITHUB_OUTPUT"
+          echo "artifact_name=${artifact_name}" >> "$GITHUB_OUTPUT"
+          echo "is_release=${is_release}" >> "$GITHUB_OUTPUT"
+
       - name: Install dependencies
-        run: bun install
+        run: bun install --frozen-lockfile
 
       - name: Pre-build web assets
         run: bun run build:web
 
       - name: Build standalone binary
-        run: bun build --compile --target=bun-linux-x64 src/index.tsx --outfile dist/yash
+        run: |
+          mkdir -p dist
+          bun build --compile --target=bun-linux-x64 src/index.tsx --outfile dist/yash
 
       - name: Create AppDir
         env:
-          VERSION: ${{ needs.check-version.outputs.version }}
+          VERSION: ${{ steps.meta.outputs.version }}
+        shell: bash
         run: |
-          mkdir -p AppDir/usr/bin AppDir/usr/share/icons/hicolor/256x256/apps
+          mkdir -p AppDir/usr/bin AppDir/usr/share/icons/hicolor/scalable/apps
 
           cp dist/yash AppDir/usr/bin/yash
 
           cat > AppDir/AppRun <<'APPRUN'
-          #!/bin/bash
+          #!/bin/sh
           HERE="$(dirname "$(readlink -f "$0")")"
           exec "$HERE/usr/bin/yash" "$@"
           APPRUN
           chmod +x AppDir/AppRun
 
-          cat > AppDir/yash.desktop <<'DESKTOP'
+          cat > AppDir/yash.desktop <<DESKTOP
           [Desktop Entry]
           Name=YASH
-          Comment=Yet Another Stream Hub
+          Comment=Yet Another Streamer Helper
           Exec=yash
           Icon=yash
           Type=Application
           Categories=Utility;Network;
           Terminal=true
+          X-AppImage-Version=${VERSION}
           DESKTOP
 
-          convert -size 256x256 xc:'#1a1a2e' \
-            -fill '#e94560' -draw "roundrectangle 32,32 224,224 20,20" \
-            -fill white -pointsize 100 -gravity center -annotate 0 "Y" \
-            AppDir/yash.png
-          cp AppDir/yash.png AppDir/usr/share/icons/hicolor/256x256/apps/yash.png
+          cat > AppDir/yash.svg <<'SVG'
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+            <rect width="256" height="256" rx="48" fill="#1a1a2e" />
+            <path d="M69 64h43l18 39 18-39h43l-41 76v52h-44v-52z" fill="#e94560" />
+          </svg>
+          SVG
+
+          cp AppDir/yash.svg AppDir/usr/share/icons/hicolor/scalable/apps/yash.svg
+          ln -sf yash.svg AppDir/.DirIcon
 
       - name: Download appimagetool
+        shell: bash
         run: |
           wget -q -O appimagetool \
             https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
@@ -101,15 +106,23 @@ jobs:
 
       - name: Build AppImage
         env:
-          VERSION: ${{ needs.check-version.outputs.version }}
-          ARCH: x86_64
           APPIMAGE_EXTRACT_AND_RUN: "1"
-        run: ./appimagetool AppDir "yash-v${VERSION}-x86_64.AppImage"
+          ARCH: x86_64
+          APPIMAGE_NAME: ${{ steps.meta.outputs.artifact_name }}
+        run: ./appimagetool AppDir "${APPIMAGE_NAME}"
 
-      - name: Tag and release
+      - name: Upload AppImage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.meta.outputs.artifact_name }}
+          path: ${{ steps.meta.outputs.artifact_name }}
+          if-no-files-found: error
+
+      - name: Publish tagged release
+        if: steps.meta.outputs.is_release == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ needs.check-version.outputs.tag }}
-          name: ${{ needs.check-version.outputs.tag }}
-          files: yash-v*-x86_64.AppImage
+          tag_name: ${{ steps.meta.outputs.release_tag }}
+          name: ${{ steps.meta.outputs.release_tag }}
+          files: ${{ steps.meta.outputs.artifact_name }}
           generate_release_notes: true
