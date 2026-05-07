@@ -18,8 +18,9 @@ When beginning work in this repository:
 3. All implementation should adhere to the requirements in SPECS.md
 4. **When adding new functionality**, update SPECS.md to document it (under the relevant section, e.g. Features, Goals, or Development Commands)
 5. **When testing TUI components**: Use the existing `yash` tmux session and relaunch the app there before verification
-6. **ALWAYS Write** ongoing work/parts in `[tmp]/ONGOING.md` to keep track of everything
-7. **Clean `[tmp]/ONGOING.md` immediately after completion is verified** — remove each item as soon as the work is confirmed done by tests, runtime checks, or explicit user verification; do not leave completed items in the file
+6. **When building or updating TUI modals** (such as `/stream`, `/settings`, or future settings/edit dialogs): keep descriptive labels aligned with other modal rows, indent editable value fields slightly further right than their description to show the relationship clearly, and verify the rendered spacing in the live `yash` tmux session rather than trusting code inspection alone
+7. **ALWAYS Write** ongoing work/parts in `[tmp]/ONGOING.md` to keep track of everything
+8. **Clean `[tmp]/ONGOING.md` immediately after completion is verified** — remove each item as soon as the work is confirmed done by tests, runtime checks, or explicit user verification; do not leave completed items in the file
 
 ## External References
 

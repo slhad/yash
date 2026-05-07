@@ -31,6 +31,13 @@ import { buildTargetedStreamMetadataUpdate } from './utils/streamMetadata';
 import { getAutocomplete } from './utils/tuiCommands';
 import { installTuiErrorCapture } from './utils/tuiErrorCapture';
 import { type MessageTarget } from './utils/tuiMessageInput';
+import {
+  buildTuiSettingsEntries,
+  SETTINGS_MESSAGE_POSITIONS,
+  SETTINGS_VIEWER_MODES,
+  SETTINGS_WIDTH_OPTIONS,
+  validateTuiSettingsDraft,
+} from './utils/tuiSettings';
 import { parseMarkerArgs, parseSettingsValue } from './utils/webCommands';
 import './index.ts'; // start Bun.serve web server in the same process
 
@@ -68,6 +75,25 @@ function applySettingSideEffects(key: string, value: unknown): void {
   if (Number.isFinite(parsed) && parsed > 0) {
     chatService.setMaxHistorySize(parsed);
   }
+}
+
+const STRUCTURAL_SETTING_KEYS = new Set(['messages.position', 'events.width', 'logs.height']);
+
+async function persistSettingEntries(
+  entries: Array<{ key: string; value: unknown }>,
+): Promise<string[]> {
+  const changedKeys: string[] = [];
+  for (const entry of entries) {
+    if (Object.is(settings.get(entry.key, null), entry.value)) continue;
+    await settings.set(entry.key, entry.value);
+    applySettingSideEffects(entry.key, entry.value);
+    changedKeys.push(entry.key);
+  }
+  if (changedKeys.some((key) => STRUCTURAL_SETTING_KEYS.has(key)) && cliRenderer && uiNodes) {
+    uiNodes = initUI(cliRenderer, lastMessages);
+    uiNodes.inputEl.focus();
+  }
+  return changedKeys;
 }
 
 function formatElapsed(start: Date): string {
@@ -122,6 +148,19 @@ function clearScrollBox(scroll: ScrollBoxRenderable): void {
   }
 }
 
+function createIndentedInputRow(
+  renderer: CliRenderer,
+  input: InputRenderable,
+  indent = '  ',
+): BoxRenderable {
+  const row = new BoxRenderable(renderer, { flexDirection: 'row', width: '100%' });
+  row.add(new TextRenderable(renderer, { content: indent, fg: 'white' }));
+  const inputBox = new BoxRenderable(renderer, { width: '96%', flexDirection: 'column' });
+  inputBox.add(input);
+  row.add(inputBox);
+  return row;
+}
+
 // ─── Persistent UI node references ──────────────────────────────────────────
 // Built once in initUI(); mutated in-place in updateUI() to avoid flicker.
 
@@ -157,12 +196,18 @@ interface StreamModal {
   op: 'start' | 'stop' | 'update';
 }
 
+interface SettingsModal {
+  box: BoxRenderable;
+  focusIndex: number;
+}
+
 let activeModal: TwitchSetupModal | null = null;
 let activeStreamModal: StreamModal | null = null;
+let activeSettingsModal: SettingsModal | null = null;
 
 function ensureMainInputFocus(): void {
   if (!uiNodes) return;
-  if (activeModal || activeStreamModal) return;
+  if (activeModal || activeStreamModal || activeSettingsModal) return;
   if (!uiNodes.inputEl.focused) {
     uiNodes.inputEl.focus();
   }
@@ -1738,7 +1783,7 @@ function openYouTubeSetupModal(): void {
 }
 
 function openStreamModal(preselected: string[]): void {
-  if (!uiNodes || activeStreamModal || activeModal) return;
+  if (!uiNodes || activeStreamModal || activeModal || activeSettingsModal) return;
   const { renderer } = uiNodes;
 
   const selectedPlatforms = new Set(preselected.length > 0 ? preselected : [...platforms]);
@@ -1765,6 +1810,7 @@ function openStreamModal(preselected: string[]): void {
   // ── Title ────────────────────────────────────────────────────────
   const titleLabel = makeLabel(' Title (all platforms):');
   const titleInput = new InputRenderable(renderer, { placeholder: 'Stream title', width: '100%' });
+  const titleInputRow = createIndentedInputRow(renderer, titleInput);
   titleInput.value = savedStream.title ?? '';
 
   // ── YouTube video category selector ─────────────────────────────
@@ -1782,6 +1828,7 @@ function openStreamModal(preselected: string[]): void {
     placeholder: 'Stream subject',
     width: '100%',
   });
+  const subjectInputRow = createIndentedInputRow(renderer, subjectInput);
   subjectInput.value = savedStream.game ?? '';
 
   // ── Twitch category ──────────────────────────────────────────────
@@ -1790,6 +1837,7 @@ function openStreamModal(preselected: string[]): void {
     placeholder: 'Category name',
     width: '100%',
   });
+  const twitchGameInputRow = createIndentedInputRow(renderer, twitchGameInput);
   twitchGameInput.value = savedStream.twitchGame ?? '';
   const twitchCatHint = new TextRenderable(renderer, { content: '', fg: 'gray' });
   twitchCatHint.visible = false;
@@ -1803,6 +1851,7 @@ function openStreamModal(preselected: string[]): void {
     placeholder: 'Category name',
     width: '100%',
   });
+  const kickCatInputRow = createIndentedInputRow(renderer, kickCatInput);
   kickCatInput.value = savedStream.kickCategory ?? '';
   const kickCatHint = new TextRenderable(renderer, { content: '', fg: 'gray' });
   kickCatHint.visible = false;
@@ -1816,6 +1865,7 @@ function openStreamModal(preselected: string[]): void {
     placeholder: 'gaming, fps, variety',
     width: '100%',
   });
+  const tagsInputRow = createIndentedInputRow(renderer, tagsInput);
   tagsInput.value = Array.isArray(savedStream.tags)
     ? savedStream.tags.join(', ')
     : (savedStream.tags ?? '');
@@ -1826,6 +1876,7 @@ function openStreamModal(preselected: string[]): void {
     placeholder: 'Stream description',
     width: '100%',
   });
+  const descInputRow = createIndentedInputRow(renderer, descInput);
   descInput.value = savedStream.description ?? '';
 
   // ── Twitch notification ──────────────────────────────────────────
@@ -1834,6 +1885,7 @@ function openStreamModal(preselected: string[]): void {
     placeholder: 'Going live notification message',
     width: '100%',
   });
+  const notifInputRow = createIndentedInputRow(renderer, notifInput);
   notifInput.value = savedStream.notification ?? '';
 
   const hint = new TextRenderable(renderer, {
@@ -1861,23 +1913,23 @@ function openStreamModal(preselected: string[]): void {
   box.add(platformToggleLabel);
   box.add(platformToggleText);
   box.add(titleLabel);
-  box.add(titleInput);
+  box.add(titleInputRow);
   box.add(ytCatLabel);
   box.add(ytCatText);
   box.add(subjectLabel);
-  box.add(subjectInput);
+  box.add(subjectInputRow);
   box.add(twitchGameLabel);
-  box.add(twitchGameInput);
+  box.add(twitchGameInputRow);
   box.add(twitchCatHint);
   box.add(kickCatLabel);
-  box.add(kickCatInput);
+  box.add(kickCatInputRow);
   box.add(kickCatHint);
   box.add(tagsLabel);
-  box.add(tagsInput);
+  box.add(tagsInputRow);
   box.add(descLabel);
-  box.add(descInput);
+  box.add(descInputRow);
   box.add(notifLabel);
-  box.add(notifInput);
+  box.add(notifInputRow);
   box.add(hint);
   renderer.root.add(box);
 
@@ -1930,17 +1982,17 @@ function openStreamModal(preselected: string[]): void {
     ytCatLabel.visible = hasYT;
     ytCatText.visible = hasYT;
     subjectLabel.visible = hasYT;
-    subjectInput.visible = hasYT;
+    subjectInputRow.visible = hasYT;
     twitchGameLabel.visible = hasTwitch;
-    twitchGameInput.visible = hasTwitch;
+    twitchGameInputRow.visible = hasTwitch;
     twitchCatHint.visible = hasTwitch && catSuggestions.length > 0;
     kickCatLabel.visible = hasKick;
-    kickCatInput.visible = hasKick;
+    kickCatInputRow.visible = hasKick;
     kickCatHint.visible = hasKick && kickCatSuggestions.length > 0;
     descLabel.visible = hasYT;
-    descInput.visible = hasYT;
+    descInputRow.visible = hasYT;
     notifLabel.visible = hasTwitch;
-    notifInput.visible = hasTwitch;
+    notifInputRow.visible = hasTwitch;
 
     const items: StreamFocusItem[] = [{ kind: 'platforms' }, { kind: 'input', node: titleInput }];
     if (hasYT) items.push({ kind: 'yt-category' });
@@ -2436,7 +2488,9 @@ async function handleCommand(trimmed: string): Promise<void> {
     }
   } else if (cmd === '/settings') {
     const op = parts[1];
-    if (op === 'get' && parts[2]) {
+    if (!op) {
+      openSettingsModal();
+    } else if (op === 'get' && parts[2]) {
       const key = parts[2];
       const val = getSettingValue(key);
       lastMessages.push(`[settings] ${key} = ${JSON.stringify(val)}`);
@@ -2444,17 +2498,13 @@ async function handleCommand(trimmed: string): Promise<void> {
       const key = parts[2];
       const rawValue = parts.slice(3).join(' ');
       const value = parseSettingsValue(rawValue);
-      await settings.set(key, value);
-      applySettingSideEffects(key, value);
-      lastMessages.push(`[settings] set ${key} = ${JSON.stringify(value)}`);
-      // Structural changes require a full layout rebuild
-      const structuralKeys = ['messages.position', 'events.width', 'logs.height'];
-      if (structuralKeys.some((k) => key === k) && cliRenderer && uiNodes) {
-        uiNodes = initUI(cliRenderer, lastMessages);
-        uiNodes.inputEl.focus();
-      }
+      const changedKeys = await persistSettingEntries([{ key, value }]);
+      if (changedKeys.length === 0) lastMessages.push('[settings] No changes.');
+      else lastMessages.push(`[settings] set ${key} = ${JSON.stringify(value)}`);
     } else {
-      lastMessages.push('[system] Usage: /settings get <key> | /settings set <key> <json-value>');
+      lastMessages.push(
+        '[system] Usage: /settings | /settings get <key> | /settings set <key> <json-value>',
+      );
       lastMessages.push(
         '[system] Common keys: stream.title, stream.description, chat.maxHistorySize, demo, title.visible, logs.visible, logs.height, logs.tail, viewers.visible, viewers.mode, messages.position, chat.timestamps.visible, events.visible, events.tail, events.width, platforms.<provider>.showViewers, platforms.youtube.setup.*',
       );
@@ -2518,7 +2568,7 @@ async function handleCommand(trimmed: string): Promise<void> {
       '[help]   /connect <youtube|twitch|kick|obs>  — authenticate a platform or configure OBS',
     );
     lastMessages.push(
-      '[help]   /stream [platform…]  — edit stream info (opens modal, persists to config)',
+      '[help]   /stream [platform…]  — edit stream info (opens modal, persists to settings)',
     );
     lastMessages.push(
       '[help]   /setup-youtube  — configure YouTube stream options (playlists, tags, chapters, description)',
@@ -2535,6 +2585,7 @@ async function handleCommand(trimmed: string): Promise<void> {
       '[help]   /markers clear | [all|youtube|twitch|kick] [limit]  — list markers or clear YouTube chapters',
     );
     lastMessages.push('[help]   /info  — show current stream/channel info from all providers');
+    lastMessages.push('[help]   /settings  — open the settings modal');
     lastMessages.push('[help]   /settings get <key>  — get a setting value');
     lastMessages.push('[help]   /settings set <key> <value>  — set a setting value');
     lastMessages.push('[help]   /logs clear | tail <n> | visible <true|false>  — manage logs');
@@ -2551,6 +2602,483 @@ async function handleCommand(trimmed: string): Promise<void> {
     }
   } else {
     lastMessages.push(`[system] Unknown command: ${trimmed}`);
+  }
+}
+
+function openSettingsModal(): void {
+  if (!uiNodes || activeStreamModal || activeModal || activeSettingsModal) return;
+  const { renderer } = uiNodes;
+
+  const draft = {
+    demo: boolSetting(settings.get('demo', false), false),
+    titleVisible: boolSetting(settings.get('title.visible', false), false),
+    viewersVisible: boolSetting(settings.get('viewers.visible', true), true),
+    viewersMode: String(settings.get('viewers.mode', 'per-platform') ?? 'per-platform'),
+    messagesPosition: String(settings.get('messages.position', 'bottom') ?? 'bottom'),
+    chatTimestampsVisible: boolSetting(settings.get('chat.timestamps.visible', true), true),
+    chatMaxHistorySize: String(numSetting(settings.get('chat.maxHistorySize', 1000), 1000)),
+    eventsVisible: boolSetting(settings.get('events.visible', true), true),
+    eventsTail: String(numSetting(settings.get('events.tail', 15), 15)),
+    eventsWidth: String(settings.get('events.width', '30%') ?? '30%'),
+    logsVisible: boolSetting(settings.get('logs.visible', true), true),
+    logsHeight: String(numSetting(settings.get('logs.height', 15), 15)),
+    logsTail: String(numSetting(settings.get('logs.tail', 20), 20)),
+    youtubeShowViewers: boolSetting(settings.get('platforms.youtube.showViewers', true), true),
+    twitchShowViewers: boolSetting(settings.get('platforms.twitch.showViewers', true), true),
+    kickShowViewers: boolSetting(settings.get('platforms.kick.showViewers', true), true),
+  };
+  const initialSettingsResult = validateTuiSettingsDraft(draft);
+  const initialEntries = initialSettingsResult.values
+    ? buildTuiSettingsEntries(initialSettingsResult.values)
+    : [];
+  const initialValueByKey = new Map(initialEntries.map((entry) => [entry.key, entry.value]));
+
+  function makeLabel(text: string): TextRenderable {
+    return new TextRenderable(renderer, { content: text, fg: 'gray' });
+  }
+
+  function makeToggleRow(label: string, value: boolean, focused: boolean): string {
+    return `${focused ? '▶' : ' '} ${label}: ${value ? 'ON' : 'OFF'}`;
+  }
+
+  function makeEnumRow(label: string, value: string, focused: boolean): string {
+    return `${focused ? '▶' : ' '} ${label}: ${value}`;
+  }
+
+  const box = new BoxRenderable(renderer, {
+    position: 'absolute',
+    top: '4%',
+    left: '8%',
+    width: '84%',
+    zIndex: 100,
+    border: true,
+    borderStyle: 'rounded',
+    borderColor: 'cyan',
+    backgroundColor: 'black',
+    shouldFill: true,
+    padding: 1,
+    flexDirection: 'column',
+    gap: 1,
+    title: ' Settings ',
+  });
+
+  const intro = new TextRenderable(renderer, {
+    content:
+      ' Tab/Shift+Tab move focus. Space or ◄/► toggles/cycles rows. Enter saves all changes. Esc cancels.',
+    fg: 'gray',
+  });
+  const displayHeading = new TextRenderable(renderer, {
+    content: ' Display',
+    fg: 'cyan',
+    attributes: TextAttributes.BOLD,
+  });
+  const demoRow = new TextRenderable(renderer, { content: '', fg: 'white' });
+  const titleVisibleRow = new TextRenderable(renderer, { content: '', fg: 'white' });
+  const viewersVisibleRow = new TextRenderable(renderer, { content: '', fg: 'white' });
+  const viewersModeRow = new TextRenderable(renderer, { content: '', fg: 'white' });
+  const messagesPositionRow = new TextRenderable(renderer, { content: '', fg: 'white' });
+  const chatTimestampsRow = new TextRenderable(renderer, { content: '', fg: 'white' });
+  const historySizeLabel = makeLabel('  chat.maxHistorySize: keep the last N chat lines in memory');
+  const historySizeInput = new InputRenderable(renderer, {
+    placeholder: '1000',
+    width: '100%',
+  });
+  const historySizeInputRow = createIndentedInputRow(renderer, historySizeInput, '    ');
+  historySizeInput.value = draft.chatMaxHistorySize;
+
+  const sidebarHeading = new TextRenderable(renderer, {
+    content: ' Sidebar',
+    fg: 'cyan',
+    attributes: TextAttributes.BOLD,
+  });
+  const eventsVisibleRow = new TextRenderable(renderer, { content: '', fg: 'white' });
+  const eventsTailLabel = makeLabel('  events.tail: how many event rows to show in the sidebar');
+  const eventsTailInput = new InputRenderable(renderer, {
+    placeholder: '15',
+    width: '100%',
+  });
+  const eventsTailInputRow = createIndentedInputRow(renderer, eventsTailInput, '    ');
+  eventsTailInput.value = draft.eventsTail;
+  const eventsWidthRow = new TextRenderable(renderer, { content: '', fg: 'white' });
+  const logsVisibleRow = new TextRenderable(renderer, { content: '', fg: 'white' });
+  const logsHeightLabel = makeLabel(
+    '  logs.height: reserved log area height when logs are visible',
+  );
+  const logsHeightInput = new InputRenderable(renderer, {
+    placeholder: '15',
+    width: '100%',
+  });
+  const logsHeightInputRow = createIndentedInputRow(renderer, logsHeightInput, '    ');
+  logsHeightInput.value = draft.logsHeight;
+  const logsTailLabel = makeLabel('  logs.tail: how many recent log lines to keep visible');
+  const logsTailInput = new InputRenderable(renderer, {
+    placeholder: '20',
+    width: '100%',
+  });
+  const logsTailInputRow = createIndentedInputRow(renderer, logsTailInput, '    ');
+  logsTailInput.value = draft.logsTail;
+
+  const providerHeading = new TextRenderable(renderer, {
+    content: ' Per-platform viewers',
+    fg: 'cyan',
+    attributes: TextAttributes.BOLD,
+  });
+  const ytViewersRow = new TextRenderable(renderer, { content: '', fg: 'white' });
+  const twitchViewersRow = new TextRenderable(renderer, { content: '', fg: 'white' });
+  const kickViewersRow = new TextRenderable(renderer, { content: '', fg: 'white' });
+
+  box.add(intro);
+  box.add(displayHeading);
+  box.add(demoRow);
+  box.add(titleVisibleRow);
+  box.add(viewersVisibleRow);
+  box.add(viewersModeRow);
+  box.add(messagesPositionRow);
+  box.add(chatTimestampsRow);
+  box.add(historySizeLabel);
+  box.add(historySizeInputRow);
+  box.add(sidebarHeading);
+  box.add(eventsVisibleRow);
+  box.add(eventsTailLabel);
+  box.add(eventsTailInputRow);
+  box.add(eventsWidthRow);
+  box.add(logsVisibleRow);
+  box.add(logsHeightLabel);
+  box.add(logsHeightInputRow);
+  box.add(logsTailLabel);
+  box.add(logsTailInputRow);
+  box.add(providerHeading);
+  box.add(ytViewersRow);
+  box.add(twitchViewersRow);
+  box.add(kickViewersRow);
+  renderer.root.add(box);
+
+  type SettingsFocusItem =
+    | {
+        kind: 'toggle';
+        node: TextRenderable;
+        render: (focused: boolean) => void;
+        toggle: () => void;
+      }
+    | {
+        kind: 'enum';
+        node: TextRenderable;
+        render: (focused: boolean) => void;
+        cycle: (direction: 1 | -1) => void;
+      }
+    | { kind: 'input'; node: InputRenderable };
+
+  function cycleOption(current: string, options: readonly string[], direction: 1 | -1): string {
+    const currentIndex = Math.max(0, options.indexOf(current));
+    const nextIndex = (currentIndex + direction + options.length) % options.length;
+    return options[nextIndex] ?? options[0] ?? current;
+  }
+
+  const items: SettingsFocusItem[] = [
+    {
+      kind: 'toggle',
+      node: demoRow,
+      render: (focused) => {
+        demoRow.content = makeToggleRow('demo', draft.demo, focused).concat(
+          '  - fake connected providers for local testing',
+        );
+        demoRow.fg = focused ? 'cyan' : 'white';
+      },
+      toggle: () => {
+        draft.demo = !draft.demo;
+      },
+    },
+    {
+      kind: 'toggle',
+      node: titleVisibleRow,
+      render: (focused) => {
+        titleVisibleRow.content = makeToggleRow(
+          'title.visible',
+          draft.titleVisible,
+          focused,
+        ).concat('  - show or hide the YASH header');
+        titleVisibleRow.fg = focused ? 'cyan' : 'white';
+      },
+      toggle: () => {
+        draft.titleVisible = !draft.titleVisible;
+      },
+    },
+    {
+      kind: 'toggle',
+      node: viewersVisibleRow,
+      render: (focused) => {
+        viewersVisibleRow.content = makeToggleRow(
+          'viewers.visible',
+          draft.viewersVisible,
+          focused,
+        ).concat('  - master switch for viewer counters');
+        viewersVisibleRow.fg = focused ? 'cyan' : 'white';
+      },
+      toggle: () => {
+        draft.viewersVisible = !draft.viewersVisible;
+      },
+    },
+    {
+      kind: 'enum',
+      node: viewersModeRow,
+      render: (focused) => {
+        viewersModeRow.content = makeEnumRow('viewers.mode', draft.viewersMode, focused).concat(
+          '  - per platform, total only, or both',
+        );
+        viewersModeRow.fg = focused ? 'cyan' : 'white';
+      },
+      cycle: (direction) => {
+        draft.viewersMode = cycleOption(draft.viewersMode, SETTINGS_VIEWER_MODES, direction);
+      },
+    },
+    {
+      kind: 'enum',
+      node: messagesPositionRow,
+      render: (focused) => {
+        messagesPositionRow.content = makeEnumRow(
+          'messages.position',
+          draft.messagesPosition,
+          focused,
+        ).concat('  - place the message box above, below, or hide it');
+        messagesPositionRow.fg = focused ? 'cyan' : 'white';
+      },
+      cycle: (direction) => {
+        draft.messagesPosition = cycleOption(
+          draft.messagesPosition,
+          SETTINGS_MESSAGE_POSITIONS,
+          direction,
+        );
+      },
+    },
+    {
+      kind: 'toggle',
+      node: chatTimestampsRow,
+      render: (focused) => {
+        chatTimestampsRow.content = makeToggleRow(
+          'chat.timestamps.visible',
+          draft.chatTimestampsVisible,
+          focused,
+        ).concat('  - prefix chat lines with their timestamp');
+        chatTimestampsRow.fg = focused ? 'cyan' : 'white';
+      },
+      toggle: () => {
+        draft.chatTimestampsVisible = !draft.chatTimestampsVisible;
+      },
+    },
+    { kind: 'input', node: historySizeInput },
+    {
+      kind: 'toggle',
+      node: eventsVisibleRow,
+      render: (focused) => {
+        eventsVisibleRow.content = makeToggleRow(
+          'events.visible',
+          draft.eventsVisible,
+          focused,
+        ).concat('  - show or hide event activity in the sidebar');
+        eventsVisibleRow.fg = focused ? 'cyan' : 'white';
+      },
+      toggle: () => {
+        draft.eventsVisible = !draft.eventsVisible;
+      },
+    },
+    { kind: 'input', node: eventsTailInput },
+    {
+      kind: 'enum',
+      node: eventsWidthRow,
+      render: (focused) => {
+        eventsWidthRow.content = makeEnumRow('events.width', draft.eventsWidth, focused).concat(
+          '  - choose how wide the right sidebar should be',
+        );
+        eventsWidthRow.fg = focused ? 'cyan' : 'white';
+      },
+      cycle: (direction) => {
+        draft.eventsWidth = cycleOption(draft.eventsWidth, SETTINGS_WIDTH_OPTIONS, direction);
+      },
+    },
+    {
+      kind: 'toggle',
+      node: logsVisibleRow,
+      render: (focused) => {
+        logsVisibleRow.content = makeToggleRow('logs.visible', draft.logsVisible, focused).concat(
+          '  - show or hide application logs in the sidebar',
+        );
+        logsVisibleRow.fg = focused ? 'cyan' : 'white';
+      },
+      toggle: () => {
+        draft.logsVisible = !draft.logsVisible;
+      },
+    },
+    { kind: 'input', node: logsHeightInput },
+    { kind: 'input', node: logsTailInput },
+    {
+      kind: 'toggle',
+      node: ytViewersRow,
+      render: (focused) => {
+        ytViewersRow.content = makeToggleRow(
+          'platforms.youtube.showViewers',
+          draft.youtubeShowViewers,
+          focused,
+        ).concat('  - allow YouTube viewers in the status bar');
+        ytViewersRow.fg = focused ? 'cyan' : 'white';
+      },
+      toggle: () => {
+        draft.youtubeShowViewers = !draft.youtubeShowViewers;
+      },
+    },
+    {
+      kind: 'toggle',
+      node: twitchViewersRow,
+      render: (focused) => {
+        twitchViewersRow.content = makeToggleRow(
+          'platforms.twitch.showViewers',
+          draft.twitchShowViewers,
+          focused,
+        ).concat('  - allow Twitch viewers in the status bar');
+        twitchViewersRow.fg = focused ? 'cyan' : 'white';
+      },
+      toggle: () => {
+        draft.twitchShowViewers = !draft.twitchShowViewers;
+      },
+    },
+    {
+      kind: 'toggle',
+      node: kickViewersRow,
+      render: (focused) => {
+        kickViewersRow.content = makeToggleRow(
+          'platforms.kick.showViewers',
+          draft.kickShowViewers,
+          focused,
+        ).concat('  - allow Kick viewers in the status bar');
+        kickViewersRow.fg = focused ? 'cyan' : 'white';
+      },
+      toggle: () => {
+        draft.kickShowViewers = !draft.kickShowViewers;
+      },
+    },
+  ];
+
+  let focusIdx = 0;
+  activeSettingsModal = { box, focusIndex: 0 };
+
+  function blurCurrent(): void {
+    const current = items[focusIdx];
+    if (!current) return;
+    if (current.kind === 'input') current.node.blur();
+    else current.render(false);
+  }
+
+  function focusCurrent(): void {
+    const current = items[focusIdx];
+    if (!current) return;
+    if (current.kind === 'input') current.node.focus();
+    else current.render(true);
+  }
+
+  function renderRows(): void {
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (!item || item.kind === 'input') continue;
+      item.render(i === focusIdx);
+    }
+  }
+
+  renderRows();
+  focusCurrent();
+
+  async function saveAndClose(): Promise<void> {
+    const result = validateTuiSettingsDraft({
+      ...draft,
+      chatMaxHistorySize: historySizeInput.value,
+      eventsTail: eventsTailInput.value,
+      logsHeight: logsHeightInput.value,
+      logsTail: logsTailInput.value,
+    });
+    if (!result.values) {
+      for (const error of result.errors) {
+        lastMessages.push(`[settings] ${error}`);
+      }
+      updateUI(lastMessages);
+      return;
+    }
+
+    renderer.removeInputHandler(modalKeyHandler);
+    renderer.root.remove(box.id);
+    activeSettingsModal = null;
+    uiNodes?.inputEl.focus();
+
+    try {
+      const changedEntries = buildTuiSettingsEntries(result.values).filter(
+        (entry) => !Object.is(initialValueByKey.get(entry.key), entry.value),
+      );
+      const changedKeys = await persistSettingEntries(changedEntries);
+      if (changedKeys.length === 0) {
+        lastMessages.push('[settings] No changes.');
+      } else {
+        lastMessages.push(`[settings] Updated: ${changedKeys.join(', ')}`);
+      }
+    } catch (err) {
+      lastMessages.push(`[settings] Error: ${String(err)}`);
+    }
+    updateUI(lastMessages);
+  }
+
+  function cancelAndClose(): void {
+    renderer.removeInputHandler(modalKeyHandler);
+    renderer.root.remove(box.id);
+    activeSettingsModal = null;
+    uiNodes?.inputEl.focus();
+  }
+
+  const modalKeyHandler = (sequence: string): boolean => {
+    if (!activeSettingsModal) return false;
+    const current = items[focusIdx];
+    if (!current) return false;
+
+    if (sequence === '\t' || sequence === '\x1b[Z') {
+      blurCurrent();
+      const direction = sequence === '\t' ? 1 : -1;
+      focusIdx = (focusIdx + direction + items.length) % items.length;
+      activeSettingsModal.focusIndex = focusIdx;
+      focusCurrent();
+      return true;
+    }
+
+    if (
+      sequence === ' ' ||
+      (current.kind === 'enum' && (sequence === '\x1b[C' || sequence === '\x1b[D')) ||
+      (current.kind === 'toggle' && (sequence === '\x1b[C' || sequence === '\x1b[D'))
+    ) {
+      if (current.kind === 'toggle') {
+        current.toggle();
+        current.render(true);
+        return true;
+      }
+      if (current.kind === 'enum') {
+        current.cycle(sequence === '\x1b[D' ? -1 : 1);
+        current.render(true);
+        return true;
+      }
+    }
+
+    if (sequence === '\r' || sequence === '\n') {
+      saveAndClose();
+      return true;
+    }
+    if (sequence === '\x1b' || sequence === '\x1b\x1b') {
+      cancelAndClose();
+      return true;
+    }
+    if (sequence === '\x1b[A' || sequence === '\x1b[B') return true;
+    return false;
+  };
+
+  renderer.prependInputHandler(modalKeyHandler);
+
+  const escapeViaKeyDown = (key: { name: string }) => {
+    if (key.name === 'escape' && activeSettingsModal) cancelAndClose();
+  };
+  for (const input of [historySizeInput, eventsTailInput, logsHeightInput, logsTailInput]) {
+    input.onKeyDown = escapeViaKeyDown as any;
   }
 }
 
@@ -2793,7 +3321,7 @@ async function main() {
 
         // Ctrl+L / Ctrl+Shift+L — cycle sidebar visibility
         // Both send \x0c in this terminal; can't be distinguished without kitty support
-        if (sequence === '\x0c' && !activeModal) {
+        if (sequence === '\x0c' && !activeModal && !activeStreamModal && !activeSettingsModal) {
           const ev = boolSetting(settings.get('events.visible', true), true);
           const lg = boolSetting(settings.get('logs.visible', true), true);
           // Cycle: (T,T)→(F,T)→(F,F)→(T,F)→(T,T)

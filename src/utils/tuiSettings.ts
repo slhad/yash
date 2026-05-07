@@ -1,0 +1,135 @@
+export const SETTINGS_VIEWER_MODES = ['per-platform', 'cumulative', 'both'] as const;
+export const SETTINGS_MESSAGE_POSITIONS = ['top', 'bottom', 'hide'] as const;
+export const SETTINGS_WIDTH_OPTIONS = ['25%', '30%', '35%', '40%', '45%', '50%'] as const;
+
+export interface TuiSettingsDraftInput {
+  demo: boolean;
+  titleVisible: boolean;
+  viewersVisible: boolean;
+  viewersMode: string;
+  messagesPosition: string;
+  chatTimestampsVisible: boolean;
+  chatMaxHistorySize: string;
+  eventsVisible: boolean;
+  eventsTail: string;
+  eventsWidth: string;
+  logsVisible: boolean;
+  logsHeight: string;
+  logsTail: string;
+  youtubeShowViewers: boolean;
+  twitchShowViewers: boolean;
+  kickShowViewers: boolean;
+}
+
+export interface TuiSettingsValues {
+  demo: boolean;
+  titleVisible: boolean;
+  viewersVisible: boolean;
+  viewersMode: (typeof SETTINGS_VIEWER_MODES)[number];
+  messagesPosition: (typeof SETTINGS_MESSAGE_POSITIONS)[number];
+  chatTimestampsVisible: boolean;
+  chatMaxHistorySize: number;
+  eventsVisible: boolean;
+  eventsTail: number;
+  eventsWidth: (typeof SETTINGS_WIDTH_OPTIONS)[number];
+  logsVisible: boolean;
+  logsHeight: number;
+  logsTail: number;
+  youtubeShowViewers: boolean;
+  twitchShowViewers: boolean;
+  kickShowViewers: boolean;
+}
+
+export interface TuiSettingsEntry {
+  key: string;
+  value: boolean | number | string;
+}
+
+function parsePositiveInt(raw: string, label: string, errors: string[]): number | null {
+  const parsed = Number.parseInt(raw.trim(), 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    errors.push(`${label} must be a positive integer.`);
+    return null;
+  }
+  return parsed;
+}
+
+export function validateTuiSettingsDraft(draft: TuiSettingsDraftInput): {
+  values: TuiSettingsValues | null;
+  errors: string[];
+} {
+  const errors: string[] = [];
+  const chatMaxHistorySize = parsePositiveInt(
+    draft.chatMaxHistorySize,
+    'chat.maxHistorySize',
+    errors,
+  );
+  const eventsTail = parsePositiveInt(draft.eventsTail, 'events.tail', errors);
+  const logsHeight = parsePositiveInt(draft.logsHeight, 'logs.height', errors);
+  const logsTail = parsePositiveInt(draft.logsTail, 'logs.tail', errors);
+
+  if (
+    !SETTINGS_VIEWER_MODES.includes(draft.viewersMode as (typeof SETTINGS_VIEWER_MODES)[number])
+  ) {
+    errors.push(`viewers.mode must be one of: ${SETTINGS_VIEWER_MODES.join(', ')}`);
+  }
+  if (
+    !SETTINGS_MESSAGE_POSITIONS.includes(
+      draft.messagesPosition as (typeof SETTINGS_MESSAGE_POSITIONS)[number],
+    )
+  ) {
+    errors.push(`messages.position must be one of: ${SETTINGS_MESSAGE_POSITIONS.join(', ')}`);
+  }
+  if (
+    !SETTINGS_WIDTH_OPTIONS.includes(draft.eventsWidth as (typeof SETTINGS_WIDTH_OPTIONS)[number])
+  ) {
+    errors.push(`events.width must be one of: ${SETTINGS_WIDTH_OPTIONS.join(', ')}`);
+  }
+
+  if (errors.length > 0) {
+    return { values: null, errors };
+  }
+
+  return {
+    values: {
+      demo: draft.demo,
+      titleVisible: draft.titleVisible,
+      viewersVisible: draft.viewersVisible,
+      viewersMode: draft.viewersMode as (typeof SETTINGS_VIEWER_MODES)[number],
+      messagesPosition: draft.messagesPosition as (typeof SETTINGS_MESSAGE_POSITIONS)[number],
+      chatTimestampsVisible: draft.chatTimestampsVisible,
+      chatMaxHistorySize: chatMaxHistorySize as number,
+      eventsVisible: draft.eventsVisible,
+      eventsTail: eventsTail as number,
+      eventsWidth: draft.eventsWidth as (typeof SETTINGS_WIDTH_OPTIONS)[number],
+      logsVisible: draft.logsVisible,
+      logsHeight: logsHeight as number,
+      logsTail: logsTail as number,
+      youtubeShowViewers: draft.youtubeShowViewers,
+      twitchShowViewers: draft.twitchShowViewers,
+      kickShowViewers: draft.kickShowViewers,
+    },
+    errors,
+  };
+}
+
+export function buildTuiSettingsEntries(values: TuiSettingsValues): TuiSettingsEntry[] {
+  return [
+    { key: 'demo', value: values.demo },
+    { key: 'title.visible', value: values.titleVisible },
+    { key: 'viewers.visible', value: values.viewersVisible },
+    { key: 'viewers.mode', value: values.viewersMode },
+    { key: 'messages.position', value: values.messagesPosition },
+    { key: 'chat.timestamps.visible', value: values.chatTimestampsVisible },
+    { key: 'chat.maxHistorySize', value: values.chatMaxHistorySize },
+    { key: 'events.visible', value: values.eventsVisible },
+    { key: 'events.tail', value: values.eventsTail },
+    { key: 'events.width', value: values.eventsWidth },
+    { key: 'logs.visible', value: values.logsVisible },
+    { key: 'logs.height', value: values.logsHeight },
+    { key: 'logs.tail', value: values.logsTail },
+    { key: 'platforms.youtube.showViewers', value: values.youtubeShowViewers },
+    { key: 'platforms.twitch.showViewers', value: values.twitchShowViewers },
+    { key: 'platforms.kick.showViewers', value: values.kickShowViewers },
+  ];
+}

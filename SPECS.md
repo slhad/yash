@@ -32,7 +32,7 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
         * `clear` removes only YouTube chapter markers persisted under `stream.chapters` in `YASH_DATA_DIR/settings.json`
         * Default list target is `all`; default list limit is `20`
         * Examples: `/markers`, `/markers youtube`, `/markers twitch 5`, `/markers clear`
-    * Command /settings [get <key>|set <key> <value>] - get or set UI settings
+    * Command /settings [get <key>|set <key> <value>] - get or set UI settings; running `/settings` with no arguments opens a TUI modal for display/sidebar/viewer preferences and persists changes to `settings.json`
         * Includes `chat.timestamps.visible` for WebUI unified chat timestamp display
     * Command `/setup-youtube [chaptering|clear-markers|tags|description|subject|playlist] [on|off]` — configure YouTube stream options; `clear-markers` enables automatic chapter clearing when a new broadcast is detected
     * `/stream` modal: per-platform category autocomplete with ↑/↓ navigation — Twitch field (`twitchGame`) calls `/api/twitch/categories` with 300 ms debounce; Kick field (`kickCategory`) calls `/api/kick/categories` with 300 ms debounce; YouTube field uses a static `<select>` dropdown from `/api/youtube/categories`
