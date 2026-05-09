@@ -3071,6 +3071,10 @@ function openSettingsModal(): void {
         lastMessages.push('[settings] No changes.');
       } else {
         lastMessages.push(`[settings] Updated: ${changedKeys.join(', ')}`);
+        if (changedKeys.includes('chat.timestamps.visible')) {
+          lastMessages.length = 0;
+          for (const raw of lastRawMessages) lastMessages.push(transformMessage(raw));
+        }
       }
     } catch (err) {
       lastMessages.push(`[settings] Error: ${String(err)}`);
@@ -3439,16 +3443,26 @@ function transformMessage(msg: {
   platform: string;
   username: string;
   message: string;
+  timestamp: number;
   color?: string;
 }) {
   const platColor = platformColor(msg.platform);
   const userColor = msg.color ?? platColor;
+  const showTs = boolSetting(settings.get('chat.timestamps.visible', true), true);
+  let tsStr = '';
+  if (showTs) {
+    const d = new Date(msg.timestamp);
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mi = String(d.getMinutes()).padStart(2, '0');
+    const ss = String(d.getSeconds()).padStart(2, '0');
+    tsStr = ` ${hh}:${mi}:${ss}`;
+  }
   if (userColor === platColor) {
-    return { content: `[${msg.platform}] ${msg.username}: ${msg.message}`, fg: platColor };
+    return { content: `[${msg.platform}]${tsStr} ${msg.username}: ${msg.message}`, fg: platColor };
   }
   return {
     parts: [
-      { content: `[${msg.platform}] `, fg: platColor },
+      { content: `[${msg.platform}]${tsStr} `, fg: platColor },
       { content: `${msg.username}: ${msg.message}`, fg: userColor },
     ],
   };
