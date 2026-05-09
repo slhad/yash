@@ -5,9 +5,11 @@ import {
   BoxRenderable,
   type CliRenderer,
   createCliRenderer,
+  fg,
   InputRenderable,
   InputRenderableEvents,
   ScrollBoxRenderable,
+  StyledText,
   TextAttributes,
   TextRenderable,
 } from '@opentui/core';
@@ -600,13 +602,19 @@ function updateUI(messages: ChatLine[]): void {
   clearScrollBox(chatScroll);
   for (let i = 0; i < messages.length; i++) {
     const msg = messages[i]!;
+    let rendered: TextRenderable | BoxRenderable;
     if (browseModeActive && i === browseSelectedIdx) {
-      // Highlight the selected message with a "> " prefix
-      const highlighted = renderHighlightedChatLine(renderer, msg);
-      chatScroll.add(highlighted);
+      rendered = renderHighlightedChatLine(renderer, msg);
     } else {
-      chatScroll.add(renderChatLine(renderer, msg));
+      rendered = renderChatLine(renderer, msg);
     }
+    if (typeof msg !== 'string' && msg.rawMsg) {
+      const rawMsg = msg.rawMsg;
+      rendered.onMouseDown = (e) => {
+        if (e.button === 0) openChatterInfoModal(rawMsg);
+      };
+    }
+    chatScroll.add(rendered);
   }
 
   // Browse mode status indicator
@@ -3155,6 +3163,28 @@ function openChatterInfoModal(msg: ChatMessage): void {
     return 'white';
   };
 
+  // Tab state — declared first so they're in scope for renderTabBar and box setup
+  let activeTab: 'session' | 'alltime' = 'session';
+  let tabSessionCount = 0;
+  let tabAlltimeCount = 0;
+
+  function renderTabBar(sessionCount: number, alltimeCount: number): StyledText {
+    const sessionColor = activeTab === 'session' ? 'cyan' : '#555555';
+    const alltimeColor = activeTab === 'alltime' ? 'cyan' : '#555555';
+    return new StyledText([
+      fg(sessionColor)(`  [S] Session (${sessionCount})  `),
+      fg(alltimeColor)(`[A] All time (${alltimeCount})`),
+    ]);
+  }
+
+  // Message scroll box — declared before box setup so box.add(msgScroll) is valid
+  const msgScroll = new ScrollBoxRenderable(renderer, {
+    stickyScroll: false,
+    stickyStart: 'top',
+    flexGrow: 1,
+    minHeight: 5,
+  });
+
   const box = new BoxRenderable(renderer, {
     position: 'absolute',
     top: '5%',
@@ -3172,29 +3202,23 @@ function openChatterInfoModal(msg: ChatMessage): void {
     title: ' Chatter Info ',
   });
 
-  // Loading placeholder
-  const loadingText = new TextRenderable(renderer, {
+  // All four structural nodes are added upfront so the yoga layout is
+  // established once. The async callback only updates .content — no add/remove.
+  const infoText = new TextRenderable(renderer, {
     content: `  Loading info for @${msg.username}...`,
     fg: 'cyan',
+    wrapMode: 'none',
   });
-  box.add(loadingText);
+  const tabBarTextNode = new TextRenderable(renderer, { content: '' });
+  box.add(infoText);
+  box.add(tabBarTextNode);
+  box.add(msgScroll);
+  box.add(new TextRenderable(renderer, {
+    content: '  [S] session  [A] all-time  [↑↓] scroll  [Esc] close',
+    fg: '#888888',
+  }));
   renderer.root.add(box);
   activeChatterInfoModal = { box };
-
-  // Tab state
-  let activeTab: 'session' | 'alltime' = 'session';
-
-  // Tab bar text nodes (created after info rows, populated in async block)
-  let sessionTabText: TextRenderable | null = null;
-  let alltimeTabText: TextRenderable | null = null;
-
-  // Message scroll box
-  const msgScroll = new ScrollBoxRenderable(renderer, {
-    stickyScroll: false,
-    stickyStart: 'top',
-    flexGrow: 1,
-    minHeight: 5,
-  });
 
   // Helper: fill the message scroll with messages for the given tab
   function fillMessageScroll(tab: 'session' | 'alltime', platform: string, userId: string): void {
@@ -3251,8 +3275,7 @@ function openChatterInfoModal(msg: ChatMessage): void {
     if (sequence === 's' || sequence === 'S') {
       if (activeTab !== 'session') {
         activeTab = 'session';
-        if (sessionTabText) sessionTabText.fg = 'cyan';
-        if (alltimeTabText) alltimeTabText.fg = '#555555';
+        tabBarTextNode.content = renderTabBar(tabSessionCount, tabAlltimeCount);
         fillMessageScroll('session', msg.platform, msg.userId);
       }
       return true;
@@ -3260,8 +3283,7 @@ function openChatterInfoModal(msg: ChatMessage): void {
     if (sequence === 'a' || sequence === 'A') {
       if (activeTab !== 'alltime') {
         activeTab = 'alltime';
-        if (sessionTabText) sessionTabText.fg = '#555555';
-        if (alltimeTabText) alltimeTabText.fg = 'cyan';
+        tabBarTextNode.content = renderTabBar(tabSessionCount, tabAlltimeCount);
         fillMessageScroll('alltime', msg.platform, msg.userId);
       }
       return true;
@@ -3279,15 +3301,6 @@ function openChatterInfoModal(msg: ChatMessage): void {
   };
 
   renderer.prependInputHandler(modalKeyHandler);
-
-  // Helper to make a row with a label + value
-  function makeInfoRow(label: string, value: string, valueFg: string): BoxRenderable {
-    const row = new BoxRenderable(renderer, { flexDirection: 'row' });
-    const labelPadded = `  ${label}`.padEnd(20);
-    row.add(new TextRenderable(renderer, { content: labelPadded, fg: '#888888' }));
-    row.add(new TextRenderable(renderer, { content: value, fg: valueFg }));
-    return row;
-  }
 
   // Async fetch & render
   void (async () => {
@@ -3310,7 +3323,6 @@ function openChatterInfoModal(msg: ChatMessage): void {
         }
 
         if (!info) {
-          // Construct minimal info from message data
           info = {
             platform: msg.platform,
             userId: msg.userId,
@@ -3321,98 +3333,75 @@ function openChatterInfoModal(msg: ChatMessage): void {
           };
         }
 
-        // Compute session stats and merge
         const stats = chatterCache.computeSessionStats(msg.platform, msg.userId, chatService.getMessageHistory());
         info.sessionMessageCount = stats.count;
         if (stats.firstSeenAt) info.sessionFirstSeenAt = stats.firstSeenAt;
 
         chatterCache.set(msg.platform, msg.userId, info);
       } else {
-        // Refresh session stats from cache hit
         const stats = chatterCache.computeSessionStats(msg.platform, msg.userId, chatService.getMessageHistory());
         info.sessionMessageCount = stats.count;
         if (stats.firstSeenAt) info.sessionFirstSeenAt = stats.firstSeenAt;
       }
 
-      // If modal was closed while fetching, bail out
       if (!activeChatterInfoModal) return;
 
-      // Clear loading text
-      box.remove(loadingText.id);
-
-      // Render info rows
+      // Build all info rows as a single multi-line StyledText so the yoga layout
+      // only needs to measure one node (avoids dynamic add/remove invalidation bugs).
       const userColor = info.color ?? 'white';
       const pColor = platColor(info.platform);
 
-      box.add(makeInfoRow('Platform:', info.platform, pColor));
-      box.add(makeInfoRow('Username:', `@${info.username}`, userColor));
+      type InfoRow = [string, string, string]; // [label, value, valueFg]
+      const rows: InfoRow[] = [
+        ['Platform:', info.platform, pColor],
+        ['Username:', `@${info.username}`, userColor],
+      ];
 
       if (info.accountCreatedAt !== undefined) {
         const dateStr = info.accountCreatedAt
           ? new Date(info.accountCreatedAt).toISOString().split('T')[0] ?? 'Unknown'
           : 'Unknown';
-        box.add(makeInfoRow('Account created:', dateStr, 'white'));
+        rows.push(['Account created:', dateStr, 'white']);
       }
 
-      box.add(makeInfoRow('Session messages:', String(info.sessionMessageCount), 'white'));
+      rows.push(['Session messages:', String(info.sessionMessageCount), 'white']);
 
       if (info.sessionFirstSeenAt) {
         const timeStr = new Date(info.sessionFirstSeenAt).toLocaleTimeString('en-US', {
           hour: '2-digit',
           minute: '2-digit',
         });
-        box.add(makeInfoRow('First seen:', timeStr, 'white'));
+        rows.push(['First seen:', timeStr, 'white']);
       } else {
-        box.add(makeInfoRow('First seen:', 'Unknown', '#888888'));
+        rows.push(['First seen:', 'Unknown', '#888888']);
       }
 
       if (info.badges && Object.keys(info.badges).length > 0) {
-        const badgeStr = Object.keys(info.badges).join(', ');
-        box.add(makeInfoRow('Badges:', badgeStr, 'white'));
+        rows.push(['Badges:', Object.keys(info.badges).join(', '), 'white']);
       }
 
       if (info.subscriberCount !== null && info.subscriberCount !== undefined) {
-        box.add(makeInfoRow('Subscribers:', info.subscriberCount.toLocaleString(), 'white'));
+        rows.push(['Subscribers:', info.subscriberCount.toLocaleString(), 'white']);
       }
 
-      // Tab bar
-      const sessionCount = info.sessionMessageCount;
-      const alltimeCount = messageLog.countForUser(msg.platform, msg.userId);
-
-      const tabBar = new BoxRenderable(renderer, { flexDirection: 'row' });
-      sessionTabText = new TextRenderable(renderer, {
-        content: `  [S] Session (${sessionCount})  `,
-        fg: 'cyan', // active by default
+      const chunks = rows.flatMap(([label, value, valueFg], i) => {
+        const labelPadded = (i > 0 ? '\n' : '') + `  ${label}`.padEnd(20);
+        return [fg('#888888')(labelPadded), fg(valueFg)(value)];
       });
-      alltimeTabText = new TextRenderable(renderer, {
-        content: `  [A] All time (${alltimeCount})  `,
-        fg: '#555555',
-      });
-      tabBar.add(sessionTabText);
-      tabBar.add(alltimeTabText);
-      box.add(tabBar);
+      infoText.content = new StyledText(chunks);
+      infoText.height = rows.length;
 
-      // Message scroll
-      box.add(msgScroll);
+      // Update tab bar
+      tabSessionCount = info.sessionMessageCount;
+      tabAlltimeCount = messageLog.countForUser(msg.platform, msg.userId);
+      tabBarTextNode.content = renderTabBar(tabSessionCount, tabAlltimeCount);
 
-      // Footer hint
-      box.add(new TextRenderable(renderer, {
-        content: '  [S] session  [A] all-time  [↑↓] scroll  [Esc] close',
-        fg: '#888888',
-      }));
-
-      // Populate initial tab
       fillMessageScroll('session', msg.platform, msg.userId);
 
     } catch (err) {
       if (!activeChatterInfoModal) return;
-      box.remove(loadingText.id);
-      box.add(new TextRenderable(renderer, {
-        content: `  Error loading info: ${String(err)}`,
-        fg: 'red',
-      }));
-      box.add(new TextRenderable(renderer, { content: '', fg: 'white' }));
-      box.add(new TextRenderable(renderer, { content: '  [Esc] close', fg: '#888888' }));
+      infoText.content = `  Error loading info: ${String(err)}`;
+      infoText.fg = 'red';
     }
   })();
 }
@@ -3421,7 +3410,7 @@ function openChatterInfoModal(msg: ChatMessage): void {
 
 let isRunning = true;
 type ChatLinePart = { content: string; fg: string };
-type ChatLine = string | ChatLinePart | { parts: ChatLinePart[] };
+type ChatLine = string | (ChatLinePart & { rawMsg?: ChatMessage }) | { parts: ChatLinePart[]; rawMsg?: ChatMessage };
 const lastMessages: ChatLine[] = [];
 let cliRenderer: Awaited<ReturnType<typeof createCliRenderer>> | null = null;
 const inputHistory: string[] = [];
@@ -3439,13 +3428,7 @@ function platformColor(platform: string): string {
   return 'white';
 }
 
-function transformMessage(msg: {
-  platform: string;
-  username: string;
-  message: string;
-  timestamp: number;
-  color?: string;
-}) {
+function transformMessage(msg: ChatMessage): ChatLine {
   const platColor = platformColor(msg.platform);
   const userColor = msg.color ?? platColor;
   const showTs = boolSetting(settings.get('chat.timestamps.visible', true), true);
@@ -3458,13 +3441,14 @@ function transformMessage(msg: {
     tsStr = ` ${hh}:${mi}:${ss}`;
   }
   if (userColor === platColor) {
-    return { content: `[${msg.platform}]${tsStr} ${msg.username}: ${msg.message}`, fg: platColor };
+    return { content: `[${msg.platform}]${tsStr} ${msg.username}: ${msg.message}`, fg: platColor, rawMsg: msg };
   }
   return {
     parts: [
       { content: `[${msg.platform}]${tsStr} `, fg: platColor },
       { content: `${msg.username}: ${msg.message}`, fg: userColor },
     ],
+    rawMsg: msg,
   };
 }
 
@@ -3753,6 +3737,21 @@ async function main() {
   console.warn = noop;
   console.error = noop;
   console.debug = noop;
+
+  if (process.env.YASH_TEST_MESSAGES) {
+    const fakeMsg = {
+      id: 'test-1',
+      platform: 'twitch',
+      userId: 'u123',
+      username: 'testuser',
+      message: 'Hello this is a test message click me!',
+      timestamp: Date.now(),
+      color: '#FF6B6B',
+    };
+    lastMessages.push(transformMessage(fakeMsg));
+    lastRawMessages.push(fakeMsg);
+    updateUI(lastMessages);
+  }
 
   chatService.subscribeToMessages((msg) => {
     lastMessages.push(transformMessage(msg));
