@@ -35,6 +35,21 @@ export interface ChatMessage {
   color?: string;
 }
 
+export interface ChatterInfo {
+  platform: string;
+  userId: string;
+  username: string;
+  color?: string;
+  badges?: Record<string, string>;
+  accountCreatedAt?: Date | null;
+  description?: string | null;
+  profileImageUrl?: string | null;
+  subscriberCount?: number | null;
+  videoCount?: number | null;
+  sessionMessageCount: number;
+  sessionFirstSeenAt?: Date;
+}
+
 export interface WebhookConfig {
   url: string;
   topics: string[];
@@ -119,4 +134,6 @@ export interface PlatformProvider {
    * @returns Array of markers (may be empty). Returns [] on unsupported platforms.
    */
   getMarkers(options?: GetMarkersOptions): Promise<StreamMarker[]>;
+
+  fetchChatterInfo?(userId: string, username: string): Promise<ChatterInfo | null>;
 }

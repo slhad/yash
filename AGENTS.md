@@ -22,6 +22,26 @@ When beginning work in this repository:
 7. **ALWAYS Write** ongoing work/parts in `[tmp]/ONGOING.md` to keep track of everything
 8. **Clean `[tmp]/ONGOING.md` immediately after completion is verified** — remove each item as soon as the work is confirmed done by tests, runtime checks, or explicit user verification; do not leave completed items in the file
 
+## No Binary Files Policy
+
+Never commit binary files (images, GIFs, fonts, archives, compiled artifacts, etc.) to the repository.
+
+- Store temporary assets in `[tmp]` — it is gitignored and safe.
+- For demo GIFs or screenshots that need to be publicly hosted (e.g. inlined in a PR), upload them to the dedicated **`screenshots` release** — a permanent prerelease used exclusively as an asset store:
+  ```bash
+  gh release upload screenshots tmp/my-demo.gif --clobber
+  # URL will be: https://github.com/slhad/yash/releases/download/screenshots/my-demo.gif
+  ```
+  The `screenshots` release already exists at https://github.com/slhad/yash/releases/tag/screenshots.
+  If it ever needs to be recreated:
+  ```bash
+  gh release create screenshots \
+    --title "Screenshots & Assets" \
+    --notes "Dedicated release for hosting screenshots, GIFs, and other media assets referenced in PRs and documentation. Not a software release." \
+    --prerelease
+  ```
+- Never create a `docs/`, `assets/`, or similar directory just to store binaries in git.
+
 ## External References
 
 - Kick event subscription docs: `https://docs.kick.com/events/subscribe-to-events`

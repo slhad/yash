@@ -35,6 +35,7 @@ import { defaultLogger } from '../utils/logger';
 import type {
   AuthResult,
   ChatMessage,
+  ChatterInfo,
   GetMarkersOptions,
   MetadataUpdateResult,
   PlatformProvider,
@@ -794,6 +795,37 @@ export class TwitchProvider implements PlatformProvider {
       lastError: this.lastError,
       connectionStatus: this.connectionStatus,
     };
+  }
+
+  // ---------------------------------------------------------------------------
+  // fetchChatterInfo — resolve Twitch user metadata via Helix
+  // ---------------------------------------------------------------------------
+  async fetchChatterInfo(userId: string, username: string): Promise<ChatterInfo | null> {
+    if (!this.apiClient) return null;
+
+    const partial: ChatterInfo = {
+      platform: 'twitch',
+      userId,
+      username,
+      sessionMessageCount: 0,
+    };
+
+    try {
+      let user = await this.apiClient.users.getUserById(userId);
+      if (!user) {
+        user = await this.apiClient.users.getUserByName(username);
+      }
+      if (!user) return partial;
+
+      return {
+        ...partial,
+        accountCreatedAt: user.creationDate,
+        description: user.description,
+        profileImageUrl: user.profilePictureUrl,
+      };
+    } catch {
+      return partial;
+    }
   }
 
   // ---------------------------------------------------------------------------

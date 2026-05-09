@@ -5,13 +5,18 @@ import {
   BoxRenderable,
   type CliRenderer,
   createCliRenderer,
+  fg,
   InputRenderable,
   InputRenderableEvents,
   ScrollBoxRenderable,
+  StyledText,
   TextAttributes,
   TextRenderable,
 } from '@opentui/core';
 import { YT_CATEGORY_NAMES } from './platforms/youtube';
+import type { ChatMessage } from './platforms/base';
+import { ChatterCache } from './services/chatter-cache';
+import { messageLog } from './services/message-log';
 import {
   authService,
   chatService,
@@ -204,10 +209,13 @@ interface SettingsModal {
 let activeModal: TwitchSetupModal | null = null;
 let activeStreamModal: StreamModal | null = null;
 let activeSettingsModal: SettingsModal | null = null;
+let activeChatterInfoModal: { box: BoxRenderable } | null = null;
+
+const chatterCache = new ChatterCache();
 
 function ensureMainInputFocus(): void {
   if (!uiNodes) return;
-  if (activeModal || activeStreamModal || activeSettingsModal) return;
+  if (activeModal || activeStreamModal || activeSettingsModal || activeChatterInfoModal) return;
   if (!uiNodes.inputEl.focused) {
     uiNodes.inputEl.focus();
   }
@@ -268,7 +276,7 @@ function updateInputAssist(): void {
 // Builds the complete layout tree once and attaches it to renderer.root.
 // Called once at startup; called again only on structural settings changes.
 
-function initUI(renderer: CliRenderer, messages: string[]): UINodes {
+function initUI(renderer: CliRenderer, messages: ChatLine[]): UINodes {
   // Tear down any previous tree
   if (uiNodes) {
     try {
@@ -537,7 +545,7 @@ function _fillSidebar(
 // ─── updateUI ────────────────────────────────────────────────────────────────
 // Mutates existing nodes in-place — never removes/re-adds root, so no flicker.
 
-function updateUI(messages: string[]): void {
+function updateUI(messages: ChatLine[]): void {
   if (!uiNodes) return;
   const {
     renderer,
@@ -592,8 +600,31 @@ function updateUI(messages: string[]): void {
 
   // Chat: clear and refill
   clearScrollBox(chatScroll);
-  for (const msg of messages) {
-    chatScroll.add(renderChatLine(renderer, msg));
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i]!;
+    let rendered: TextRenderable | BoxRenderable;
+    if (browseModeActive && i === browseSelectedIdx) {
+      rendered = renderHighlightedChatLine(renderer, msg);
+    } else {
+      rendered = renderChatLine(renderer, msg);
+    }
+    if (typeof msg !== 'string' && msg.rawMsg) {
+      const rawMsg = msg.rawMsg;
+      rendered.onMouseDown = (e) => {
+        if (e.button === 0) openChatterInfoModal(rawMsg);
+      };
+    }
+    chatScroll.add(rendered);
+  }
+
+  // Browse mode status indicator
+  const { composeTargetText } = uiNodes;
+  if (browseModeActive) {
+    composeTargetText.content = '[BROWSE ↑↓ Enter=info Esc=exit] ';
+    composeTargetText.fg = 'cyan';
+    composeTargetText.visible = true;
+  } else {
+    updateInputAssist();
   }
 
   // Sidebar: clear and refill
@@ -2585,6 +2616,9 @@ async function handleCommand(trimmed: string): Promise<void> {
       '[help]   /markers clear | [all|youtube|twitch|kick] [limit]  — list markers or clear YouTube chapters',
     );
     lastMessages.push('[help]   /info  — show current stream/channel info from all providers');
+    lastMessages.push(
+      '[help]   /inject <twitch|youtube|kick> <username> <message>  — inject a fake chat message for offline testing',
+    );
     lastMessages.push('[help]   /settings  — open the settings modal');
     lastMessages.push('[help]   /settings get <key>  — get a setting value');
     lastMessages.push('[help]   /settings set <key> <value>  — set a setting value');
@@ -2599,6 +2633,36 @@ async function handleCommand(trimmed: string): Promise<void> {
       } catch (err) {
         lastMessages.push(`[system] ${platform}: error: ${String(err)}`);
       }
+    }
+  } else if (cmd === '/inject') {
+    // /inject <platform> <username> <message text>
+    const INJECT_PLATFORMS = ['twitch', 'youtube', 'kick'];
+    const platform = (parts[1] ?? '').toLowerCase();
+    const username = parts[2] ?? '';
+    const messageText = parts.slice(3).join(' ');
+
+    if (!platform || !INJECT_PLATFORMS.includes(platform)) {
+      lastMessages.push(
+        `[inject] Invalid or missing platform. Usage: /inject <twitch|youtube|kick> <username> <message>`,
+      );
+    } else if (!username) {
+      lastMessages.push('[inject] Missing username. Usage: /inject <platform> <username> <message>');
+    } else if (!messageText) {
+      lastMessages.push(
+        '[inject] Missing message text. Usage: /inject <platform> <username> <message>',
+      );
+    } else {
+      const INJECT_COLORS = ['#FF7F50', '#9370DB', '#3CB371', '#FF69B4', '#00CED1', '#FFD700'];
+      const color = INJECT_COLORS[username.length % INJECT_COLORS.length];
+      chatService.injectMessage({
+        id: `inject_${Date.now()}`,
+        platform,
+        userId: `${platform}_test_${username.toLowerCase()}`,
+        username,
+        message: messageText,
+        timestamp: Date.now(),
+        color,
+      });
     }
   } else {
     lastMessages.push(`[system] Unknown command: ${trimmed}`);
@@ -3015,6 +3079,10 @@ function openSettingsModal(): void {
         lastMessages.push('[settings] No changes.');
       } else {
         lastMessages.push(`[settings] Updated: ${changedKeys.join(', ')}`);
+        if (changedKeys.includes('chat.timestamps.visible')) {
+          lastMessages.length = 0;
+          for (const raw of lastRawMessages) lastMessages.push(transformMessage(raw));
+        }
       }
     } catch (err) {
       lastMessages.push(`[settings] Error: ${String(err)}`);
@@ -3082,15 +3150,276 @@ function openSettingsModal(): void {
   }
 }
 
+// ─── Chatter info modal ──────────────────────────────────────────────────────
+
+function openChatterInfoModal(msg: ChatMessage): void {
+  if (!uiNodes || activeModal || activeStreamModal || activeSettingsModal || activeChatterInfoModal) return;
+  const { renderer } = uiNodes;
+
+  const platColor = (p: string): string => {
+    if (p === 'twitch') return '#9146FF';
+    if (p === 'youtube') return '#FF0000';
+    if (p === 'kick') return '#53FC18';
+    return 'white';
+  };
+
+  // Tab state — declared first so they're in scope for renderTabBar and box setup
+  let activeTab: 'session' | 'alltime' = 'session';
+  let tabSessionCount = 0;
+  let tabAlltimeCount = 0;
+
+  function renderTabBar(sessionCount: number, alltimeCount: number): StyledText {
+    const sessionColor = activeTab === 'session' ? 'cyan' : '#555555';
+    const alltimeColor = activeTab === 'alltime' ? 'cyan' : '#555555';
+    return new StyledText([
+      fg(sessionColor)(`  [S] Session (${sessionCount})  `),
+      fg(alltimeColor)(`[A] All time (${alltimeCount})`),
+    ]);
+  }
+
+  // Message scroll box — declared before box setup so box.add(msgScroll) is valid
+  const msgScroll = new ScrollBoxRenderable(renderer, {
+    stickyScroll: false,
+    stickyStart: 'top',
+    flexGrow: 1,
+    minHeight: 5,
+  });
+
+  const box = new BoxRenderable(renderer, {
+    position: 'absolute',
+    top: '5%',
+    left: '8%',
+    width: '84%',
+    zIndex: 100,
+    border: true,
+    borderStyle: 'rounded',
+    borderColor: 'cyan',
+    backgroundColor: '#1a1a1a',
+    shouldFill: true,
+    padding: 1,
+    flexDirection: 'column',
+    gap: 0,
+    title: ' Chatter Info ',
+  });
+
+  // All four structural nodes are added upfront so the yoga layout is
+  // established once. The async callback only updates .content — no add/remove.
+  const infoText = new TextRenderable(renderer, {
+    content: `  Loading info for @${msg.username}...`,
+    fg: 'cyan',
+    wrapMode: 'none',
+  });
+  const tabBarTextNode = new TextRenderable(renderer, { content: '' });
+  box.add(infoText);
+  box.add(tabBarTextNode);
+  box.add(msgScroll);
+  box.add(new TextRenderable(renderer, {
+    content: '  [S] session  [A] all-time  [↑↓] scroll  [Esc] close',
+    fg: '#888888',
+  }));
+  renderer.root.add(box);
+  activeChatterInfoModal = { box };
+
+  // Helper: fill the message scroll with messages for the given tab
+  function fillMessageScroll(tab: 'session' | 'alltime', platform: string, userId: string): void {
+    // Clear existing children
+    for (const child of msgScroll.getChildren()) {
+      msgScroll.remove(child.id);
+    }
+
+    let messages: ChatMessage[];
+    if (tab === 'session') {
+      messages = chatService.getMessageHistory()
+        .filter(m => m.platform === platform && m.userId === userId);
+      // already oldest-first from getMessageHistory, no need to reverse
+    } else {
+      // DB returns newest-first; reverse for oldest-first display
+      messages = messageLog.getForUser(platform, userId, 200).slice().reverse();
+    }
+
+    if (messages.length === 0) {
+      msgScroll.add(new TextRenderable(renderer, {
+        content: '  (no messages)',
+        fg: '#888888',
+      }));
+      return;
+    }
+
+    for (const m of messages) {
+      const date = new Date(m.timestamp);
+      const yyyy = date.getFullYear();
+      const mo = String(date.getMonth() + 1).padStart(2, '0');
+      const dd = String(date.getDate()).padStart(2, '0');
+      const hh = String(date.getHours()).padStart(2, '0');
+      const mi = String(date.getMinutes()).padStart(2, '0');
+      const ss = String(date.getSeconds()).padStart(2, '0');
+      const timeStr = `${yyyy}-${mo}-${dd} - ${hh}:${mi}:${ss}  `;
+
+      const row = new BoxRenderable(renderer, { flexDirection: 'row' });
+      row.add(new TextRenderable(renderer, { content: timeStr, fg: '#888888' }));
+      row.add(new TextRenderable(renderer, { content: m.message, fg: 'white' }));
+      msgScroll.add(row);
+    }
+  }
+
+  const modalKeyHandler = (sequence: string): boolean => {
+    if (!activeChatterInfoModal) return false;
+    if (sequence === '\x1b' || sequence === '\x1b\x1b') {
+      renderer.removeInputHandler(modalKeyHandler);
+      renderer.root.remove(box.id);
+      activeChatterInfoModal = null;
+      ensureMainInputFocus();
+      return true;
+    }
+    // Tab switching
+    if (sequence === 's' || sequence === 'S') {
+      if (activeTab !== 'session') {
+        activeTab = 'session';
+        tabBarTextNode.content = renderTabBar(tabSessionCount, tabAlltimeCount);
+        fillMessageScroll('session', msg.platform, msg.userId);
+      }
+      return true;
+    }
+    if (sequence === 'a' || sequence === 'A') {
+      if (activeTab !== 'alltime') {
+        activeTab = 'alltime';
+        tabBarTextNode.content = renderTabBar(tabSessionCount, tabAlltimeCount);
+        fillMessageScroll('alltime', msg.platform, msg.userId);
+      }
+      return true;
+    }
+    // Arrow key scrolling
+    if (sequence === '\x1b[A') {
+      msgScroll.scrollBy(-3);
+      return true;
+    }
+    if (sequence === '\x1b[B') {
+      msgScroll.scrollBy(3);
+      return true;
+    }
+    return false;
+  };
+
+  renderer.prependInputHandler(modalKeyHandler);
+
+  // Async fetch & render
+  void (async () => {
+    try {
+      // Try cache first
+      let info = chatterCache.get(msg.platform, msg.userId);
+
+      if (!info) {
+        // Fetch from provider
+        let provider: { fetchChatterInfo?: (userId: string, username: string) => Promise<import('./platforms/base').ChatterInfo | null> } | null = null;
+        if (msg.platform === 'twitch') provider = twitch;
+        else if (msg.platform === 'youtube') provider = youtube;
+        else if (msg.platform === 'kick') provider = kick;
+
+        if (provider?.fetchChatterInfo) {
+          const fetched = await provider.fetchChatterInfo(msg.userId, msg.username);
+          if (fetched) {
+            info = fetched;
+          }
+        }
+
+        if (!info) {
+          info = {
+            platform: msg.platform,
+            userId: msg.userId,
+            username: msg.username,
+            color: msg.color,
+            badges: msg.badges,
+            sessionMessageCount: 0,
+          };
+        }
+
+        const stats = chatterCache.computeSessionStats(msg.platform, msg.userId, chatService.getMessageHistory());
+        info.sessionMessageCount = stats.count;
+        if (stats.firstSeenAt) info.sessionFirstSeenAt = stats.firstSeenAt;
+
+        chatterCache.set(msg.platform, msg.userId, info);
+      } else {
+        const stats = chatterCache.computeSessionStats(msg.platform, msg.userId, chatService.getMessageHistory());
+        info.sessionMessageCount = stats.count;
+        if (stats.firstSeenAt) info.sessionFirstSeenAt = stats.firstSeenAt;
+      }
+
+      if (!activeChatterInfoModal) return;
+
+      // Build all info rows as a single multi-line StyledText so the yoga layout
+      // only needs to measure one node (avoids dynamic add/remove invalidation bugs).
+      const userColor = info.color ?? 'white';
+      const pColor = platColor(info.platform);
+
+      type InfoRow = [string, string, string]; // [label, value, valueFg]
+      const rows: InfoRow[] = [
+        ['Platform:', info.platform, pColor],
+        ['Username:', `@${info.username}`, userColor],
+      ];
+
+      if (info.accountCreatedAt !== undefined) {
+        const dateStr = info.accountCreatedAt
+          ? new Date(info.accountCreatedAt).toISOString().split('T')[0] ?? 'Unknown'
+          : 'Unknown';
+        rows.push(['Account created:', dateStr, 'white']);
+      }
+
+      rows.push(['Session messages:', String(info.sessionMessageCount), 'white']);
+
+      if (info.sessionFirstSeenAt) {
+        const timeStr = new Date(info.sessionFirstSeenAt).toLocaleTimeString('en-US', {
+          hour: '2-digit',
+          minute: '2-digit',
+        });
+        rows.push(['First seen:', timeStr, 'white']);
+      } else {
+        rows.push(['First seen:', 'Unknown', '#888888']);
+      }
+
+      if (info.badges && Object.keys(info.badges).length > 0) {
+        rows.push(['Badges:', Object.keys(info.badges).join(', '), 'white']);
+      }
+
+      if (info.subscriberCount !== null && info.subscriberCount !== undefined) {
+        rows.push(['Subscribers:', info.subscriberCount.toLocaleString(), 'white']);
+      }
+
+      const chunks = rows.flatMap(([label, value, valueFg], i) => {
+        const labelPadded = (i > 0 ? '\n' : '') + `  ${label}`.padEnd(20);
+        return [fg('#888888')(labelPadded), fg(valueFg)(value)];
+      });
+      infoText.content = new StyledText(chunks);
+      infoText.height = rows.length;
+
+      // Update tab bar
+      tabSessionCount = info.sessionMessageCount;
+      tabAlltimeCount = messageLog.countForUser(msg.platform, msg.userId);
+      tabBarTextNode.content = renderTabBar(tabSessionCount, tabAlltimeCount);
+
+      fillMessageScroll('session', msg.platform, msg.userId);
+
+    } catch (err) {
+      if (!activeChatterInfoModal) return;
+      infoText.content = `  Error loading info: ${String(err)}`;
+      infoText.fg = 'red';
+    }
+  })();
+}
+
 // ─── Main ────────────────────────────────────────────────────────────────────
 
 let isRunning = true;
 type ChatLinePart = { content: string; fg: string };
-type ChatLine = string | ChatLinePart | { parts: ChatLinePart[] };
+type ChatLine = string | (ChatLinePart & { rawMsg?: ChatMessage }) | { parts: ChatLinePart[]; rawMsg?: ChatMessage };
 const lastMessages: ChatLine[] = [];
 let cliRenderer: Awaited<ReturnType<typeof createCliRenderer>> | null = null;
 const inputHistory: string[] = [];
 let historyIndex = -1;
+
+// ─── Browse mode state ───────────────────────────────────────────────────────
+let browseModeActive = false;
+let browseSelectedIdx: number | null = null; // index into lastMessages
+let lastRawMessages: ChatMessage[] = []; // parallel to lastMessages (only chat platform messages)
 
 function platformColor(platform: string): string {
   if (platform === 'youtube') return 'red';
@@ -3099,22 +3428,27 @@ function platformColor(platform: string): string {
   return 'white';
 }
 
-function transformMessage(msg: {
-  platform: string;
-  username: string;
-  message: string;
-  color?: string;
-}) {
+function transformMessage(msg: ChatMessage): ChatLine {
   const platColor = platformColor(msg.platform);
   const userColor = msg.color ?? platColor;
+  const showTs = boolSetting(settings.get('chat.timestamps.visible', true), true);
+  let tsStr = '';
+  if (showTs) {
+    const d = new Date(msg.timestamp);
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mi = String(d.getMinutes()).padStart(2, '0');
+    const ss = String(d.getSeconds()).padStart(2, '0');
+    tsStr = ` ${hh}:${mi}:${ss}`;
+  }
   if (userColor === platColor) {
-    return { content: `[${msg.platform}] ${msg.username}: ${msg.message}`, fg: platColor };
+    return { content: `[${msg.platform}]${tsStr} ${msg.username}: ${msg.message}`, fg: platColor, rawMsg: msg };
   }
   return {
     parts: [
-      { content: `[${msg.platform}] `, fg: platColor },
+      { content: `[${msg.platform}]${tsStr} `, fg: platColor },
       { content: `${msg.username}: ${msg.message}`, fg: userColor },
     ],
+    rawMsg: msg,
   };
 }
 
@@ -3140,6 +3474,17 @@ function renderChatLine(renderer: CliRenderer, msg: ChatLine): TextRenderable | 
     return row;
   }
   return new TextRenderable(renderer, { content: msg.content, fg: msg.fg });
+}
+
+function renderHighlightedChatLine(
+  renderer: CliRenderer,
+  msg: ChatLine,
+): TextRenderable | BoxRenderable {
+  // Prefix the line with "> " indicator in cyan to show selection
+  const row = new BoxRenderable(renderer, { flexDirection: 'row' });
+  row.add(new TextRenderable(renderer, { content: '> ', fg: 'cyan', attributes: TextAttributes.BOLD }));
+  row.add(renderChatLine(renderer, msg));
+  return row;
 }
 
 function compactObject<T extends Record<string, unknown>>(value: T): Record<string, unknown> {
@@ -3293,8 +3638,31 @@ async function main() {
           return true;
         }
 
+        // Shift+Up (\x1b[1;2A) — enter browse mode
+        if (sequence === '\x1b[1;2A' && !activeModal && !activeStreamModal && !activeSettingsModal) {
+          browseModeActive = true;
+          browseSelectedIdx = lastMessages.length > 0 ? lastMessages.length - 1 : null;
+          updateUI(lastMessages);
+          return true;
+        }
+
+        // Shift+Down (\x1b[1;2B) — exit browse mode
+        if (sequence === '\x1b[1;2B' && !activeModal && !activeStreamModal && !activeSettingsModal) {
+          browseModeActive = false;
+          browseSelectedIdx = null;
+          updateUI(lastMessages);
+          return true;
+        }
+
         if (sequence === '\x1b[A') {
-          // Up arrow — go back in history
+          // Up arrow — in browse mode: navigate up; otherwise: go back in history
+          if (browseModeActive) {
+            if (browseSelectedIdx !== null) {
+              browseSelectedIdx = Math.max(0, browseSelectedIdx - 1);
+            }
+            updateUI(lastMessages);
+            return true;
+          }
           if (inputHistory.length === 0) return true;
           if (historyIndex === -1) historyIndex = inputHistory.length - 1;
           else if (historyIndex > 0) historyIndex--;
@@ -3305,7 +3673,14 @@ async function main() {
         }
 
         if (sequence === '\x1b[B') {
-          // Down arrow — go forward in history
+          // Down arrow — in browse mode: navigate down; otherwise: go forward in history
+          if (browseModeActive) {
+            if (browseSelectedIdx !== null) {
+              browseSelectedIdx = Math.min(lastMessages.length - 1, browseSelectedIdx + 1);
+            }
+            updateUI(lastMessages);
+            return true;
+          }
           if (historyIndex === -1) return true;
           historyIndex++;
           if (historyIndex >= inputHistory.length) {
@@ -3316,6 +3691,14 @@ async function main() {
             uiNodes.inputEl.value = entry;
           }
           updateInputAssist();
+          return true;
+        }
+
+        // Escape — exit browse mode if active
+        if ((sequence === '\x1b' || sequence === '\x1b\x1b') && browseModeActive) {
+          browseModeActive = false;
+          browseSelectedIdx = null;
+          updateUI(lastMessages);
           return true;
         }
 
@@ -3355,8 +3738,24 @@ async function main() {
   console.error = noop;
   console.debug = noop;
 
+  if (process.env.YASH_TEST_MESSAGES) {
+    const fakeMsg = {
+      id: 'test-1',
+      platform: 'twitch',
+      userId: 'u123',
+      username: 'testuser',
+      message: 'Hello this is a test message click me!',
+      timestamp: Date.now(),
+      color: '#FF6B6B',
+    };
+    lastMessages.push(transformMessage(fakeMsg));
+    lastRawMessages.push(fakeMsg);
+    updateUI(lastMessages);
+  }
+
   chatService.subscribeToMessages((msg) => {
     lastMessages.push(transformMessage(msg));
+    lastRawMessages.push(msg);
   });
 
   obsService.subscribeToMessages((event) => {
@@ -3397,6 +3796,15 @@ async function main() {
   });
 
   uiNodes.inputEl.on(InputRenderableEvents.ENTER, async () => {
+    // Browse mode: Enter opens chatter info for the selected message
+    if (browseModeActive && browseSelectedIdx !== null) {
+      const rawMsg = lastRawMessages[browseSelectedIdx];
+      if (rawMsg !== undefined) {
+        openChatterInfoModal(rawMsg);
+      }
+      return;
+    }
+
     const rawValue = uiNodes!.inputEl.value;
     let trimmed = rawValue.trim();
     if (trimmed.startsWith('/')) {
