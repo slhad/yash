@@ -29,6 +29,9 @@ jobs:
       - name: Install Playwright browsers
         run: npx playwright install --with-deps
 
+      - name: Build web bundle
+        run: bun run build:web
+
       - name: Prepare local config
         run: |
           if [ -f config.example.json ] && [ ! -f config.json ]; then
@@ -52,6 +55,8 @@ jobs:
 
       - name: Run Playwright tests
         run: npx playwright test --reporter=list
+        env:
+          RUN_PLAYWRIGHT: '1'
 
       - name: Upload Playwright report
         if: always()
