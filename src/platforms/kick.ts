@@ -37,6 +37,7 @@ import { SmeeRelay } from '../utils/smee';
 import type {
   AuthResult,
   ChatMessage,
+  ChatterInfo,
   GetMarkersOptions,
   MetadataUpdateResult,
   PlatformProvider,
@@ -845,6 +846,54 @@ export class KickProvider implements PlatformProvider {
   /** Returns the smee.io webhook URL to register in Kick app settings, or null if not started. */
   getWebhookUrl(): string | null {
     return this.webhookUrl;
+  }
+
+  // ---------------------------------------------------------------------------
+  // fetchChatterInfo — public channel lookup via kick.com/api/v2
+  // ---------------------------------------------------------------------------
+  async fetchChatterInfo(userId: string, username: string): Promise<ChatterInfo | null> {
+    if (!this.isAuthenticatedFlag) return null;
+
+    const partial: ChatterInfo = {
+      platform: 'kick',
+      userId,
+      username,
+      sessionMessageCount: 0,
+    };
+
+    interface KickChannelApiResponse {
+      followers_count?: number;
+      user?: {
+        bio?: string | null;
+        profile_pic?: string | null;
+      };
+    }
+
+    try {
+      const accessToken = await this._getAccessToken();
+      if (!accessToken) return partial;
+
+      const slug = username.toLowerCase();
+      const resp = await fetch(`https://kick.com/api/v2/channels/${slug}`, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          Accept: 'application/json',
+        },
+      });
+
+      if (!resp.ok) return partial;
+
+      const data = (await resp.json()) as KickChannelApiResponse;
+
+      return {
+        ...partial,
+        description: data.user?.bio ?? null,
+        profileImageUrl: data.user?.profile_pic ?? null,
+        subscriberCount: data.followers_count ?? null,
+      };
+    } catch {
+      return partial;
+    }
   }
 
   // ---------------------------------------------------------------------------
