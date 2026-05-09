@@ -1,4 +1,5 @@
 import type { ChatMessage, PlatformProvider } from '../platforms/base';
+import { messageLog } from './message-log';
 
 export class ChatService {
   private providers: Map<string, PlatformProvider> = new Map();
@@ -32,6 +33,11 @@ export class ChatService {
 
     // Add to history
     this.addToHistory(normalizedMessage);
+
+    // Persist to SQLite (skip injected test messages)
+    if (!normalizedMessage.id.startsWith('inject_')) {
+      messageLog.insert(normalizedMessage);
+    }
 
     // Notify all registered callbacks
     this.messageCallbacks.forEach((callback) => callback(normalizedMessage));
