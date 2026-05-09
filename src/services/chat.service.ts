@@ -147,4 +147,13 @@ export class ChatService {
   isPlatformRegistered(platform: string): boolean {
     return this.providers.has(platform);
   }
+
+  /**
+   * Inject a fake incoming message for offline testing.
+   * The message is processed through the same normalisation and subscriber
+   * pipeline as real platform messages.
+   */
+  injectMessage(message: ChatMessage): void {
+    this.handleIncomingMessage(message);
+  }
 }

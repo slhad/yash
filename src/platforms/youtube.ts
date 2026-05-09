@@ -47,6 +47,7 @@ import {
 } from '../utils/youtubeLiveChatGrpc';
 import type {
   AuthResult,
+  ChatterInfo,
   ChatMessage,
   GetMarkersOptions,
   MetadataUpdateResult,
@@ -1734,6 +1735,76 @@ export class YouTubeProvider implements PlatformProvider {
       broadcastId: this.broadcastId,
       liveChatId: this.liveChatId,
     };
+  }
+
+  // ---------------------------------------------------------------------------
+  // ChatterInfo — fetch channel details for a given userId (channelId)
+  // ---------------------------------------------------------------------------
+
+  async fetchChatterInfo(userId: string, username: string): Promise<ChatterInfo | null> {
+    if (!this.isAuthenticated() || !this.tokenData) return null;
+
+    const partial: ChatterInfo = {
+      platform: 'youtube',
+      userId,
+      username,
+      sessionMessageCount: 0,
+    };
+
+    try {
+      await this._refreshTokenIfNeeded();
+      const resp = await this._request(
+        `${YT_API}/channels?part=id,snippet,statistics&id=${encodeURIComponent(userId)}`,
+      );
+      if (!resp.ok) return partial;
+
+      const data = (await resp.json()) as {
+        items?: Array<{
+          id: string;
+          snippet?: {
+            title?: string;
+            description?: string;
+            publishedAt?: string;
+            thumbnails?: { default?: { url?: string } };
+          };
+          statistics?: {
+            subscriberCount?: string;
+            videoCount?: string;
+            hiddenSubscriberCount?: boolean;
+          };
+        }>;
+      };
+
+      const item = data.items?.[0];
+      if (!item) return partial;
+
+      const snippet = item.snippet;
+      const statistics = item.statistics;
+
+      const accountCreatedAt = snippet?.publishedAt ? new Date(snippet.publishedAt) : null;
+      const subscriberCount =
+        statistics?.hiddenSubscriberCount === true
+          ? null
+          : statistics?.subscriberCount != null
+            ? Number.parseInt(statistics.subscriberCount, 10)
+            : null;
+      const videoCount =
+        statistics?.videoCount != null ? Number.parseInt(statistics.videoCount, 10) : null;
+
+      return {
+        platform: 'youtube',
+        userId,
+        username,
+        accountCreatedAt,
+        description: snippet?.description ?? null,
+        profileImageUrl: snippet?.thumbnails?.default?.url ?? null,
+        subscriberCount,
+        videoCount,
+        sessionMessageCount: 0,
+      };
+    } catch {
+      return partial;
+    }
   }
 
   // ---------------------------------------------------------------------------

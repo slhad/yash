@@ -11,6 +11,7 @@ export const TUI_COMMANDS = [
   '/exit',
   '/help',
   '/info',
+  '/inject',
   '/logs',
   '/marker',
   '/markers',
@@ -23,6 +24,7 @@ export const TUI_COMMANDS = [
 export type TuiCommand = (typeof TUI_COMMANDS)[number];
 
 const PLATFORMS = ['youtube', 'twitch', 'kick', 'obs'];
+const INJECT_PLATFORMS = ['twitch', 'youtube', 'kick'];
 const MSG_TARGETS = ['all', 'youtube', 'twitch', 'kick'];
 const MARKERS_ARGS = ['clear', 'all', 'youtube', 'twitch', 'kick'];
 const SETTINGS_KEYS = [
@@ -103,6 +105,15 @@ export function getAutocomplete(input: string): { completion: string | null; hin
 
   if (cmd === '/connect') {
     return completeToken(PLATFORMS, restLower);
+  }
+
+  if (cmd === '/inject') {
+    if (!rest.includes(' ')) {
+      // First arg: platform
+      return completeToken(INJECT_PLATFORMS, restLower);
+    }
+    // After platform is chosen: free-form username + message — no hints
+    return { completion: null, hints: [] };
   }
 
   if (cmd === '/msg') {
