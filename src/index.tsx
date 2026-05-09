@@ -3219,9 +3219,13 @@ function openChatterInfoModal(msg: ChatMessage): void {
 
     for (const m of messages) {
       const date = new Date(m.timestamp);
+      const yyyy = date.getFullYear();
+      const mo = String(date.getMonth() + 1).padStart(2, '0');
+      const dd = String(date.getDate()).padStart(2, '0');
       const hh = String(date.getHours()).padStart(2, '0');
-      const mm = String(date.getMinutes()).padStart(2, '0');
-      const timeStr = `${hh}:${mm} `;
+      const mi = String(date.getMinutes()).padStart(2, '0');
+      const ss = String(date.getSeconds()).padStart(2, '0');
+      const timeStr = `${yyyy}-${mo}-${dd} - ${hh}:${mi}:${ss}  `;
 
       const row = new BoxRenderable(renderer, { flexDirection: 'row' });
       row.add(new TextRenderable(renderer, { content: timeStr, fg: '#888888' }));
