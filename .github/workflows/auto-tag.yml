@@ -1,0 +1,51 @@
+name: Auto Tag on Version Bump
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - package.json
+
+jobs:
+  detect:
+    name: Detect version bump
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      bumped: ${{ steps.version.outputs.bumped }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Detect version bump
+        id: version
+        run: |
+          VERSION=$(jq -r .version package.json)
+          PREV_VERSION=$(git show HEAD~1:package.json 2>/dev/null | jq -r .version || echo "")
+          echo "tag=v${VERSION}" >> $GITHUB_OUTPUT
+          if [ "$VERSION" != "$PREV_VERSION" ]; then
+            echo "bumped=true" >> $GITHUB_OUTPUT
+          else
+            echo "bumped=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create git tag
+        if: steps.version.outputs.bumped == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "${{ steps.version.outputs.tag }}"
+          git push origin "${{ steps.version.outputs.tag }}"
+
+  release:
+    name: Build and release
+    needs: detect
+    if: needs.detect.outputs.bumped == 'true'
+    uses: ./.github/workflows/release.yml
+    with:
+      tag_name: ${{ needs.detect.outputs.tag }}
+    permissions:
+      contents: write

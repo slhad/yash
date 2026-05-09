@@ -7,6 +7,11 @@ on:
   schedule:
     - cron: "17 2 * * *"
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      tag_name:
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -31,7 +36,13 @@ jobs:
         id: meta
         shell: bash
         run: |
-          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+          if [[ -n "${{ inputs.tag_name }}" ]]; then
+            version="${{ inputs.tag_name }}"
+            version="${version#v}"
+            release_tag="${{ inputs.tag_name }}"
+            artifact_name="yash-${{ inputs.tag_name }}-x86_64.AppImage"
+            is_release=true
+          elif [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
             version="${GITHUB_REF_NAME#v}"
             release_tag="${GITHUB_REF_NAME}"
             artifact_name="yash-${GITHUB_REF_NAME}-x86_64.AppImage"
