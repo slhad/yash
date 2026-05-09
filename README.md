@@ -86,13 +86,12 @@ flowchart TD
     K2 -- Success --> K3["Return applied/skipped field details"]
     K2 -- Error --> K4["Return provider error"]
 
-    Y --> Y1["List own liveBroadcasts and current liveStreams"]
-    Y1 --> Y2["Resolve saved YouTube stream key to streamId"]
-    Y2 --> Y3["Filter broadcasts to mutable lifecycle states: created, ready, testing, live"]
-    Y3 --> Y4{"Mutable broadcast bound to saved streamId exists?"}
-    Y4 -- Yes --> Y5["Pick best mutable bound broadcast"]
+    Y --> Y1["List own liveBroadcasts; resolve saved stream key to streamId via API"]
+    Y1 --> Y3["Filter broadcasts to mutable lifecycle states: created, ready, testing, live"]
+    Y3 --> Y4{"Any broadcast (mutable or not) bound to saved streamId?"}
+    Y4 -- Yes --> Y5["Pick best mutable broadcast bound to that streamId"]
     Y4 -- No --> Y6{"Any mutable broadcast exists at all?"}
-    Y6 -- Yes --> Y7["Pick best mutable unbound/other broadcast"]
+    Y6 -- Yes --> Y7["Pick best mutable broadcast (unbound or other)"]
     Y6 -- No --> Y8{"saved streamId available?"}
     Y8 -- No --> Y13["Return warning: no broadcast target found + recent broadcast references"]
     Y8 -- Yes --> Y9["Create fallback broadcast via liveBroadcasts.insert"]

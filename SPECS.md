@@ -241,6 +241,7 @@ Mutable settings live in `settings.json`, including `demo`, `chat.*`, `stream.*`
 | `KICK_CLIENT_ID` | `platforms.kick.clientId` |
 | `KICK_CLIENT_SECRET` | `platforms.kick.clientSecret` |
 | `KICK_REDIRECT_URI` | `platforms.kick.redirectUri` |
+| `YASH_TUI_ONLY` | When set to `1`, skips HTML page routes (`/`, `/unified`, `/sidebyside`); only API + OAuth endpoints are registered |
 
 ### Features
 - OAuth authentication flows for all platforms
@@ -320,7 +321,9 @@ src/
 │   ├── auth.service.ts
 │   ├── chat.service.ts
 │   ├── stream.service.ts
-│   └── obs.service.ts
+│   ├── obs.service.ts
+│   ├── chatter-cache.ts  # In-memory cache for chatter profile info (ChatterInfo)
+│   └── message-log.ts    # SQLite-backed message persistence
 ├── ui/                  # React components (Dashboard, StreamControls, ChatDisplay, MessageInput, StatusBar)
 ├── utils/
 │   ├── webCommands.ts   # Shared WebUI command module (consumed by main.tsx + served as /api/js/commands.js)
@@ -353,6 +356,21 @@ interface StreamMarker {
   url?: string;      // Deep-link to marker position in VOD (Twitch)
 }
 
+interface ChatterInfo {
+  platform: string;
+  userId: string;
+  username: string;
+  color?: string;
+  badges?: Record<string, string>;
+  accountCreatedAt?: Date | null;
+  description?: string | null;
+  profileImageUrl?: string | null;
+  subscriberCount?: number | null;
+  videoCount?: number | null;
+  sessionMessageCount: number;
+  sessionFirstSeenAt?: Date;
+}
+
 interface GetMarkersOptions {
   videoId?: string;
   limit?: number;
@@ -374,6 +392,7 @@ interface PlatformProvider {
   createMarker(description?: string, timestamp?: number): Promise<StreamMarker | null>;
   getMarkers(options?: GetMarkersOptions): Promise<StreamMarker[]>;
   getStreamStartTime(): Date | null;
+  fetchChatterInfo?(userId: string, username: string): Promise<ChatterInfo | null>;
 }
 
 // Note: setStreamKey / startStream / stopStream are YouTube-specific or removed.
