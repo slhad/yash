@@ -22,6 +22,27 @@ When beginning work in this repository:
 7. **ALWAYS Write** ongoing work/parts in `[tmp]/ONGOING.md` to keep track of everything
 8. **Clean `[tmp]/ONGOING.md` immediately after completion is verified** — remove each item as soon as the work is confirmed done by tests, runtime checks, or explicit user verification; do not leave completed items in the file
 
+## No Binary Files Policy
+
+Never commit binary files (images, GIFs, fonts, archives, compiled artifacts, etc.) to the repository.
+
+- Store temporary assets in `[tmp]` — it is gitignored and safe.
+- For demo GIFs or screenshots that need to be publicly hosted (e.g. inlined in a PR):
+  1. Record/capture the file into `[tmp]`.
+  2. Upload it as a release asset to get a permanent CDN URL:
+     ```bash
+     # Get the latest release ID
+     gh api repos/<owner>/<repo>/releases --jq '.[0].id'
+     # Upload the asset
+     gh api --method POST \
+       -H "Content-Type: image/gif" \
+       --input tmp/my-demo.gif \
+       "https://uploads.github.com/repos/<owner>/<repo>/releases/<id>/assets?name=my-demo.gif" \
+       --jq '.browser_download_url'
+     ```
+  3. Use the returned `browser_download_url` in PR descriptions or markdown.
+- Never create a `docs/`, `assets/`, or similar directory just to store binaries in git.
+
 ## External References
 
 - Kick event subscription docs: `https://docs.kick.com/events/subscribe-to-events`
