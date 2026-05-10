@@ -3168,6 +3168,13 @@ function openChatterInfoModal(msg: ChatMessage): void {
   let tabSessionCount = 0;
   let tabAlltimeCount = 0;
 
+  // Alltime lazy-load state
+  const ALLTIME_PAGE_SIZE = 100;
+  let alltimeMessages: ChatMessage[] = [];
+  let alltimePage = 0;
+  let alltimeExhausted = false;
+  let alltimeLoading = false;
+
   function renderTabBar(sessionCount: number, alltimeCount: number): StyledText {
     const sessionColor = activeTab === 'session' ? 'cyan' : '#555555';
     const alltimeColor = activeTab === 'alltime' ? 'cyan' : '#555555';
@@ -3215,61 +3222,127 @@ function openChatterInfoModal(msg: ChatMessage): void {
   box.add(tabBarTextNode);
   box.add(msgScroll);
   box.add(new TextRenderable(renderer, {
-    content: '  [S] session  [A] all-time  [↑↓] scroll  [Esc] close',
+    content: '  [S] session  [A] all-time  [↑] scroll / load older  [↓] scroll  [Esc] close',
     fg: '#888888',
   }));
   renderer.root.add(box);
   activeChatterInfoModal = { box };
 
-  // Helper: fill the message scroll with messages for the given tab
+  // ── Alltime tab helpers ────────────────────────────────────────────────────
+
+  function fmtTimestamp(ts: number): string {
+    const d = new Date(ts);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} - ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}  `;
+  }
+
+  function makeMessageRow(m: ChatMessage): BoxRenderable {
+    const row = new BoxRenderable(renderer, { flexDirection: 'row' });
+    row.add(new TextRenderable(renderer, { content: fmtTimestamp(m.timestamp), fg: '#888888' }));
+    row.add(new TextRenderable(renderer, { content: m.message, fg: 'white' }));
+    return row;
+  }
+
+  function makeStreamSeparator(timestamp: number): TextRenderable {
+    return new TextRenderable(renderer, {
+      content: `── stream starting ${fmtTimestamp(timestamp).trim()} ──`,
+      fg: '#4a9eff',
+    });
+  }
+
+  // Render all of alltimeMessages into the (already-cleared) scroll box.
+  function renderAlltimeFull(): void {
+    if (alltimeExhausted) {
+      msgScroll.add(new TextRenderable(renderer, { content: '  ── beginning of history ──', fg: '#555555' }));
+    }
+    let lastStreamId: string | undefined = undefined;
+    for (const m of alltimeMessages) {
+      if (m.streamId !== lastStreamId) {
+        lastStreamId = m.streamId;
+        msgScroll.add(makeStreamSeparator(m.timestamp));
+      }
+      msgScroll.add(makeMessageRow(m));
+    }
+  }
+
+  // Prepend one page of older messages into the scroll box.
+  // Called when the user scrolls to the top of the alltime tab.
+  function loadMoreOlderMessages(platform: string, userId: string): void {
+    if (alltimeLoading || alltimeExhausted) return;
+    alltimeLoading = true;
+    try {
+      const batch = messageLog.getForUserDesc(platform, userId, ALLTIME_PAGE_SIZE, alltimePage * ALLTIME_PAGE_SIZE);
+      if (batch.length === 0) {
+        alltimeExhausted = true;
+        msgScroll.add(new TextRenderable(renderer, { content: '  ── beginning of history ──', fg: '#555555' }), 0);
+        return;
+      }
+
+      const chronoBatch = batch.slice().reverse(); // oldest first
+      alltimePage++;
+      if (batch.length < ALLTIME_PAGE_SIZE) alltimeExhausted = true;
+
+      // If the newest message in the batch shares a stream with the oldest
+      // currently displayed message, the existing first separator is a duplicate
+      // of what we're about to prepend — remove it.
+      const lastInBatch = chronoBatch[chronoBatch.length - 1];
+      const firstInExisting = alltimeMessages[0];
+      if (lastInBatch?.streamId === firstInExisting?.streamId) {
+        const children = msgScroll.getChildren();
+        if (children.length > 0) msgScroll.remove(children[0].id);
+      }
+
+      let insertIdx = 0;
+      let localLastStreamId: string | undefined = undefined;
+      for (const m of chronoBatch) {
+        if (m.streamId !== localLastStreamId) {
+          localLastStreamId = m.streamId;
+          msgScroll.add(makeStreamSeparator(m.timestamp), insertIdx++);
+        }
+        msgScroll.add(makeMessageRow(m), insertIdx++);
+      }
+
+      if (alltimeExhausted) {
+        msgScroll.add(new TextRenderable(renderer, { content: '  ── beginning of history ──', fg: '#555555' }), 0);
+      }
+
+      alltimeMessages = [...chronoBatch, ...alltimeMessages];
+    } finally {
+      alltimeLoading = false;
+    }
+  }
+
+  // ── Fill scroll helper ─────────────────────────────────────────────────────
+
   function fillMessageScroll(tab: 'session' | 'alltime', platform: string, userId: string): void {
-    // Clear existing children
     for (const child of msgScroll.getChildren()) {
       msgScroll.remove(child.id);
     }
 
-    let messages: ChatMessage[];
     if (tab === 'session') {
-      messages = chatService.getMessageHistory()
+      const messages = chatService.getMessageHistory()
         .filter(m => m.platform === platform && m.userId === userId);
-      // already oldest-first from getMessageHistory, no need to reverse
-    } else {
-      // ASC order directly — no cap, viewport culling keeps rendering fast
-      messages = messageLog.getForUserPaged(platform, userId, 100_000, 0);
-    }
-
-    if (messages.length === 0) {
-      msgScroll.add(new TextRenderable(renderer, {
-        content: '  (no messages)',
-        fg: '#888888',
-      }));
-      return;
-    }
-
-    function fmtTimestamp(ts: number): string {
-      const d = new Date(ts);
-      const yyyy = d.getFullYear();
-      const mo = String(d.getMonth() + 1).padStart(2, '0');
-      const dd = String(d.getDate()).padStart(2, '0');
-      const hh = String(d.getHours()).padStart(2, '0');
-      const mi = String(d.getMinutes()).padStart(2, '0');
-      const ss = String(d.getSeconds()).padStart(2, '0');
-      return `${yyyy}-${mo}-${dd} - ${hh}:${mi}:${ss}  `;
-    }
-
-    let lastStreamId: string | undefined = undefined;
-    for (const m of messages) {
-      // In alltime tab, insert a separator when the stream changes
-      if (tab === 'alltime' && m.streamId !== lastStreamId) {
-        lastStreamId = m.streamId;
-        const label = `── stream starting ${fmtTimestamp(m.timestamp).trim()} ──`;
-        msgScroll.add(new TextRenderable(renderer, { content: label, fg: '#4a9eff' }));
+      if (messages.length === 0) {
+        msgScroll.add(new TextRenderable(renderer, { content: '  (no messages)', fg: '#888888' }));
+        return;
       }
-
-      const row = new BoxRenderable(renderer, { flexDirection: 'row' });
-      row.add(new TextRenderable(renderer, { content: fmtTimestamp(m.timestamp), fg: '#888888' }));
-      row.add(new TextRenderable(renderer, { content: m.message, fg: 'white' }));
-      msgScroll.add(row);
+      for (const m of messages) {
+        msgScroll.add(makeMessageRow(m));
+      }
+    } else {
+      // Initial DB load (also re-runs on tab switch to restore content)
+      if (alltimeMessages.length === 0) {
+        const batch = messageLog.getForUserDesc(platform, userId, ALLTIME_PAGE_SIZE, 0);
+        alltimeMessages = batch.slice().reverse();
+        alltimePage = 1;
+        alltimeExhausted = batch.length < ALLTIME_PAGE_SIZE;
+      }
+      if (alltimeMessages.length === 0) {
+        msgScroll.add(new TextRenderable(renderer, { content: '  (no messages)', fg: '#888888' }));
+        alltimeExhausted = true;
+        return;
+      }
+      renderAlltimeFull();
+      msgScroll.scrollTo(99999); // jump to newest (bottom)
     }
   }
 
@@ -3299,9 +3372,13 @@ function openChatterInfoModal(msg: ChatMessage): void {
       }
       return true;
     }
-    // Arrow key scrolling
+    // Arrow key scrolling; ↑ at top of alltime tab loads older messages
     if (sequence === '\x1b[A') {
-      msgScroll.scrollBy(-3);
+      if (activeTab === 'alltime' && msgScroll.scrollTop === 0 && !alltimeExhausted) {
+        loadMoreOlderMessages(msg.platform, msg.userId);
+      } else {
+        msgScroll.scrollBy(-3);
+      }
       return true;
     }
     if (sequence === '\x1b[B') {

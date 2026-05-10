@@ -42,17 +42,26 @@ export class MessageLog {
     const rows = this.db.prepare(
       `SELECT * FROM messages WHERE platform = ? AND user_id = ? ORDER BY timestamp DESC LIMIT ?`
     ).all(platform, userId, limit) as Array<Record<string, unknown>>;
-    return rows.map(this._rowToMessage);
+    return rows.map(MessageLog._rowToMessage);
   }
 
+  // Newest-first with offset — used for lazy loading in the chatter info modal.
+  getForUserDesc(platform: string, userId: string, limit: number, offset: number): ChatMessage[] {
+    const rows = this.db.prepare(
+      `SELECT * FROM messages WHERE platform = ? AND user_id = ? ORDER BY timestamp DESC LIMIT ? OFFSET ?`
+    ).all(platform, userId, limit, offset) as Array<Record<string, unknown>>;
+    return rows.map(MessageLog._rowToMessage);
+  }
+
+  // Oldest-first with offset — general pagination utility.
   getForUserPaged(platform: string, userId: string, pageSize: number, offset: number): ChatMessage[] {
     const rows = this.db.prepare(
       `SELECT * FROM messages WHERE platform = ? AND user_id = ? ORDER BY timestamp ASC LIMIT ? OFFSET ?`
     ).all(platform, userId, pageSize, offset) as Array<Record<string, unknown>>;
-    return rows.map(this._rowToMessage);
+    return rows.map(MessageLog._rowToMessage);
   }
 
-  private _rowToMessage(row: Record<string, unknown>): ChatMessage {
+  private static _rowToMessage(row: Record<string, unknown>): ChatMessage {
     return {
       id: row.id as string,
       platform: row.platform as string,
@@ -62,7 +71,7 @@ export class MessageLog {
       timestamp: row.timestamp as number,
       color: row.color as string | undefined,
       badges: row.badges ? JSON.parse(row.badges as string) as Record<string, string> : undefined,
-      streamId: row.stream_id as string | undefined ?? undefined,
+      streamId: (row.stream_id as string | null) ?? undefined,
     };
   }
 
