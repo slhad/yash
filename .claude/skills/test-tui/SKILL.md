@@ -164,6 +164,7 @@ tmux send-keys -t yash Escape 2>/dev/null || tmux send-keys -t yash C-c 2>/dev/n
 | Enter | `Enter` |
 | Escape | `Escape` |
 | Ctrl+C | `C-c` |
+| Clear input line | `C-u` |
 
 ## Known Behaviours
 
@@ -171,4 +172,5 @@ tmux send-keys -t yash Escape 2>/dev/null || tmux send-keys -t yash C-c 2>/dev/n
 - **Never verify the app is running by counting box-drawing chars** — the pane has thousands of lines of history from old sessions that will produce false positives. Always grep for `YASH server running` in recent scrollback to confirm a live current run.
 - Modals (stream, YouTube setup, Kick setup) must block arrow key sequences `\x1b[A` (Up) and `\x1b[B` (Down) explicitly. The `modalKeyHandler` in `src/index.tsx` returns `true` for those two sequences to prevent history cycling, but returns `false` for all other unhandled sequences so regular character input still reaches the input fields.
 - The message input history cycles on bare Up/Down only when no modal is active.
+- **Clearing the main input:** `Ctrl+A` only moves the cursor to the beginning — it does NOT select all. Use `C-u` (`Ctrl+U`) to kill the line from the cursor back to the start, which reliably empties the field. `Ctrl+A` followed by `BSpace` is a no-op and a common mistake in VHS tapes.
 - The TUI captures `console.log` — do not use it for debugging; use the logger file transport instead.
