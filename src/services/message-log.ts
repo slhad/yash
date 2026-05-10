@@ -3,6 +3,15 @@ import { getDataDir } from '../utils/config';
 import type { ChatMessage } from '../platforms/base';
 import path from 'path';
 
+export interface StreamSummary {
+  streamId: string;
+  platforms: string[];
+  messageCount: number;
+  userCount: number;
+  startTime: number;
+  endTime: number;
+}
+
 export class MessageLog {
   private db: Database;
 
@@ -105,6 +114,74 @@ export class MessageLog {
       `SELECT COUNT(*) as count FROM messages WHERE platform = ? AND user_id = ?`
     ).get(platform, userId) as { count: number } | null;
     return result?.count ?? 0;
+  }
+
+  // All unique streams, most-recent first, with per-stream stats.
+  getStreams(): StreamSummary[] {
+    const rows = this.db.prepare(`
+      SELECT
+        stream_id,
+        GROUP_CONCAT(DISTINCT platform) AS platforms,
+        COUNT(*)                        AS message_count,
+        COUNT(DISTINCT user_id)         AS user_count,
+        MIN(timestamp)                  AS start_time,
+        MAX(timestamp)                  AS end_time
+      FROM messages
+      WHERE stream_id IS NOT NULL
+      GROUP BY stream_id
+      ORDER BY MAX(timestamp) DESC
+    `).all() as Array<Record<string, unknown>>;
+    return rows.map(r => ({
+      streamId: r.stream_id as string,
+      platforms: (r.platforms as string).split(','),
+      messageCount: r.message_count as number,
+      userCount: r.user_count as number,
+      startTime: r.start_time as number,
+      endTime: r.end_time as number,
+    }));
+  }
+
+  // Messages for one stream, newest-first with offset (for lazy-load prepend).
+  getForStream(streamId: string, limit: number, offset: number): ChatMessage[] {
+    const rows = this.db.prepare(
+      `SELECT * FROM messages WHERE stream_id = ? ORDER BY timestamp DESC LIMIT ? OFFSET ?`
+    ).all(streamId, limit, offset) as Array<Record<string, unknown>>;
+    return rows.map(MessageLog._rowToMessage);
+  }
+
+  countForStream(streamId: string): number {
+    const result = this.db.prepare(
+      `SELECT COUNT(*) as count FROM messages WHERE stream_id = ?`
+    ).get(streamId) as { count: number } | null;
+    return result?.count ?? 0;
+  }
+
+  // Full-text search across message content, username, and stream_id.
+  searchMessages(query: string, opts?: { username?: string; platform?: string; limit?: number }): ChatMessage[] {
+    const limit = opts?.limit ?? 200;
+    const conditions: string[] = [];
+    const params: string[] = [];
+
+    if (query) {
+      conditions.push('(LOWER(message) LIKE ? OR LOWER(username) LIKE ? OR LOWER(COALESCE(stream_id, \'\')) LIKE ?)');
+      const q = `%${query.toLowerCase()}%`;
+      params.push(q, q, q);
+    }
+    if (opts?.username) {
+      conditions.push('LOWER(username) LIKE ?');
+      params.push(`%${opts.username.toLowerCase()}%`);
+    }
+    if (opts?.platform) {
+      conditions.push('platform = ?');
+      params.push(opts.platform);
+    }
+
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    const rows = this.db.prepare(
+      `SELECT * FROM messages ${where} ORDER BY timestamp DESC LIMIT ?`
+    ).all(...params, limit) as Array<Record<string, unknown>>;
+    return rows.map(MessageLog._rowToMessage);
   }
 
   close(): void {
