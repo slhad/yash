@@ -189,6 +189,10 @@ interface UINodes {
 let uiNodes: UINodes | null = null;
 let selectedMessageTarget: MessageTarget = 'all';
 
+let autocycleSuggestions: string[] = [];
+let autocycleHints: string[] = [];
+let autocycleIndex = -1;
+
 interface TwitchSetupModal {
   box: BoxRenderable;
   focusIndex: number;
@@ -255,6 +259,16 @@ function updateInputAssist(): void {
     uiNodes.inputEl.fg = 'white';
     uiNodes.inputEl.placeholder = '> type a command…';
     composeTargetText.visible = false;
+    // Re-render cycling hint if mid-cycle (prevents periodic updateUI from clobbering it)
+    if (
+      autocycleIndex >= 0 &&
+      autocycleSuggestions[autocycleIndex] === val &&
+      autocycleSuggestions.length > 1
+    ) {
+      hint.content = `  ${autocycleHints.map((h, i) => (i === autocycleIndex ? `[${h}]` : h)).join('  ')}`;
+      hint.visible = true;
+      return;
+    }
     const { hints } = getAutocomplete(val);
     if (hints.length > 0) {
       hint.content = `  ${hints.join('  ')}`;
@@ -4229,16 +4243,32 @@ async function main() {
             updateInputAssist();
             return true;
           }
-          const { completion, hints } = getAutocomplete(val);
-          if (completion) {
-            uiNodes.inputEl.value = completion;
+
+          const continuing =
+            autocycleIndex >= 0 && autocycleSuggestions[autocycleIndex] === val;
+
+          if (continuing) {
+            autocycleIndex = (autocycleIndex + 1) % autocycleSuggestions.length;
+          } else {
+            const { completions, hints } = getAutocomplete(val);
+            if (completions.length === 0) return true;
+            autocycleSuggestions = completions;
+            autocycleHints = hints;
+            autocycleIndex = 0;
           }
-          if (hints.length > 1) {
-            uiNodes.autocompleteHint.content = `  ${hints.join('  ')}`;
+
+          uiNodes.inputEl.value = autocycleSuggestions[autocycleIndex] ?? val;
+
+          if (autocycleSuggestions.length > 1) {
+            const hintStr = autocycleHints
+              .map((h, i) => (i === autocycleIndex ? `[${h}]` : h))
+              .join('  ');
+            uiNodes.autocompleteHint.content = `  ${hintStr}`;
             uiNodes.autocompleteHint.visible = true;
           } else {
             uiNodes.autocompleteHint.visible = false;
           }
+
           return true;
         }
 

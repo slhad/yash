@@ -77,20 +77,31 @@ function longestCommonPrefix(strs: string[]): string {
 /**
  * Given the current input value, returns:
  *   - `completion`: the longest unambiguous prefix to complete to (or null)
- *   - `hints`: all matching commands or arguments (shown below the input)
+ *   - `hints`: display tokens for each match (shown below the input)
+ *   - `completions`: full input strings for each match (used for Tab cycling)
  */
-export function getAutocomplete(input: string): { completion: string | null; hints: string[] } {
-  if (!input.startsWith('/') || input.length === 0) return { completion: null, hints: [] };
+export function getAutocomplete(input: string): {
+  completion: string | null;
+  hints: string[];
+  completions: string[];
+} {
+  if (!input.startsWith('/') || input.length === 0)
+    return { completion: null, hints: [], completions: [] };
 
   const lower = input.toLowerCase();
 
   // ── Command-level autocomplete (no space yet) ──────────────────────────────
   if (!lower.includes(' ')) {
     const matches = _registered.filter((c) => c.startsWith(lower));
-    if (matches.length === 0) return { completion: null, hints: [] };
-    if (matches.length === 1) return { completion: matches[0] ?? null, hints: matches };
+    if (matches.length === 0) return { completion: null, hints: [], completions: [] };
+    if (matches.length === 1)
+      return { completion: matches[0] ?? null, hints: matches, completions: matches };
     const prefix = longestCommonPrefix(matches);
-    return { completion: prefix.length > lower.length ? prefix : null, hints: matches };
+    return {
+      completion: prefix.length > lower.length ? prefix : null,
+      hints: matches,
+      completions: matches,
+    };
   }
 
   // ── Argument-level autocomplete ────────────────────────────────────────────
@@ -103,14 +114,15 @@ export function getAutocomplete(input: string): { completion: string | null; hin
   function completeToken(
     candidates: string[],
     partial: string,
-  ): { completion: string | null; hints: string[] } {
+  ): { completion: string | null; hints: string[]; completions: string[] } {
     const matches = candidates.filter((c) => c.startsWith(partial));
-    if (matches.length === 0) return { completion: null, hints: [] };
+    if (matches.length === 0) return { completion: null, hints: [], completions: [] };
     const prefix = longestCommonPrefix(matches);
     const fullCompletion = `${cmd} ${prefix}`;
     return {
       completion: prefix.length > partial.length ? fullCompletion : null,
       hints: matches,
+      completions: matches.map((m) => `${cmd} ${m}`),
     };
   }
 
@@ -124,7 +136,7 @@ export function getAutocomplete(input: string): { completion: string | null; hin
       return completeToken(INJECT_PLATFORMS, restLower);
     }
     // After platform is chosen: free-form username + message — no hints
-    return { completion: null, hints: [] };
+    return { completion: null, hints: [], completions: [] };
   }
 
   if (cmd === '/msg') {
@@ -132,7 +144,7 @@ export function getAutocomplete(input: string): { completion: string | null; hin
       return completeToken(MSG_TARGETS, restLower);
     }
     // After the target is chosen, free-form text — no hints
-    return { completion: null, hints: [] };
+    return { completion: null, hints: [], completions: [] };
   }
 
   if (cmd === '/logs') {
@@ -143,12 +155,12 @@ export function getAutocomplete(input: string): { completion: string | null; hin
     if (rest.endsWith(' ')) {
       const first = restLower.trim();
       if (['all', 'youtube', 'twitch', 'kick'].includes(first)) {
-        return { completion: null, hints: ['<limit>'] };
+        return { completion: null, hints: ['<limit>'], completions: [] };
       }
       if (first === '') {
-        return { completion: null, hints: MARKERS_ARGS };
+        return { completion: null, hints: MARKERS_ARGS, completions: [] };
       }
-      if (first === 'clear') return { completion: null, hints: [] };
+      if (first === 'clear') return { completion: null, hints: [], completions: [] };
     }
 
     if (!rest.includes(' ')) {
@@ -157,11 +169,11 @@ export function getAutocomplete(input: string): { completion: string | null; hin
 
     const parts = restLower.split(/\s+/).filter(Boolean);
     const first = parts[0] ?? '';
-    if (first === 'clear') return { completion: null, hints: [] };
+    if (first === 'clear') return { completion: null, hints: [], completions: [] };
     if (['all', 'youtube', 'twitch', 'kick'].includes(first) && parts.length === 1) {
-      return { completion: null, hints: ['<limit>'] };
+      return { completion: null, hints: ['<limit>'], completions: [] };
     }
-    return { completion: null, hints: [] };
+    return { completion: null, hints: [], completions: [] };
   }
 
   if (cmd === '/stream') {
@@ -182,16 +194,17 @@ export function getAutocomplete(input: string): { completion: string | null; hin
     if ((op === 'get' || op === 'set') && parts.length === 2) {
       const partial = (parts[1] ?? '').toLowerCase();
       const matches = SETTINGS_KEYS.filter((k) => k.startsWith(partial));
-      if (matches.length === 0) return { completion: null, hints: matches };
+      if (matches.length === 0) return { completion: null, hints: matches, completions: [] };
       const prefix = longestCommonPrefix(matches);
       const fullCompletion = `${cmd} ${op} ${prefix}`;
       return {
         completion: prefix.length > partial.length ? fullCompletion : null,
         hints: matches,
+        completions: matches.map((k) => `${cmd} ${op} ${k}`),
       };
     }
-    return { completion: null, hints: [] };
+    return { completion: null, hints: [], completions: [] };
   }
 
-  return { completion: null, hints: [] };
+  return { completion: null, hints: [], completions: [] };
 }
