@@ -47,11 +47,11 @@ describe('getAutocomplete', () => {
   // ── no-match cases ──────────────────────────────────────────────────────────
 
   test('empty string → no completion, no hints', () => {
-    expect(getAutocomplete('')).toEqual({ completion: null, hints: [] });
+    expect(getAutocomplete('')).toEqual({ completion: null, hints: [], completions: [] });
   });
 
   test('non-slash input → no completion, no hints', () => {
-    expect(getAutocomplete('hello')).toEqual({ completion: null, hints: [] });
+    expect(getAutocomplete('hello')).toEqual({ completion: null, hints: [], completions: [] });
   });
 
   test('bare "/" → no completion (ambiguous), all commands as hints', () => {
@@ -61,7 +61,7 @@ describe('getAutocomplete', () => {
   });
 
   test('/z (no match) → no completion, no hints', () => {
-    expect(getAutocomplete('/z')).toEqual({ completion: null, hints: [] });
+    expect(getAutocomplete('/z')).toEqual({ completion: null, hints: [], completions: [] });
   });
 
   // ── unique prefix → single completion ──────────────────────────────────────
