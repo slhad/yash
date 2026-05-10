@@ -1184,7 +1184,8 @@ export class YouTubeProvider implements PlatformProvider {
   }
 
   private _dispatch(msg: ChatMessage) {
-    for (const cb of this.messageCallbacks) cb(msg);
+    const enriched = this.broadcastId ? { ...msg, streamId: this.broadcastId } : msg;
+    for (const cb of this.messageCallbacks) cb(enriched);
   }
 
   // ---------------------------------------------------------------------------

@@ -574,7 +574,10 @@ export class KickProvider implements PlatformProvider {
   }
 
   private _dispatch(msg: ChatMessage) {
-    for (const cb of this.messageCallbacks) cb(msg);
+    const enriched = this.streamStartTime
+      ? { ...msg, streamId: this.streamStartTime.toISOString() }
+      : msg;
+    for (const cb of this.messageCallbacks) cb(enriched);
   }
 
   // ---------------------------------------------------------------------------

@@ -16,17 +16,25 @@ export class MessageLog {
       message TEXT NOT NULL,
       timestamp INTEGER NOT NULL,
       color TEXT,
-      badges TEXT
+      badges TEXT,
+      stream_id TEXT
     )`);
+    // Migrate existing DBs that predate stream_id
+    try {
+      this.db.exec('ALTER TABLE messages ADD COLUMN stream_id TEXT');
+    } catch {
+      // Column already exists — ignore
+    }
     this.db.exec(`CREATE INDEX IF NOT EXISTS idx_user ON messages (platform, user_id, timestamp DESC)`);
   }
 
   insert(msg: ChatMessage): void {
     // ignore if already exists (idempotent)
-    this.db.prepare(`INSERT OR IGNORE INTO messages (id, platform, user_id, username, message, timestamp, color, badges)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(
+    this.db.prepare(`INSERT OR IGNORE INTO messages (id, platform, user_id, username, message, timestamp, color, badges, stream_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
       msg.id, msg.platform, msg.userId, msg.username, msg.message,
-      msg.timestamp, msg.color ?? null, msg.badges ? JSON.stringify(msg.badges) : null
+      msg.timestamp, msg.color ?? null, msg.badges ? JSON.stringify(msg.badges) : null,
+      msg.streamId ?? null
     );
   }
 
@@ -43,6 +51,7 @@ export class MessageLog {
       timestamp: row.timestamp as number,
       color: row.color as string | undefined,
       badges: row.badges ? JSON.parse(row.badges as string) as Record<string, string> : undefined,
+      streamId: row.stream_id as string | undefined ?? undefined,
     }));
   }
 

@@ -3245,18 +3245,28 @@ function openChatterInfoModal(msg: ChatMessage): void {
       return;
     }
 
+    function fmtTimestamp(ts: number): string {
+      const d = new Date(ts);
+      const yyyy = d.getFullYear();
+      const mo = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      const hh = String(d.getHours()).padStart(2, '0');
+      const mi = String(d.getMinutes()).padStart(2, '0');
+      const ss = String(d.getSeconds()).padStart(2, '0');
+      return `${yyyy}-${mo}-${dd} - ${hh}:${mi}:${ss}  `;
+    }
+
+    let lastStreamId: string | undefined = undefined;
     for (const m of messages) {
-      const date = new Date(m.timestamp);
-      const yyyy = date.getFullYear();
-      const mo = String(date.getMonth() + 1).padStart(2, '0');
-      const dd = String(date.getDate()).padStart(2, '0');
-      const hh = String(date.getHours()).padStart(2, '0');
-      const mi = String(date.getMinutes()).padStart(2, '0');
-      const ss = String(date.getSeconds()).padStart(2, '0');
-      const timeStr = `${yyyy}-${mo}-${dd} - ${hh}:${mi}:${ss}  `;
+      // In alltime tab, insert a separator when the stream changes
+      if (tab === 'alltime' && m.streamId !== lastStreamId) {
+        lastStreamId = m.streamId;
+        const label = `── stream starting ${fmtTimestamp(m.timestamp).trim()} ──`;
+        msgScroll.add(new TextRenderable(renderer, { content: label, fg: '#4a9eff' }));
+      }
 
       const row = new BoxRenderable(renderer, { flexDirection: 'row' });
-      row.add(new TextRenderable(renderer, { content: timeStr, fg: '#888888' }));
+      row.add(new TextRenderable(renderer, { content: fmtTimestamp(m.timestamp), fg: '#888888' }));
       row.add(new TextRenderable(renderer, { content: m.message, fg: 'white' }));
       msgScroll.add(row);
     }
