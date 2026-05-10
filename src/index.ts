@@ -1,6 +1,3 @@
-import index from '../index.html';
-import sidebyside from '../sidebyside.html';
-import unified from '../unified.html';
 import commandsJs from './utils/webCommands.bundle.js' with { type: 'text' };
 
 // When launched as TUI companion (YASH_TUI_ONLY=1), skip HTML page routes —
@@ -54,9 +51,17 @@ function applySettingSideEffects(key: string, value: unknown): void {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
+const serveHtml = (path: string) => ({
+  GET: () => new Response(Bun.file(path), { headers: { 'Content-Type': 'text/html; charset=utf-8' } }),
+});
+
 const htmlRoutes: Record<string, any> = isTuiOnly
   ? {}
-  : { '/': index, '/unified': unified, '/sidebyside': sidebyside };
+  : {
+      '/': serveHtml('./index.html'),
+      '/unified': serveHtml('./unified.html'),
+      '/sidebyside': serveHtml('./sidebyside.html'),
+    };
 
 Bun.serve({
   routes: {
@@ -907,6 +912,19 @@ Bun.serve({
       // and formatting as the JSON handler.
       GET: (req) => prometheusMetricsHandler((name: string) => req.headers.get(name), req.url),
     },
+  },
+  async fetch(req) {
+    const { pathname } = new URL(req.url);
+    if (pathname.startsWith('/yash/')) {
+      const file = Bun.file(`.${pathname}`);
+      if (await file.exists()) {
+        const bytes = await file.arrayBuffer();
+        return new Response(bytes, {
+          headers: { 'Content-Type': file.type || 'application/javascript' },
+        });
+      }
+    }
+    return new Response('Not found', { status: 404 });
   },
   development: false,
 });
