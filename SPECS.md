@@ -46,6 +46,11 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
             * `/settings ` → `get | set`; `/settings get/set ` → setting key list
             * `/logs ` → `clear | tail | visible`
         * Single-match autocomplete on Enter: if only one command or argument matches the current input, pressing Enter executes that completion directly without needing Tab first
+    * Chatter info modal: left-click any chat message, or press Enter while in browse mode (↑/↓ to select a message), to open a modal showing:
+        * Platform profile info fetched via `provider.fetchChatterInfo()` (subscriber count, video count, account age, description, avatar URL)
+        * Session stats: number of messages sent this session and time first seen
+        * Last 200 messages from the persistent message log (cross-session history)
+        * Dismiss with Escape or q; modal is exclusive (only one open at a time)
     * TUI Layout
         * Single-line borderless status bar showing all platforms + OBS connection status on one horizontal row; stream status color-coded per platform
         * Chat panel occupies center/maximum space (flex-grow), horizontal layout with right sidebar
@@ -249,6 +254,7 @@ Mutable settings live in `settings.json`, including `demo`, `chat.*`, `stream.*`
     * YouTube: real OAuth2 Authorization Code flow — visit `GET /api/youtube/auth` to initiate, callback handled at `GET /api/youtube/callback`; TUI `/connect youtube` returns a redirect URL via `POST /api/connect/youtube`
     * Kick: real OAuth 2.1 PKCE flow — visit `GET /api/kick/auth` to initiate, callback handled at `GET /api/kick/callback`; TUI `/connect kick` returns a redirect URL via `POST /api/connect/kick`, and opens a credentials setup modal if `clientId`/`clientSecret` are missing
 - Unified chat interface with platform-specific message normalization
+- Persistent message log: all incoming chat messages are appended to a SQLite database at `YASH_DATA_DIR/messages.db`; survives restarts; used by the chatter info modal to show per-user cross-session message history (up to 200 messages per user)
 - Stream control (start/stop/update metadata)
 - Stream markers / chapter points
     * `PlatformProvider.createMarker(description?, timestamp?)` — creates a marker on the platform
@@ -322,8 +328,8 @@ src/
 │   ├── chat.service.ts
 │   ├── stream.service.ts
 │   ├── obs.service.ts
-│   ├── chatter-cache.ts  # In-memory cache for chatter profile info (ChatterInfo)
-│   └── message-log.ts    # SQLite-backed message persistence
+│   ├── chatter-cache.ts  # In-memory cache for chatter profile info (ChatterInfo) + session stats
+│   └── message-log.ts    # SQLite-backed message persistence (YASH_DATA_DIR/messages.db)
 ├── ui/                  # React components (Dashboard, StreamControls, ChatDisplay, MessageInput, StatusBar)
 ├── utils/
 │   ├── webCommands.ts   # Shared WebUI command module (consumed by main.tsx + served as /api/js/commands.js)
