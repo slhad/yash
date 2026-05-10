@@ -10,6 +10,18 @@
 - [root]: workspace repository.
 - [tmp]: folder for temporary files excluded from versioning.
 
+## tmp/ Is Never Committed
+
+**Never `git add` any file under `tmp/`**, even with `-f`/`--force`.
+
+`tmp/` is gitignored because it holds ephemeral local artifacts (build outputs,
+seed scripts, VHS tapes, test databases, recordings, …).  These must not enter
+the repository history — not even on feature branches.
+
+If you have a script or tape that you think should be versioned, move it to an
+appropriate tracked directory (e.g. `scripts/`, `test/fixtures/`) and commit it
+there instead.
+
 ## Getting Started
 
 When beginning work in this repository:
