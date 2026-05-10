@@ -3178,9 +3178,10 @@ function openChatterInfoModal(msg: ChatMessage): void {
   };
 
   // Tab state — declared first so they're in scope for renderTabBar and box setup
-  let activeTab: 'session' | 'alltime' = 'session';
+  let activeTab: 'session' | 'alltime' | 'context' = 'session';
   let tabSessionCount = 0;
   let tabAlltimeCount = 0;
+  let tabContextCount = 0;
 
   // Alltime lazy-load state
   const ALLTIME_PAGE_SIZE = 100;
@@ -3189,12 +3190,20 @@ function openChatterInfoModal(msg: ChatMessage): void {
   let alltimeExhausted = false;
   let alltimeLoading = false;
 
-  function renderTabBar(sessionCount: number, alltimeCount: number): StyledText {
+  // Context lazy-load state
+  let contextMessages: ChatMessage[] = [];
+  let contextPage = 0;
+  let contextExhausted = false;
+  let contextLoading = false;
+
+  function renderTabBar(sessionCount: number, alltimeCount: number, contextCount: number): StyledText {
     const sessionColor = activeTab === 'session' ? 'cyan' : '#555555';
     const alltimeColor = activeTab === 'alltime' ? 'cyan' : '#555555';
+    const contextColor = activeTab === 'context' ? 'cyan' : '#555555';
     return new StyledText([
       fg(sessionColor)(`  [S] Session (${sessionCount})  `),
-      fg(alltimeColor)(`[A] All time (${alltimeCount})`),
+      fg(alltimeColor)(`[A] All time (${alltimeCount})  `),
+      fg(contextColor)(`[C] Context (${contextCount})`),
     ]);
   }
 
@@ -3237,7 +3246,7 @@ function openChatterInfoModal(msg: ChatMessage): void {
   box.add(tabBarTextNode);
   box.add(msgScroll);
   box.add(new TextRenderable(renderer, {
-    content: '  [S] session  [A] all-time  [↑] scroll / load older  [↓] scroll  [Esc] close',
+    content: '  [S] session  [A] all-time  [C] context  [↑] scroll / load older  [↓] scroll  [Esc] close',
     fg: '#888888',
   }));
   renderer.root.add(box);
@@ -3262,6 +3271,21 @@ function openChatterInfoModal(msg: ChatMessage): void {
       content: `── stream starting ${fmtTimestamp(timestamp).trim()} ──`,
       fg: '#4a9eff',
     });
+  }
+
+  function makeContextMessageRow(m: ChatMessage, isTargetUser: boolean): BoxRenderable {
+    const row = new BoxRenderable(renderer, { flexDirection: 'row' });
+    row.add(new TextRenderable(renderer, { content: fmtTimestamp(m.timestamp), fg: '#888888' }));
+    if (isTargetUser) {
+      row.add(new TextRenderable(renderer, { content: '★ ', fg: 'cyan' }));
+      row.add(new TextRenderable(renderer, { content: `${m.username}: `, fg: m.color ?? platColor(m.platform) }));
+      row.add(new TextRenderable(renderer, { content: m.message, fg: 'white' }));
+    } else {
+      row.add(new TextRenderable(renderer, { content: `[${m.platform}] `, fg: platColor(m.platform) }));
+      row.add(new TextRenderable(renderer, { content: `${m.username}: `, fg: '#888888' }));
+      row.add(new TextRenderable(renderer, { content: m.message, fg: '#aaaaaa' }));
+    }
+    return row;
   }
 
   // Render all of alltimeMessages into the (already-cleared) scroll box.
@@ -3326,9 +3350,65 @@ function openChatterInfoModal(msg: ChatMessage): void {
     }
   }
 
+  function renderContextFull(): void {
+    if (contextExhausted) {
+      msgScroll.add(new TextRenderable(renderer, { content: '  ── beginning of context ──', fg: '#555555' }));
+    }
+    let lastStreamId: string | undefined = undefined;
+    for (const m of contextMessages) {
+      if (m.streamId !== lastStreamId) {
+        lastStreamId = m.streamId;
+        msgScroll.add(makeStreamSeparator(m.timestamp));
+      }
+      msgScroll.add(makeContextMessageRow(m, m.platform === msg.platform && m.userId === msg.userId));
+    }
+  }
+
+  function loadMoreOlderContextMessages(platform: string, userId: string): void {
+    if (contextLoading || contextExhausted) return;
+    contextLoading = true;
+    try {
+      const batch = messageLog.getContextForUserDesc(platform, userId, ALLTIME_PAGE_SIZE, contextPage * ALLTIME_PAGE_SIZE);
+      if (batch.length === 0) {
+        contextExhausted = true;
+        msgScroll.add(new TextRenderable(renderer, { content: '  ── beginning of context ──', fg: '#555555' }), 0);
+        return;
+      }
+
+      const chronoBatch = batch.slice().reverse();
+      contextPage++;
+      if (batch.length < ALLTIME_PAGE_SIZE) contextExhausted = true;
+
+      const lastInBatch = chronoBatch[chronoBatch.length - 1];
+      const firstInExisting = contextMessages[0];
+      if (lastInBatch?.streamId === firstInExisting?.streamId) {
+        const children = msgScroll.getChildren();
+        if (children.length > 0) msgScroll.remove(children[0].id);
+      }
+
+      let insertIdx = 0;
+      let localLastStreamId: string | undefined = undefined;
+      for (const m of chronoBatch) {
+        if (m.streamId !== localLastStreamId) {
+          localLastStreamId = m.streamId;
+          msgScroll.add(makeStreamSeparator(m.timestamp), insertIdx++);
+        }
+        msgScroll.add(makeContextMessageRow(m, m.platform === platform && m.userId === userId), insertIdx++);
+      }
+
+      if (contextExhausted) {
+        msgScroll.add(new TextRenderable(renderer, { content: '  ── beginning of context ──', fg: '#555555' }), 0);
+      }
+
+      contextMessages = [...chronoBatch, ...contextMessages];
+    } finally {
+      contextLoading = false;
+    }
+  }
+
   // ── Fill scroll helper ─────────────────────────────────────────────────────
 
-  function fillMessageScroll(tab: 'session' | 'alltime', platform: string, userId: string): void {
+  function fillMessageScroll(tab: 'session' | 'alltime' | 'context', platform: string, userId: string): void {
     for (const child of msgScroll.getChildren()) {
       msgScroll.remove(child.id);
     }
@@ -3343,7 +3423,7 @@ function openChatterInfoModal(msg: ChatMessage): void {
       for (const m of messages) {
         msgScroll.add(makeMessageRow(m));
       }
-    } else {
+    } else if (tab === 'alltime') {
       // Initial DB load (also re-runs on tab switch to restore content)
       if (alltimeMessages.length === 0) {
         const batch = messageLog.getForUserDesc(platform, userId, ALLTIME_PAGE_SIZE, 0);
@@ -3358,6 +3438,21 @@ function openChatterInfoModal(msg: ChatMessage): void {
       }
       renderAlltimeFull();
       // Defer scroll until after layout is computed (two ticks to be safe)
+      setTimeout(() => { msgScroll.scrollTo(99999); }, 32);
+    } else {
+      // Context tab — all messages from streams where the chatter participated
+      if (contextMessages.length === 0) {
+        const batch = messageLog.getContextForUserDesc(platform, userId, ALLTIME_PAGE_SIZE, 0);
+        contextMessages = batch.slice().reverse();
+        contextPage = 1;
+        contextExhausted = batch.length < ALLTIME_PAGE_SIZE;
+      }
+      if (contextMessages.length === 0) {
+        msgScroll.add(new TextRenderable(renderer, { content: '  (no context — messages need stream IDs)', fg: '#888888' }));
+        contextExhausted = true;
+        return;
+      }
+      renderContextFull();
       setTimeout(() => { msgScroll.scrollTo(99999); }, 32);
     }
   }
@@ -3375,7 +3470,7 @@ function openChatterInfoModal(msg: ChatMessage): void {
     if (sequence === 's' || sequence === 'S') {
       if (activeTab !== 'session') {
         activeTab = 'session';
-        tabBarTextNode.content = renderTabBar(tabSessionCount, tabAlltimeCount);
+        tabBarTextNode.content = renderTabBar(tabSessionCount, tabAlltimeCount, tabContextCount);
         fillMessageScroll('session', msg.platform, msg.userId);
       }
       return true;
@@ -3383,15 +3478,25 @@ function openChatterInfoModal(msg: ChatMessage): void {
     if (sequence === 'a' || sequence === 'A') {
       if (activeTab !== 'alltime') {
         activeTab = 'alltime';
-        tabBarTextNode.content = renderTabBar(tabSessionCount, tabAlltimeCount);
+        tabBarTextNode.content = renderTabBar(tabSessionCount, tabAlltimeCount, tabContextCount);
         fillMessageScroll('alltime', msg.platform, msg.userId);
       }
       return true;
     }
-    // Arrow key scrolling; ↑ at top of alltime tab loads older messages
+    if (sequence === 'c' || sequence === 'C') {
+      if (activeTab !== 'context') {
+        activeTab = 'context';
+        tabBarTextNode.content = renderTabBar(tabSessionCount, tabAlltimeCount, tabContextCount);
+        fillMessageScroll('context', msg.platform, msg.userId);
+      }
+      return true;
+    }
+    // Arrow key scrolling; ↑ at top of alltime/context tab loads older messages
     if (sequence === '\x1b[A') {
       if (activeTab === 'alltime' && msgScroll.scrollTop === 0 && !alltimeExhausted) {
         loadMoreOlderMessages(msg.platform, msg.userId);
+      } else if (activeTab === 'context' && msgScroll.scrollTop === 0 && !contextExhausted) {
+        loadMoreOlderContextMessages(msg.platform, msg.userId);
       } else {
         msgScroll.scrollBy(-3);
       }
@@ -3498,7 +3603,8 @@ function openChatterInfoModal(msg: ChatMessage): void {
       // Update tab bar
       tabSessionCount = info.sessionMessageCount;
       tabAlltimeCount = messageLog.countForUser(msg.platform, msg.userId);
-      tabBarTextNode.content = renderTabBar(tabSessionCount, tabAlltimeCount);
+      tabContextCount = messageLog.countContextForUser(msg.platform, msg.userId);
+      tabBarTextNode.content = renderTabBar(tabSessionCount, tabAlltimeCount, tabContextCount);
 
       fillMessageScroll('session', msg.platform, msg.userId);
 

@@ -26,6 +26,7 @@ export class MessageLog {
       // Column already exists — ignore
     }
     this.db.exec(`CREATE INDEX IF NOT EXISTS idx_user ON messages (platform, user_id, timestamp DESC)`);
+    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_stream ON messages (stream_id, timestamp DESC)`);
   }
 
   insert(msg: ChatMessage): void {
@@ -51,6 +52,30 @@ export class MessageLog {
       `SELECT * FROM messages WHERE platform = ? AND user_id = ? ORDER BY timestamp DESC LIMIT ? OFFSET ?`
     ).all(platform, userId, limit, offset) as Array<Record<string, unknown>>;
     return rows.map(MessageLog._rowToMessage);
+  }
+
+  // All messages from stream sessions where this user participated — newest-first with offset.
+  getContextForUserDesc(platform: string, userId: string, limit: number, offset: number): ChatMessage[] {
+    const rows = this.db.prepare(
+      `SELECT * FROM messages
+       WHERE stream_id IN (
+         SELECT DISTINCT stream_id FROM messages
+         WHERE platform = ? AND user_id = ? AND stream_id IS NOT NULL
+       )
+       ORDER BY timestamp DESC LIMIT ? OFFSET ?`
+    ).all(platform, userId, limit, offset) as Array<Record<string, unknown>>;
+    return rows.map(MessageLog._rowToMessage);
+  }
+
+  countContextForUser(platform: string, userId: string): number {
+    const result = this.db.prepare(
+      `SELECT COUNT(*) as count FROM messages
+       WHERE stream_id IN (
+         SELECT DISTINCT stream_id FROM messages
+         WHERE platform = ? AND user_id = ? AND stream_id IS NOT NULL
+       )`
+    ).get(platform, userId) as { count: number } | null;
+    return result?.count ?? 0;
   }
 
   // Oldest-first with offset — general pagination utility.
