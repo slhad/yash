@@ -42,7 +42,18 @@ export class MessageLog {
     const rows = this.db.prepare(
       `SELECT * FROM messages WHERE platform = ? AND user_id = ? ORDER BY timestamp DESC LIMIT ?`
     ).all(platform, userId, limit) as Array<Record<string, unknown>>;
-    return rows.map(row => ({
+    return rows.map(this._rowToMessage);
+  }
+
+  getForUserPaged(platform: string, userId: string, pageSize: number, offset: number): ChatMessage[] {
+    const rows = this.db.prepare(
+      `SELECT * FROM messages WHERE platform = ? AND user_id = ? ORDER BY timestamp ASC LIMIT ? OFFSET ?`
+    ).all(platform, userId, pageSize, offset) as Array<Record<string, unknown>>;
+    return rows.map(this._rowToMessage);
+  }
+
+  private _rowToMessage(row: Record<string, unknown>): ChatMessage {
+    return {
       id: row.id as string,
       platform: row.platform as string,
       userId: row.user_id as string,
@@ -52,7 +63,7 @@ export class MessageLog {
       color: row.color as string | undefined,
       badges: row.badges ? JSON.parse(row.badges as string) as Record<string, string> : undefined,
       streamId: row.stream_id as string | undefined ?? undefined,
-    }));
+    };
   }
 
   countForUser(platform: string, userId: string): number {

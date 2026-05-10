@@ -3183,6 +3183,7 @@ function openChatterInfoModal(msg: ChatMessage): void {
     stickyStart: 'top',
     flexGrow: 1,
     minHeight: 5,
+    viewportCulling: true,
   });
 
   const box = new BoxRenderable(renderer, {
@@ -3233,8 +3234,8 @@ function openChatterInfoModal(msg: ChatMessage): void {
         .filter(m => m.platform === platform && m.userId === userId);
       // already oldest-first from getMessageHistory, no need to reverse
     } else {
-      // DB returns newest-first; reverse for oldest-first display
-      messages = messageLog.getForUser(platform, userId, 200).slice().reverse();
+      // ASC order directly — no cap, viewport culling keeps rendering fast
+      messages = messageLog.getForUserPaged(platform, userId, 100_000, 0);
     }
 
     if (messages.length === 0) {
