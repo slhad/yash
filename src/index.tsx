@@ -2619,6 +2619,7 @@ async function handleCommand(trimmed: string): Promise<void> {
     lastMessages.push(
       '[help]   /inject <twitch|youtube|kick> <username> <message>  — inject a fake chat message for offline testing',
     );
+    lastMessages.push('[help]   /chatter <@username>  — open chatter info modal for the most recent message from that user');
     lastMessages.push('[help]   /settings  — open the settings modal');
     lastMessages.push('[help]   /settings get <key>  — get a setting value');
     lastMessages.push('[help]   /settings set <key> <value>  — set a setting value');
@@ -2632,6 +2633,19 @@ async function handleCommand(trimmed: string): Promise<void> {
         lastMessages.push(`[system] ${platform}: ${formatInfoValue(info)}`);
       } catch (err) {
         lastMessages.push(`[system] ${platform}: error: ${String(err)}`);
+      }
+    }
+  } else if (cmd === '/chatter') {
+    // /chatter <@username> — open chatter info modal for the most recent message from that user
+    const target = (parts[1] ?? '').replace(/^@/, '').toLowerCase();
+    if (!target) {
+      lastMessages.push('[chatter] Usage: /chatter <@username>');
+    } else {
+      const rawMsg = [...lastRawMessages].reverse().find(m => m.username.toLowerCase() === target);
+      if (!rawMsg) {
+        lastMessages.push(`[chatter] No recent message found from @${target}`);
+      } else {
+        openChatterInfoModal(rawMsg);
       }
     }
   } else if (cmd === '/inject') {
@@ -3198,6 +3212,7 @@ function openChatterInfoModal(msg: ChatMessage): void {
     top: '5%',
     left: '8%',
     width: '84%',
+    height: '85%',
     zIndex: 100,
     border: true,
     borderStyle: 'rounded',
@@ -3206,7 +3221,7 @@ function openChatterInfoModal(msg: ChatMessage): void {
     shouldFill: true,
     padding: 1,
     flexDirection: 'column',
-    gap: 0,
+    gap: 1,
     title: ' Chatter Info ',
   });
 
@@ -3342,7 +3357,8 @@ function openChatterInfoModal(msg: ChatMessage): void {
         return;
       }
       renderAlltimeFull();
-      msgScroll.scrollTo(99999); // jump to newest (bottom)
+      // Defer scroll until after layout is computed (two ticks to be safe)
+      setTimeout(() => { msgScroll.scrollTo(99999); }, 32);
     }
   }
 
