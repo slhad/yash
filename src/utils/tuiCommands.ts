@@ -7,9 +7,11 @@
 
 /** All slash commands available in the TUI. */
 export const TUI_COMMANDS = [
+  '/chatter',
   '/connect',
   '/exit',
   '/help',
+  '/history',
   '/info',
   '/inject',
   '/logs',
@@ -22,6 +24,15 @@ export const TUI_COMMANDS = [
 ] as const;
 
 export type TuiCommand = (typeof TUI_COMMANDS)[number];
+
+// Runtime command list — overwritten at startup by initTuiCommands() so that
+// the handler map in index.tsx is the single source of truth for autocomplete.
+let _registered: readonly string[] = TUI_COMMANDS;
+
+/** Called once at startup with Object.keys(commandHandlers).sort(). */
+export function initTuiCommands(cmds: string[]): void {
+  _registered = cmds;
+}
 
 const PLATFORMS = ['youtube', 'twitch', 'kick', 'obs'];
 const INJECT_PLATFORMS = ['twitch', 'youtube', 'kick'];
@@ -75,7 +86,7 @@ export function getAutocomplete(input: string): { completion: string | null; hin
 
   // ── Command-level autocomplete (no space yet) ──────────────────────────────
   if (!lower.includes(' ')) {
-    const matches = (TUI_COMMANDS as readonly string[]).filter((c) => c.startsWith(lower));
+    const matches = _registered.filter((c) => c.startsWith(lower));
     if (matches.length === 0) return { completion: null, hints: [] };
     if (matches.length === 1) return { completion: matches[0] ?? null, hints: matches };
     const prefix = longestCommonPrefix(matches);

@@ -33,7 +33,7 @@ import { isDemoMode, saveConfig } from './utils/config';
 import logCollector from './utils/logCollector';
 import { defaultLogger } from './utils/logger';
 import { buildTargetedStreamMetadataUpdate } from './utils/streamMetadata';
-import { getAutocomplete } from './utils/tuiCommands';
+import { getAutocomplete, initTuiCommands } from './utils/tuiCommands';
 import { installTuiErrorCapture } from './utils/tuiErrorCapture';
 import { type MessageTarget } from './utils/tuiMessageInput';
 import {
@@ -2335,29 +2335,19 @@ function openStreamModal(preselected: string[]): void {
   });
 }
 
-async function handleCommand(trimmed: string): Promise<void> {
-  if (!trimmed.startsWith('/')) {
-    const targetPlatforms = selectedMessageTarget === 'all' ? [] : [selectedMessageTarget];
-    try {
-      await chatService.sendMessage(trimmed, targetPlatforms);
-      lastMessages.push(transformOutgoingMessage(selectedMessageTarget, trimmed));
-    } catch (err) {
-      lastMessages.push(`[system] Failed to send message: ${String(err)}`);
+// Keys of this object are the single source of truth for TUI command names —
+// initTuiCommands() below syncs them into the autocomplete module at startup.
+const commandHandlers: Record<string, (parts: string[]) => Promise<void>> = {
+  '/connect': async (parts) => {
+    const platform = (parts[1] ?? '').toLowerCase();
+    if (!platform) {
+      lastMessages.push('[system] Usage: /connect <youtube|twitch|kick|obs>');
+      return;
     }
-    return;
-  }
-
-  const parts = trimmed.split(/\s+/);
-  const cmd = parts[0].toLowerCase();
-
-  if (cmd === '/connect' && parts[1]) {
-    const platform = parts[1].toLowerCase();
-
     if (platform === 'obs') {
       openObsConnectModal();
       return;
     }
-
     const provider =
       platform === 'youtube'
         ? youtube
@@ -2405,9 +2395,9 @@ async function handleCommand(trimmed: string): Promise<void> {
     } else {
       lastMessages.push(`[system] Unknown platform: ${platform}`);
     }
-  } else if (cmd === '/msg') {
-    // /msg all <text>     → sends to all platforms
-    // /msg youtube <text> → sends only to youtube
+  },
+
+  '/msg': async (parts) => {
     const target = parts[1]?.toLowerCase();
     const text = parts.slice(2).join(' ');
     const validTargets = ['all', 'youtube', 'twitch', 'kick'];
@@ -2422,11 +2412,10 @@ async function handleCommand(trimmed: string): Promise<void> {
     } else {
       lastMessages.push('[system] Usage: /msg <all|youtube|twitch|kick> <text>');
     }
-  } else if (cmd === '/marker') {
-    // Syntax:  /marker [description] [| timestamp_seconds]
-    // Parsing delegated to the shared parseMarkerArgs util (src/utils/webCommands.ts).
+  },
+
+  '/marker': async (parts) => {
     const rawParts = parts.slice(1);
-    // TUI adds extra validation: reject a non-numeric pipe segment with a clear error.
     const rawArgs = rawParts.join(' ');
     const pipeIdx = rawArgs.indexOf('|');
     if (pipeIdx !== -1) {
@@ -2469,7 +2458,9 @@ async function handleCommand(trimmed: string): Promise<void> {
     } catch (err) {
       lastMessages.push(`[marker] Error: ${String(err)}`);
     }
-  } else if (cmd === '/markers') {
+  },
+
+  '/markers': async (parts) => {
     if ((parts[1] ?? '').toLowerCase() === 'clear') {
       if (parts.length > 2) {
         lastMessages.push('[markers] Usage: /markers clear | [all|youtube|twitch|kick] [limit]');
@@ -2518,7 +2509,9 @@ async function handleCommand(trimmed: string): Promise<void> {
         lastMessages.push(`[markers] ${target}: error: ${String(err)}`);
       }
     }
-  } else if (cmd === '/settings') {
+  },
+
+  '/settings': async (parts) => {
     const op = parts[1];
     if (!op) {
       openSettingsModal();
@@ -2541,7 +2534,9 @@ async function handleCommand(trimmed: string): Promise<void> {
         '[system] Common keys: stream.title, stream.description, chat.maxHistorySize, demo, title.visible, logs.visible, logs.height, logs.tail, viewers.visible, viewers.mode, messages.position, chat.timestamps.visible, events.visible, events.tail, events.width, platforms.<provider>.showViewers, platforms.youtube.setup.*',
       );
     }
-  } else if (cmd === '/logs') {
+  },
+
+  '/logs': async (parts) => {
     const op = parts[1];
     if (op === 'clear') {
       try {
@@ -2569,8 +2564,9 @@ async function handleCommand(trimmed: string): Promise<void> {
     } else {
       lastMessages.push('[logs] Usage: /logs clear | /logs tail <n>');
     }
-  } else if (cmd === '/stream') {
-    // Optional platform filter: /stream [youtube] [twitch] [kick]
+  },
+
+  '/stream': async (parts) => {
     const specified = parts.slice(1).filter((p) => platforms.includes(p));
     const youtubeTargeted = specified.length === 0 || specified.includes('youtube');
     if (youtubeTargeted && youtube.isAuthenticated() && !youtube.getStreamKey()) {
@@ -2578,20 +2574,26 @@ async function handleCommand(trimmed: string): Promise<void> {
     } else {
       openStreamModal(specified);
     }
-  } else if (cmd === '/setup-youtube') {
+  },
+
+  '/setup-youtube': async (_parts) => {
     if (!youtube.isAuthenticated()) {
       lastMessages.push('[system] YouTube is not authenticated. Run /connect youtube first.');
       updateUI(lastMessages);
     } else {
       openYouTubeSetupModal();
     }
-  } else if (cmd === '/exit') {
+  },
+
+  '/exit': async (_parts) => {
     isRunning = false;
     authService.stopAutoRefresh();
     await obsService.disconnect();
     cliRenderer?.destroy();
     process.exit(0);
-  } else if (cmd === '/help') {
+  },
+
+  '/help': async (_parts) => {
     lastMessages.push('[help] Available commands:');
     lastMessages.push(
       '[help] Status symbols: ✓ = authenticated and online, ○ = authenticated but offline, ✗ = not authenticated',
@@ -2630,7 +2632,9 @@ async function handleCommand(trimmed: string): Promise<void> {
     lastMessages.push('[help]   /logs clear | tail <n> | visible <true|false>  — manage logs');
     lastMessages.push('[help]   /exit  — exit the app');
     lastMessages.push('[help]   /help  — show this help');
-  } else if (cmd === '/info') {
+  },
+
+  '/info': async (_parts) => {
     for (const platform of ['youtube', 'twitch', 'kick']) {
       try {
         const info = await fetchPlatformInfo(platform);
@@ -2639,8 +2643,9 @@ async function handleCommand(trimmed: string): Promise<void> {
         lastMessages.push(`[system] ${platform}: error: ${String(err)}`);
       }
     }
-  } else if (cmd === '/chatter') {
-    // /chatter <@username> — open chatter info modal for the most recent message from that user
+  },
+
+  '/chatter': async (parts) => {
     const target = (parts[1] ?? '').replace(/^@/, '').toLowerCase();
     if (!target) {
       lastMessages.push('[chatter] Usage: /chatter <@username>');
@@ -2652,12 +2657,9 @@ async function handleCommand(trimmed: string): Promise<void> {
         openChatterInfoModal(rawMsg);
       }
     }
-  } else if (cmd === '/history') {
-    // /history                   — open broadcasts browser
-    // /history search <query>    — open with search pre-filled
-    // /history user <username>   — search filtered to username
-    // /history stream <id>       — open stream messages directly (not implemented as a flag; user
-    //                              can open the browser and navigate instead)
+  },
+
+  '/history': async (parts) => {
     const sub = parts[1]?.toLowerCase();
     if (sub === 'search') {
       const query = parts.slice(2).join(' ');
@@ -2670,8 +2672,9 @@ async function handleCommand(trimmed: string): Promise<void> {
     } else {
       lastMessages.push('[history] Usage: /history  |  /history search <query>  |  /history user <@name>');
     }
-  } else if (cmd === '/inject') {
-    // /inject <platform> <username> <message text>
+  },
+
+  '/inject': async (parts) => {
     const INJECT_PLATFORMS = ['twitch', 'youtube', 'kick'];
     const platform = (parts[1] ?? '').toLowerCase();
     const username = parts[2] ?? '';
@@ -2700,6 +2703,27 @@ async function handleCommand(trimmed: string): Promise<void> {
         color,
       });
     }
+  },
+};
+initTuiCommands(Object.keys(commandHandlers).sort());
+
+async function handleCommand(trimmed: string): Promise<void> {
+  if (!trimmed.startsWith('/')) {
+    const targetPlatforms = selectedMessageTarget === 'all' ? [] : [selectedMessageTarget];
+    try {
+      await chatService.sendMessage(trimmed, targetPlatforms);
+      lastMessages.push(transformOutgoingMessage(selectedMessageTarget, trimmed));
+    } catch (err) {
+      lastMessages.push(`[system] Failed to send message: ${String(err)}`);
+    }
+    return;
+  }
+
+  const parts = trimmed.split(/\s+/);
+  const cmd = parts[0].toLowerCase();
+  const handler = commandHandlers[cmd];
+  if (handler) {
+    await handler(parts);
   } else {
     lastMessages.push(`[system] Unknown command: ${trimmed}`);
   }
