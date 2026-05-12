@@ -14,17 +14,17 @@ function summarizeMarkerFailure(platform: string, error?: string): string {
       normalized.includes('stream needs to be live') ||
       normalized.includes('streamnotliveerror')
     ) {
-      return 'not live';
+      return '○';
     }
 
     return 'error';
   }
 
   if (platform === 'kick') {
-    return 'unsupported';
+    return '✗';
   }
 
-  return 'unavailable';
+  return '✗';
 }
 
 export function formatMarkerCreationSummary(entries: MarkerCreationSummaryEntry[]): string {

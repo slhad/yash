@@ -9,7 +9,7 @@ describe('formatMarkerCreationSummary', () => {
         { platform: 'twitch', marker: { id: 'tw_2', positionInSeconds: 42 } },
         { platform: 'kick', marker: null },
       ]),
-    ).toBe('youtube: ✓ 0s | twitch: ✓ 42s | kick: unsupported');
+    ).toBe('youtube: ✓ 0s | twitch: ✓ 42s | kick: ✗');
   });
 
   test('compresses known live-state errors to keep the TUI output on one line', () => {
@@ -22,6 +22,6 @@ describe('formatMarkerCreationSummary', () => {
           error: 'error: StreamNotLiveError: Your stream needs to be live to do this',
         },
       ]),
-    ).toBe('youtube: error | twitch: not live');
+    ).toBe('youtube: error | twitch: ○');
   });
 });
