@@ -20,9 +20,91 @@ Small toolkit to manage streaming across YouTube, Twitch, and Kick with a unifie
 - `src/index.tsx` runs the TUI and imports `src/index.ts` as a side effect to start `Bun.serve` in the same process
 - `bun run start:webui` runs only the web server (`src/index.ts`)
 - `bun run start:tui` runs the TUI-focused mode (`YASH_TUI_ONLY=1 bun run src/index.tsx`)
+- `bun run cmd <command>` sends a command to a running TUI process via IPC (see [CLI IPC](#cli-ipc) below)
 - `Bun.serve` intentionally uses `development: false`; Bun development-mode bundle timing output corrupts the TUI rendering on the shared terminal fd
 
 > **Note:** Running the TUI process and web server as separate long-lived processes against the same port is not the supported default flow anymore. Use `bun run start` unless you explicitly want a web-only or TUI-only mode.
+
+## CLI IPC
+
+When a TUI process is running, it listens on a Unix Domain Socket at `YASH_DATA_DIR/yash.sock` (default `~/.yash/yash.sock`). The `bun run cmd` script connects to that socket, sends a command, prints the response, and exits.
+
+```sh
+bun run cmd /marker          # drop a stream marker
+bun run cmd /markers         # list all markers
+bun run cmd /settings get stream.title
+bun run cmd /settings set demo true
+bun run cmd /connect youtube
+bun run cmd /msg all Hello chat
+bun run cmd /help
+```
+
+Both forms are accepted — `bun run cmd marker` and `bun run cmd /marker` are equivalent; the leading `/` is added automatically if omitted.
+
+**Exit behaviour:**
+- Exits `0` with stdout output on success
+- Exits `1` and prints the error string to stderr on command error
+- Exits `1` and prints `yash is not running` when the socket is absent or the connection is refused
+
+**Commands blocked over IPC** (return an error string instead of executing):
+
+| Command | Reason |
+|---|---|
+| `/exit` | Cannot terminate the TUI remotely |
+| `/stream` | Requires TUI modal interaction |
+| `/setup-youtube` | Requires TUI modal interaction |
+| `/history` | Requires TUI modal interaction |
+| `/chatter` | Requires TUI modal interaction |
+| `/settings` (bare) | Requires TUI settings modal |
+
+`/settings get <key>` and `/settings set <key> <value>` work normally over IPC.
+
+**Stale socket cleanup:** the server removes any pre-existing socket file at startup, so a leftover socket from a crash does not block a new TUI launch.
+
+### IPC round-trip flow
+
+```mermaid
+flowchart TD
+    A(["bun run cmd &lt;command&gt;\nsrc/cli.ts"]) --> B["Normalise\n(prepend '/' if missing)"]
+    B --> C["sendCliCommand\nsrc/ipc/client.ts"]
+    C --> D["net.createConnection\n$YASH_DATA_DIR/yash.sock"]
+
+    D -->|"ENOENT / ECONNREFUSED"| E["stderr: 'yash is not running'\nexit 1"]
+    D -->|"connected"| F["Write JSON request\n{command: '/foo bar'}"]
+
+    F --> G[["yash TUI process\nsrc/ipc/server.ts"]]
+    G --> H["Buffer until newline\nparse JSON"]
+    H --> I["handleCommandForCli\nsrc/index.tsx"]
+
+    I -->|"/exit"| J["'Cannot exit the TUI via IPC'"]
+    I -->|"TUI-only cmd\n(/stream /history etc.)"| K["'This command requires the TUI'"]
+    I -->|"unknown cmd"| L["'Unknown command: ...'"]
+    I -->|"valid cmd"| M["commandHandlers#91;cmd#93;(parts, emit)\ncollect lines → join"]
+
+    J --> N["Write {ok: false, error}"]
+    K --> N
+    L --> O["Write {ok: true, output}"]
+    M --> O
+
+    N --> P["socket.end()"]
+    O --> P
+
+    P --> Q["client reads response"]
+    Q -->|"ok: true"| R["stdout: output / exit 0"]
+    Q -->|"ok: false"| S["stderr: error / exit 1"]
+    Q -->|"parse failure"| T["'Invalid response' / exit 1"]
+
+    R --> U["client.end()"]
+    S --> U
+    T --> U
+
+    style E fill:#c0392b,color:#fff
+    style N fill:#e67e22,color:#fff
+    style R fill:#27ae60,color:#fff
+    style S fill:#c0392b,color:#fff
+    style T fill:#c0392b,color:#fff
+    style G fill:#2980b9,color:#fff
+```
 
 ## Configuration
 
