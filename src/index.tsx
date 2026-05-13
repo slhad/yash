@@ -32,6 +32,7 @@ import {
 import { isDemoMode, saveConfig } from './utils/config';
 import logCollector from './utils/logCollector';
 import { defaultLogger } from './utils/logger';
+import { formatMarkerCreationSummary } from './utils/markerSummary';
 import { buildTargetedStreamMetadataUpdate } from './utils/streamMetadata';
 import { getAutocomplete, initTuiCommands } from './utils/tuiCommands';
 import { installTuiErrorCapture } from './utils/tuiErrorCapture';
@@ -2442,11 +2443,6 @@ const commandHandlers: Record<string, (parts: string[]) => Promise<void>> = {
     }
     const { description, timestamp } = parseMarkerArgs(rawParts);
 
-    lastMessages.push(
-      `[marker] Creating on all platforms${description ? ` — "${description}"` : ''}${timestamp !== undefined ? ` @ ${timestamp}s` : ''}…`,
-    );
-    updateUI(lastMessages);
-
     try {
       const results = await Promise.allSettled([
         youtube.createMarker(description, timestamp),
@@ -2454,24 +2450,18 @@ const commandHandlers: Record<string, (parts: string[]) => Promise<void>> = {
         kick.createMarker(description, timestamp),
       ]);
       const labels = ['youtube', 'twitch', 'kick'];
-      for (let i = 0; i < results.length; i++) {
-        const r = results[i];
-        const label = labels[i];
-        if (r.status === 'fulfilled') {
-          if (r.value) {
-            lastMessages.push(
-              `[marker] ${label} ✓ pos=${r.value.positionInSeconds}s id=${r.value.id}`,
-            );
-          } else {
-            lastMessages.push(`[marker] ${label} — not live / not supported`);
-          }
-        } else {
-          lastMessages.push(`[marker] ${label} error: ${String(r.reason)}`);
-        }
-      }
+      const summary = formatMarkerCreationSummary(
+        results.map((result, index) => ({
+          platform: labels[index] ?? `provider-${index + 1}`,
+          marker: result.status === 'fulfilled' ? result.value : null,
+          error: result.status === 'rejected' ? `error: ${String(result.reason)}` : undefined,
+        })),
+      );
+      lastMessages.push(`[marker] ${summary}`);
     } catch (err) {
       lastMessages.push(`[marker] Error: ${String(err)}`);
     }
+    updateUI(lastMessages);
   },
 
   '/markers': async (parts) => {
