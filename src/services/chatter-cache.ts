@@ -24,15 +24,16 @@ export class ChatterCache {
     userId: string,
     messages: ChatMessage[],
   ): { count: number; firstSeenAt?: Date } {
-    const userMessages = messages.filter(
-      (m) => m.platform === platform && m.userId === userId,
-    );
+    const userMessages = messages.filter((m) => m.platform === platform && m.userId === userId);
 
     if (userMessages.length === 0) {
       return { count: 0 };
     }
 
-    const earliest = userMessages.reduce((min, m) => (m.timestamp < min ? m.timestamp : min), userMessages[0]!.timestamp);
+    const earliest = userMessages.reduce(
+      (min, m) => (m.timestamp < min ? m.timestamp : min),
+      userMessages[0]!.timestamp,
+    );
 
     return {
       count: userMessages.length,

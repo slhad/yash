@@ -1,6 +1,6 @@
-import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
-import { MessageLog } from '../src/services/message-log';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { ChatMessage } from '../src/platforms/base';
+import { MessageLog } from '../src/services/message-log';
 
 function makeMsg(overrides: Partial<ChatMessage> = {}): ChatMessage {
   return {
@@ -94,7 +94,9 @@ describe('MessageLog', () => {
 
     test('respects the limit parameter', () => {
       for (let i = 0; i < 5; i++) {
-        log.insert(makeMsg({ id: `msg-${i}`, platform: 'twitch', userId: 'user123', timestamp: i * 1000 }));
+        log.insert(
+          makeMsg({ id: `msg-${i}`, platform: 'twitch', userId: 'user123', timestamp: i * 1000 }),
+        );
       }
       const results = log.getForUser('twitch', 'user123', 3);
       expect(results).toHaveLength(3);
@@ -102,13 +104,20 @@ describe('MessageLog', () => {
 
     test('reconstructs badges from JSON', () => {
       const badges = { subscriber: '6', moderator: '1' };
-      log.insert(makeMsg({ id: 'badged', platform: 'twitch', userId: 'user123', timestamp: 1000, badges }));
+      log.insert(
+        makeMsg({ id: 'badged', platform: 'twitch', userId: 'user123', timestamp: 1000, badges }),
+      );
       const results = log.getForUser('twitch', 'user123');
       expect(results[0]!.badges).toEqual(badges);
     });
 
     test('handles null color and badges gracefully', () => {
-      const msg = makeMsg({ id: 'no-extras', platform: 'twitch', userId: 'user123', timestamp: 1000 });
+      const msg = makeMsg({
+        id: 'no-extras',
+        platform: 'twitch',
+        userId: 'user123',
+        timestamp: 1000,
+      });
       delete msg.color;
       delete msg.badges;
       log.insert(msg);

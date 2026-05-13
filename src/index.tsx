@@ -13,10 +13,8 @@ import {
   TextAttributes,
   TextRenderable,
 } from '@opentui/core';
-import { YT_CATEGORY_NAMES } from './platforms/youtube';
 import type { ChatMessage } from './platforms/base';
-import { ChatterCache } from './services/chatter-cache';
-import { messageLog, type StreamSummary } from './services/message-log';
+import { YT_CATEGORY_NAMES } from './platforms/youtube';
 import {
   authService,
   chatService,
@@ -29,6 +27,8 @@ import {
   twitch,
   youtube,
 } from './services';
+import { ChatterCache } from './services/chatter-cache';
+import { messageLog, type StreamSummary } from './services/message-log';
 import { isDemoMode, saveConfig } from './utils/config';
 import logCollector from './utils/logCollector';
 import { defaultLogger } from './utils/logger';
@@ -46,6 +46,7 @@ import {
 } from './utils/tuiSettings';
 import { parseMarkerArgs, parseSettingsValue } from './utils/webCommands';
 import './index.ts'; // start Bun.serve web server in the same process
+import { startIpcServer } from './ipc/server';
 
 const settings = settingsStore;
 
@@ -221,7 +222,14 @@ const chatterCache = new ChatterCache();
 
 function ensureMainInputFocus(): void {
   if (!uiNodes) return;
-  if (activeModal || activeStreamModal || activeSettingsModal || activeChatterInfoModal || activeHistoryModal) return;
+  if (
+    activeModal ||
+    activeStreamModal ||
+    activeSettingsModal ||
+    activeChatterInfoModal ||
+    activeHistoryModal
+  )
+    return;
   if (!uiNodes.inputEl.focused) {
     uiNodes.inputEl.focus();
   }
@@ -2352,11 +2360,14 @@ function openStreamModal(preselected: string[]): void {
 
 // Keys of this object are the single source of truth for TUI command names —
 // initTuiCommands() below syncs them into the autocomplete module at startup.
-const commandHandlers: Record<string, (parts: string[]) => Promise<void>> = {
-  '/connect': async (parts) => {
+const commandHandlers: Record<
+  string,
+  (parts: string[], emit: (line: string) => void) => Promise<void>
+> = {
+  '/connect': async (parts, emit) => {
     const platform = (parts[1] ?? '').toLowerCase();
     if (!platform) {
-      lastMessages.push('[system] Usage: /connect <youtube|twitch|kick|obs>');
+      emit('[system] Usage: /connect <youtube|twitch|kick|obs>');
       return;
     }
     if (platform === 'obs') {
@@ -2372,11 +2383,11 @@ const commandHandlers: Record<string, (parts: string[]) => Promise<void>> = {
             ? kick
             : null;
     if (provider) {
-      lastMessages.push(`[system] Authenticating ${platform}...`);
+      emit(`[system] Authenticating ${platform}...`);
       try {
         const res = await provider.authenticate();
         if (res?.success) {
-          lastMessages.push(`[system] ${platform} authentication succeeded`);
+          emit(`[system] ${platform} authentication succeeded`);
           updateUI(lastMessages);
           if (platform === 'youtube' && !youtube.getStreamKey()) {
             openYouTubeStreamPickerModal();
@@ -2385,7 +2396,7 @@ const commandHandlers: Record<string, (parts: string[]) => Promise<void>> = {
         } else if (res?.error?.startsWith('oauth_required:')) {
           const authUrl = res.error.slice('oauth_required:'.length);
           const fallbackUrl = `http://localhost:3000/api/${platform}/auth`;
-          lastMessages.push(`[system] Opening browser for ${platform} OAuth...`);
+          emit(`[system] Opening browser for ${platform} OAuth...`);
           const proc = Bun.spawn(['xdg-open', authUrl]);
           proc.exited.then((code) => {
             if (code !== 0) {
@@ -2400,19 +2411,17 @@ const commandHandlers: Record<string, (parts: string[]) => Promise<void>> = {
         } else if (platform === 'youtube' && res?.error === 'YouTube credentials not configured') {
           openYouTubeCredentialsModal();
         } else {
-          lastMessages.push(
-            `[system] ${platform} authentication failed: ${res?.error ?? 'unknown error'}`,
-          );
+          emit(`[system] ${platform} authentication failed: ${res?.error ?? 'unknown error'}`);
         }
       } catch (err) {
-        lastMessages.push(`[system] ${platform} authentication error: ${String(err)}`);
+        emit(`[system] ${platform} authentication error: ${String(err)}`);
       }
     } else {
-      lastMessages.push(`[system] Unknown platform: ${platform}`);
+      emit(`[system] Unknown platform: ${platform}`);
     }
   },
 
-  '/msg': async (parts) => {
+  '/msg': async (parts, emit) => {
     const target = parts[1]?.toLowerCase();
     const text = parts.slice(2).join(' ');
     const validTargets = ['all', 'youtube', 'twitch', 'kick'];
@@ -2420,23 +2429,23 @@ const commandHandlers: Record<string, (parts: string[]) => Promise<void>> = {
       const targetPlatforms = target === 'all' ? [] : [target];
       try {
         await chatService.sendMessage(text, targetPlatforms);
-        lastMessages.push(transformOutgoingMessage(target as MessageTarget, text));
+        emit(`[you → ${target}] ${text}`);
       } catch (err) {
-        lastMessages.push(`[system] Failed to send message: ${String(err)}`);
+        emit(`[system] Failed to send message: ${String(err)}`);
       }
     } else {
-      lastMessages.push('[system] Usage: /msg <all|youtube|twitch|kick> <text>');
+      emit('[system] Usage: /msg <all|youtube|twitch|kick> <text>');
     }
   },
 
-  '/marker': async (parts) => {
+  '/marker': async (parts, emit) => {
     const rawParts = parts.slice(1);
     const rawArgs = rawParts.join(' ');
     const pipeIdx = rawArgs.indexOf('|');
     if (pipeIdx !== -1) {
       const tsRaw = rawArgs.slice(pipeIdx + 1).trim();
       if (tsRaw && Number.isNaN(Number.parseFloat(tsRaw))) {
-        lastMessages.push(`[marker] Invalid timestamp "${tsRaw}" — must be a non-negative number`);
+        emit(`[marker] Invalid timestamp "${tsRaw}" — must be a non-negative number`);
         updateUI(lastMessages);
         return;
       }
@@ -2457,26 +2466,26 @@ const commandHandlers: Record<string, (parts: string[]) => Promise<void>> = {
           error: result.status === 'rejected' ? `error: ${String(result.reason)}` : undefined,
         })),
       );
-      lastMessages.push(`[marker] ${summary}`);
+      emit(`[marker] ${summary}`);
     } catch (err) {
-      lastMessages.push(`[marker] Error: ${String(err)}`);
+      emit(`[marker] Error: ${String(err)}`);
     }
     updateUI(lastMessages);
   },
 
-  '/markers': async (parts) => {
+  '/markers': async (parts, emit) => {
     if ((parts[1] ?? '').toLowerCase() === 'clear') {
       if (parts.length > 2) {
-        lastMessages.push('[markers] Usage: /markers clear | [all|youtube|twitch|kick] [limit]');
+        emit('[markers] Usage: /markers clear | [all|youtube|twitch|kick] [limit]');
         updateUI(lastMessages);
         return;
       }
 
       try {
         await youtube.clearPersistedMarkers();
-        lastMessages.push('[markers] youtube: cleared persisted markers');
+        emit('[markers] youtube: cleared persisted markers');
       } catch (err) {
-        lastMessages.push(`[markers] youtube: clear error: ${String(err)}`);
+        emit(`[markers] youtube: clear error: ${String(err)}`);
       }
       updateUI(lastMessages);
       return;
@@ -2489,7 +2498,7 @@ const commandHandlers: Record<string, (parts: string[]) => Promise<void>> = {
     const limit = limitToken ? Number.parseInt(limitToken, 10) : 20;
 
     if (limitToken && (Number.isNaN(limit) || limit <= 0)) {
-      lastMessages.push('[markers] Usage: /markers clear | [all|youtube|twitch|kick] [limit]');
+      emit('[markers] Usage: /markers clear | [all|youtube|twitch|kick] [limit]');
       updateUI(lastMessages);
       return;
     }
@@ -2500,77 +2509,75 @@ const commandHandlers: Record<string, (parts: string[]) => Promise<void>> = {
         const provider = target === 'youtube' ? youtube : target === 'twitch' ? twitch : kick;
         const markers = await provider.getMarkers({ limit });
         if (markers.length === 0) {
-          lastMessages.push(`[markers] ${target}: none`);
+          emit(`[markers] ${target}: none`);
           continue;
         }
-        lastMessages.push(`[markers] ${target}:`);
+        emit(`[markers] ${target}:`);
         for (const marker of markers) {
-          lastMessages.push(
+          emit(
             `[markers]   ${formatMarkerPosition(marker.positionInSeconds)}  ${marker.description || '(untitled)'}  [${marker.id}]`,
           );
         }
       } catch (err) {
-        lastMessages.push(`[markers] ${target}: error: ${String(err)}`);
+        emit(`[markers] ${target}: error: ${String(err)}`);
       }
     }
   },
 
-  '/settings': async (parts) => {
+  '/settings': async (parts, emit) => {
     const op = parts[1];
     if (!op) {
       openSettingsModal();
     } else if (op === 'get' && parts[2]) {
       const key = parts[2];
       const val = getSettingValue(key);
-      lastMessages.push(`[settings] ${key} = ${JSON.stringify(val)}`);
+      emit(`[settings] ${key} = ${JSON.stringify(val)}`);
     } else if (op === 'set' && parts[2] && parts[3]) {
       const key = parts[2];
       const rawValue = parts.slice(3).join(' ');
       const value = parseSettingsValue(rawValue);
       const changedKeys = await persistSettingEntries([{ key, value }]);
-      if (changedKeys.length === 0) lastMessages.push('[settings] No changes.');
-      else lastMessages.push(`[settings] set ${key} = ${JSON.stringify(value)}`);
+      if (changedKeys.length === 0) emit('[settings] No changes.');
+      else emit(`[settings] set ${key} = ${JSON.stringify(value)}`);
     } else {
-      lastMessages.push(
-        '[system] Usage: /settings | /settings get <key> | /settings set <key> <json-value>',
-      );
-      lastMessages.push(
+      emit('[system] Usage: /settings | /settings get <key> | /settings set <key> <json-value>');
+      emit(
         '[system] Common keys: stream.title, stream.description, chat.maxHistorySize, demo, title.visible, logs.visible, logs.height, logs.tail, viewers.visible, viewers.mode, messages.position, chat.timestamps.visible, events.visible, events.tail, events.width, platforms.<provider>.showViewers, platforms.youtube.setup.*',
       );
     }
   },
 
-  '/logs': async (parts) => {
+  '/logs': async (parts, emit) => {
     const op = parts[1];
     if (op === 'clear') {
       try {
         logCollector.clear();
-        lastMessages.push('[logs] cleared');
+        emit('[logs] cleared');
       } catch {
-        lastMessages.push('[logs] failed to clear');
+        emit('[logs] failed to clear');
       }
     } else if (op === 'tail' && parts[2]) {
       const n = parseInt(parts[2], 10) || 0;
       if (n > 0) {
         await settings.set('logs.tail', n);
-        lastMessages.push(`[logs] tail set to ${n}`);
+        emit(`[logs] tail set to ${n}`);
       } else {
-        lastMessages.push('[logs] Usage: /logs tail <n>');
+        emit('[logs] Usage: /logs tail <n>');
       }
     } else if (op === 'visible' && parts[2]) {
       const v = String(parts[2]).toLowerCase();
       if (v === 'true' || v === 'false') {
         await settings.set('logs.visible', v === 'true');
-        lastMessages.push(`[logs] visible set to ${v}`);
+        emit(`[logs] visible set to ${v}`);
       } else {
-        lastMessages.push('[logs] Usage: /logs visible <true|false>');
+        emit('[logs] Usage: /logs visible <true|false>');
       }
     } else {
-      lastMessages.push('[logs] Usage: /logs clear | /logs tail <n>');
+      emit('[logs] Usage: /logs clear | /logs tail <n>');
     }
   },
 
-  '/stream': async (parts) => {
+  '/stream': async (parts, _emit) => {
     const specified = parts.slice(1).filter((p) => platforms.includes(p));
     const youtubeTargeted = specified.length === 0 || specified.includes('youtube');
     if (youtubeTargeted && youtube.isAuthenticated() && !youtube.getStreamKey()) {
@@ -2580,16 +2587,16 @@ const commandHandlers: Record<string, (parts: string[]) => Promise<void>> = {
     }
   },
 
-  '/setup-youtube': async (_parts) => {
+  '/setup-youtube': async (_parts, emit) => {
     if (!youtube.isAuthenticated()) {
-      lastMessages.push('[system] YouTube is not authenticated. Run /connect youtube first.');
+      emit('[system] YouTube is not authenticated. Run /connect youtube first.');
       updateUI(lastMessages);
     } else {
       openYouTubeSetupModal();
     }
   },
 
-  '/exit': async (_parts) => {
+  '/exit': async (_parts, _emit) => {
     isRunning = false;
     authService.stopAutoRefresh();
     await obsService.disconnect();
@@ -2597,73 +2604,71 @@ const commandHandlers: Record<string, (parts: string[]) => Promise<void>> = {
     process.exit(0);
   },
 
-  '/help': async (_parts) => {
-    lastMessages.push('[help] Available commands:');
-    lastMessages.push(
+  '/help': async (_parts, emit) => {
+    emit('[help] Available commands:');
+    emit(
       '[help] Status symbols: ✓ = authenticated and online, ○ = authenticated but offline, ✗ = not authenticated',
     );
-    lastMessages.push(
-      '[help]   /connect <youtube|twitch|kick|obs>  — authenticate a platform or configure OBS',
-    );
-    lastMessages.push(
-      '[help]   /stream [platform…]  — edit stream info (opens modal, persists to settings)',
-    );
-    lastMessages.push(
+    emit('[help]   /connect <youtube|twitch|kick|obs>  — authenticate a platform or configure OBS');
+    emit('[help]   /stream [platform…]  — edit stream info (opens modal, persists to settings)');
+    emit(
       '[help]   /setup-youtube  — configure YouTube stream options (playlists, tags, chapters, description)',
     );
-    lastMessages.push('[help]   /msg <all|youtube|twitch|kick> <text>  — send a message');
-    lastMessages.push(
+    emit('[help]   /msg <all|youtube|twitch|kick> <text>  — send a message');
+    emit(
       '[help]   /marker [description] [| timestamp_s]  — place a stream marker on all platforms',
     );
-    lastMessages.push('[help]       e.g.  /marker Intro | 0');
-    lastMessages.push(
-      '[help]       e.g.  /marker Q&A | 3723    (timestamp in seconds, YouTube only)',
-    );
-    lastMessages.push(
+    emit('[help]       e.g.  /marker Intro | 0');
+    emit('[help]       e.g.  /marker Q&A | 3723    (timestamp in seconds, YouTube only)');
+    emit(
       '[help]   /markers clear | [all|youtube|twitch|kick] [limit]  — list markers or clear YouTube chapters',
     );
-    lastMessages.push('[help]   /info  — show current stream/channel info from all providers');
-    lastMessages.push(
+    emit('[help]   /info  — show current stream/channel info from all providers');
+    emit(
       '[help]   /inject <twitch|youtube|kick> <username> <message>  — inject a fake chat message for offline testing',
     );
-    lastMessages.push('[help]   /chatter <@username>  — open chatter info modal for the most recent message from that user');
-    lastMessages.push('[help]   /history  — browse all stream broadcasts and search message history');
-    lastMessages.push('[help]   /history search <query>  — open history with search pre-filled');
-    lastMessages.push('[help]   /history user <@name>  — search history filtered to a user');
-    lastMessages.push('[help]   /settings  — open the settings modal');
-    lastMessages.push('[help]   /settings get <key>  — get a setting value');
-    lastMessages.push('[help]   /settings set <key> <value>  — set a setting value');
-    lastMessages.push('[help]   /logs clear | tail <n> | visible <true|false>  — manage logs');
-    lastMessages.push('[help]   /exit  — exit the app');
-    lastMessages.push('[help]   /help  — show this help');
+    emit(
+      '[help]   /chatter <@username>  — open chatter info modal for the most recent message from that user',
+    );
+    emit('[help]   /history  — browse all stream broadcasts and search message history');
+    emit('[help]   /history search <query>  — open history with search pre-filled');
+    emit('[help]   /history user <@name>  — search history filtered to a user');
+    emit('[help]   /settings  — open the settings modal');
+    emit('[help]   /settings get <key>  — get a setting value');
+    emit('[help]   /settings set <key> <value>  — set a setting value');
+    emit('[help]   /logs clear | tail <n> | visible <true|false>  — manage logs');
+    emit('[help]   /exit  — exit the app');
+    emit('[help]   /help  — show this help');
   },
 
-  '/info': async (_parts) => {
+  '/info': async (_parts, emit) => {
     for (const platform of ['youtube', 'twitch', 'kick']) {
       try {
         const info = await fetchPlatformInfo(platform);
-        lastMessages.push(`[system] ${platform}: ${formatInfoValue(info)}`);
+        emit(`[system] ${platform}: ${formatInfoValue(info)}`);
       } catch (err) {
-        lastMessages.push(`[system] ${platform}: error: ${String(err)}`);
+        emit(`[system] ${platform}: error: ${String(err)}`);
       }
     }
   },
 
-  '/chatter': async (parts) => {
+  '/chatter': async (parts, emit) => {
     const target = (parts[1] ?? '').replace(/^@/, '').toLowerCase();
     if (!target) {
-      lastMessages.push('[chatter] Usage: /chatter <@username>');
+      emit('[chatter] Usage: /chatter <@username>');
     } else {
-      const rawMsg = [...lastRawMessages].reverse().find(m => m.username.toLowerCase() === target);
+      const rawMsg = [...lastRawMessages]
+        .reverse()
+        .find((m) => m.username.toLowerCase() === target);
       if (!rawMsg) {
-        lastMessages.push(`[chatter] No recent message found from @${target}`);
+        emit(`[chatter] No recent message found from @${target}`);
       } else {
         openChatterInfoModal(rawMsg);
       }
     }
   },
 
-  '/history': async (parts) => {
+  '/history': async (parts, emit) => {
     const sub = parts[1]?.toLowerCase();
     if (sub === 'search') {
       const query = parts.slice(2).join(' ');
@@ -2674,26 +2679,24 @@ const commandHandlers: Record<string, (parts: string[]) => Promise<void>> = {
     } else if (!sub) {
       openHistoryModal();
     } else {
-      lastMessages.push('[history] Usage: /history  |  /history search <query>  |  /history user <@name>');
+      emit('[history] Usage: /history  |  /history search <query>  |  /history user <@name>');
     }
   },
 
-  '/inject': async (parts) => {
+  '/inject': async (parts, emit) => {
     const INJECT_PLATFORMS = ['twitch', 'youtube', 'kick'];
     const platform = (parts[1] ?? '').toLowerCase();
     const username = parts[2] ?? '';
     const messageText = parts.slice(3).join(' ');
 
     if (!platform || !INJECT_PLATFORMS.includes(platform)) {
-      lastMessages.push(
+      emit(
         `[inject] Invalid or missing platform. Usage: /inject <twitch|youtube|kick> <username> <message>`,
       );
     } else if (!username) {
-      lastMessages.push('[inject] Missing username. Usage: /inject <platform> <username> <message>');
+      emit('[inject] Missing username. Usage: /inject <platform> <username> <message>');
     } else if (!messageText) {
-      lastMessages.push(
-        '[inject] Missing message text. Usage: /inject <platform> <username> <message>',
-      );
+      emit('[inject] Missing message text. Usage: /inject <platform> <username> <message>');
     } else {
       const INJECT_COLORS = ['#FF7F50', '#9370DB', '#3CB371', '#FF69B4', '#00CED1', '#FFD700'];
       const color = INJECT_COLORS[username.length % INJECT_COLORS.length];
@@ -2723,14 +2726,38 @@ async function handleCommand(trimmed: string): Promise<void> {
     return;
   }
 
+  const emit = (line: string) => lastMessages.push(line);
   const parts = trimmed.split(/\s+/);
   const cmd = parts[0].toLowerCase();
   const handler = commandHandlers[cmd];
   if (handler) {
-    await handler(parts);
+    await handler(parts, emit);
   } else {
-    lastMessages.push(`[system] Unknown command: ${trimmed}`);
+    emit(`[system] Unknown command: ${trimmed}`);
   }
+}
+
+async function handleCommandForCli(trimmed: string): Promise<string> {
+  const parts = trimmed.split(/\s+/);
+  const cmd = parts[0].toLowerCase();
+
+  if (cmd === '/exit') return 'Cannot exit the TUI via IPC';
+
+  const tuiOnlyCommands = new Set(['/stream', '/setup-youtube', '/history', '/chatter']);
+  if (tuiOnlyCommands.has(cmd)) return 'This command requires the TUI';
+  if (cmd === '/settings' && !parts[1]) return 'This command requires the TUI';
+
+  const lines: string[] = [];
+  const emit = (line: string) => lines.push(line);
+
+  const handler = commandHandlers[cmd];
+  if (handler) {
+    await handler(parts, emit);
+  } else {
+    emit(`[system] Unknown command: ${trimmed}`);
+  }
+
+  return lines.join('\n');
 }
 
 function openSettingsModal(): void {
@@ -3217,7 +3244,8 @@ function openSettingsModal(): void {
 // ─── Chatter info modal ──────────────────────────────────────────────────────
 
 function openChatterInfoModal(msg: ChatMessage): void {
-  if (!uiNodes || activeModal || activeStreamModal || activeSettingsModal || activeChatterInfoModal) return;
+  if (!uiNodes || activeModal || activeStreamModal || activeSettingsModal || activeChatterInfoModal)
+    return;
   const { renderer } = uiNodes;
 
   const platColor = (p: string): string => {
@@ -3246,7 +3274,11 @@ function openChatterInfoModal(msg: ChatMessage): void {
   let contextExhausted = false;
   let contextLoading = false;
 
-  function renderTabBar(sessionCount: number, alltimeCount: number, contextCount: number): StyledText {
+  function renderTabBar(
+    sessionCount: number,
+    alltimeCount: number,
+    contextCount: number,
+  ): StyledText {
     const sessionColor = activeTab === 'session' ? 'cyan' : '#555555';
     const alltimeColor = activeTab === 'alltime' ? 'cyan' : '#555555';
     const contextColor = activeTab === 'context' ? 'cyan' : '#555555';
@@ -3295,10 +3327,13 @@ function openChatterInfoModal(msg: ChatMessage): void {
   box.add(infoText);
   box.add(tabBarTextNode);
   box.add(msgScroll);
-  box.add(new TextRenderable(renderer, {
-    content: '  [S] session  [A] all-time  [C] context  [↑] scroll / load older  [↓] scroll  [Esc] close',
-    fg: '#888888',
-  }));
+  box.add(
+    new TextRenderable(renderer, {
+      content:
+        '  [S] session  [A] all-time  [C] context  [↑] scroll / load older  [↓] scroll  [Esc] close',
+      fg: '#888888',
+    }),
+  );
   renderer.root.add(box);
   activeChatterInfoModal = { box };
 
@@ -3328,10 +3363,17 @@ function openChatterInfoModal(msg: ChatMessage): void {
     row.add(new TextRenderable(renderer, { content: fmtTimestamp(m.timestamp), fg: '#888888' }));
     if (isTargetUser) {
       row.add(new TextRenderable(renderer, { content: '★ ', fg: 'cyan' }));
-      row.add(new TextRenderable(renderer, { content: `${m.username}: `, fg: m.color ?? platColor(m.platform) }));
+      row.add(
+        new TextRenderable(renderer, {
+          content: `${m.username}: `,
+          fg: m.color ?? platColor(m.platform),
+        }),
+      );
       row.add(new TextRenderable(renderer, { content: m.message, fg: 'white' }));
     } else {
-      row.add(new TextRenderable(renderer, { content: `[${m.platform}] `, fg: platColor(m.platform) }));
+      row.add(
+        new TextRenderable(renderer, { content: `[${m.platform}] `, fg: platColor(m.platform) }),
+      );
       row.add(new TextRenderable(renderer, { content: `${m.username}: `, fg: '#888888' }));
       row.add(new TextRenderable(renderer, { content: m.message, fg: '#aaaaaa' }));
     }
@@ -3341,9 +3383,11 @@ function openChatterInfoModal(msg: ChatMessage): void {
   // Render all of alltimeMessages into the (already-cleared) scroll box.
   function renderAlltimeFull(): void {
     if (alltimeExhausted) {
-      msgScroll.add(new TextRenderable(renderer, { content: '  ── beginning of history ──', fg: '#555555' }));
+      msgScroll.add(
+        new TextRenderable(renderer, { content: '  ── beginning of history ──', fg: '#555555' }),
+      );
     }
-    let lastStreamId: string | undefined = undefined;
+    let lastStreamId: string | undefined;
     for (const m of alltimeMessages) {
       if (m.streamId !== lastStreamId) {
         lastStreamId = m.streamId;
@@ -3359,10 +3403,18 @@ function openChatterInfoModal(msg: ChatMessage): void {
     if (alltimeLoading || alltimeExhausted) return;
     alltimeLoading = true;
     try {
-      const batch = messageLog.getForUserDesc(platform, userId, ALLTIME_PAGE_SIZE, alltimePage * ALLTIME_PAGE_SIZE);
+      const batch = messageLog.getForUserDesc(
+        platform,
+        userId,
+        ALLTIME_PAGE_SIZE,
+        alltimePage * ALLTIME_PAGE_SIZE,
+      );
       if (batch.length === 0) {
         alltimeExhausted = true;
-        msgScroll.add(new TextRenderable(renderer, { content: '  ── beginning of history ──', fg: '#555555' }), 0);
+        msgScroll.add(
+          new TextRenderable(renderer, { content: '  ── beginning of history ──', fg: '#555555' }),
+          0,
+        );
         return;
       }
 
@@ -3381,7 +3433,7 @@ function openChatterInfoModal(msg: ChatMessage): void {
       }
 
       let insertIdx = 0;
-      let localLastStreamId: string | undefined = undefined;
+      let localLastStreamId: string | undefined;
       for (const m of chronoBatch) {
         if (m.streamId !== localLastStreamId) {
           localLastStreamId = m.streamId;
@@ -3391,7 +3443,10 @@ function openChatterInfoModal(msg: ChatMessage): void {
       }
 
       if (alltimeExhausted) {
-        msgScroll.add(new TextRenderable(renderer, { content: '  ── beginning of history ──', fg: '#555555' }), 0);
+        msgScroll.add(
+          new TextRenderable(renderer, { content: '  ── beginning of history ──', fg: '#555555' }),
+          0,
+        );
       }
 
       alltimeMessages = [...chronoBatch, ...alltimeMessages];
@@ -3402,15 +3457,19 @@ function openChatterInfoModal(msg: ChatMessage): void {
 
   function renderContextFull(): void {
     if (contextExhausted) {
-      msgScroll.add(new TextRenderable(renderer, { content: '  ── beginning of context ──', fg: '#555555' }));
+      msgScroll.add(
+        new TextRenderable(renderer, { content: '  ── beginning of context ──', fg: '#555555' }),
+      );
     }
-    let lastStreamId: string | undefined = undefined;
+    let lastStreamId: string | undefined;
     for (const m of contextMessages) {
       if (m.streamId !== lastStreamId) {
         lastStreamId = m.streamId;
         msgScroll.add(makeStreamSeparator(m.timestamp));
       }
-      msgScroll.add(makeContextMessageRow(m, m.platform === msg.platform && m.userId === msg.userId));
+      msgScroll.add(
+        makeContextMessageRow(m, m.platform === msg.platform && m.userId === msg.userId),
+      );
     }
   }
 
@@ -3418,10 +3477,18 @@ function openChatterInfoModal(msg: ChatMessage): void {
     if (contextLoading || contextExhausted) return;
     contextLoading = true;
     try {
-      const batch = messageLog.getContextForUserDesc(platform, userId, ALLTIME_PAGE_SIZE, contextPage * ALLTIME_PAGE_SIZE);
+      const batch = messageLog.getContextForUserDesc(
+        platform,
+        userId,
+        ALLTIME_PAGE_SIZE,
+        contextPage * ALLTIME_PAGE_SIZE,
+      );
       if (batch.length === 0) {
         contextExhausted = true;
-        msgScroll.add(new TextRenderable(renderer, { content: '  ── beginning of context ──', fg: '#555555' }), 0);
+        msgScroll.add(
+          new TextRenderable(renderer, { content: '  ── beginning of context ──', fg: '#555555' }),
+          0,
+        );
         return;
       }
 
@@ -3437,17 +3504,23 @@ function openChatterInfoModal(msg: ChatMessage): void {
       }
 
       let insertIdx = 0;
-      let localLastStreamId: string | undefined = undefined;
+      let localLastStreamId: string | undefined;
       for (const m of chronoBatch) {
         if (m.streamId !== localLastStreamId) {
           localLastStreamId = m.streamId;
           msgScroll.add(makeStreamSeparator(m.timestamp), insertIdx++);
         }
-        msgScroll.add(makeContextMessageRow(m, m.platform === platform && m.userId === userId), insertIdx++);
+        msgScroll.add(
+          makeContextMessageRow(m, m.platform === platform && m.userId === userId),
+          insertIdx++,
+        );
       }
 
       if (contextExhausted) {
-        msgScroll.add(new TextRenderable(renderer, { content: '  ── beginning of context ──', fg: '#555555' }), 0);
+        msgScroll.add(
+          new TextRenderable(renderer, { content: '  ── beginning of context ──', fg: '#555555' }),
+          0,
+        );
       }
 
       contextMessages = [...chronoBatch, ...contextMessages];
@@ -3458,14 +3531,19 @@ function openChatterInfoModal(msg: ChatMessage): void {
 
   // ── Fill scroll helper ─────────────────────────────────────────────────────
 
-  function fillMessageScroll(tab: 'session' | 'alltime' | 'context', platform: string, userId: string): void {
+  function fillMessageScroll(
+    tab: 'session' | 'alltime' | 'context',
+    platform: string,
+    userId: string,
+  ): void {
     for (const child of msgScroll.getChildren()) {
       msgScroll.remove(child.id);
     }
 
     if (tab === 'session') {
-      const messages = chatService.getMessageHistory()
-        .filter(m => m.platform === platform && m.userId === userId);
+      const messages = chatService
+        .getMessageHistory()
+        .filter((m) => m.platform === platform && m.userId === userId);
       if (messages.length === 0) {
         msgScroll.add(new TextRenderable(renderer, { content: '  (no messages)', fg: '#888888' }));
         return;
@@ -3488,7 +3566,9 @@ function openChatterInfoModal(msg: ChatMessage): void {
       }
       renderAlltimeFull();
       // Defer scroll until after layout is computed (two ticks to be safe)
-      setTimeout(() => { msgScroll.scrollTo(99999); }, 32);
+      setTimeout(() => {
+        msgScroll.scrollTo(99999);
+      }, 32);
     } else {
       // Context tab — all messages from streams where the chatter participated
       if (contextMessages.length === 0) {
@@ -3498,12 +3578,19 @@ function openChatterInfoModal(msg: ChatMessage): void {
         contextExhausted = batch.length < ALLTIME_PAGE_SIZE;
       }
       if (contextMessages.length === 0) {
-        msgScroll.add(new TextRenderable(renderer, { content: '  (no context — messages need stream IDs)', fg: '#888888' }));
+        msgScroll.add(
+          new TextRenderable(renderer, {
+            content: '  (no context — messages need stream IDs)',
+            fg: '#888888',
+          }),
+        );
         contextExhausted = true;
         return;
       }
       renderContextFull();
-      setTimeout(() => { msgScroll.scrollTo(99999); }, 32);
+      setTimeout(() => {
+        msgScroll.scrollTo(99999);
+      }, 32);
     }
   }
 
@@ -3569,7 +3656,12 @@ function openChatterInfoModal(msg: ChatMessage): void {
 
       if (!info) {
         // Fetch from provider
-        let provider: { fetchChatterInfo?: (userId: string, username: string) => Promise<import('./platforms/base').ChatterInfo | null> } | null = null;
+        let provider: {
+          fetchChatterInfo?: (
+            userId: string,
+            username: string,
+          ) => Promise<import('./platforms/base').ChatterInfo | null>;
+        } | null = null;
         if (msg.platform === 'twitch') provider = twitch;
         else if (msg.platform === 'youtube') provider = youtube;
         else if (msg.platform === 'kick') provider = kick;
@@ -3592,13 +3684,21 @@ function openChatterInfoModal(msg: ChatMessage): void {
           };
         }
 
-        const stats = chatterCache.computeSessionStats(msg.platform, msg.userId, chatService.getMessageHistory());
+        const stats = chatterCache.computeSessionStats(
+          msg.platform,
+          msg.userId,
+          chatService.getMessageHistory(),
+        );
         info.sessionMessageCount = stats.count;
         if (stats.firstSeenAt) info.sessionFirstSeenAt = stats.firstSeenAt;
 
         chatterCache.set(msg.platform, msg.userId, info);
       } else {
-        const stats = chatterCache.computeSessionStats(msg.platform, msg.userId, chatService.getMessageHistory());
+        const stats = chatterCache.computeSessionStats(
+          msg.platform,
+          msg.userId,
+          chatService.getMessageHistory(),
+        );
         info.sessionMessageCount = stats.count;
         if (stats.firstSeenAt) info.sessionFirstSeenAt = stats.firstSeenAt;
       }
@@ -3618,7 +3718,7 @@ function openChatterInfoModal(msg: ChatMessage): void {
 
       if (info.accountCreatedAt !== undefined) {
         const dateStr = info.accountCreatedAt
-          ? new Date(info.accountCreatedAt).toISOString().split('T')[0] ?? 'Unknown'
+          ? (new Date(info.accountCreatedAt).toISOString().split('T')[0] ?? 'Unknown')
           : 'Unknown';
         rows.push(['Account created:', dateStr, 'white']);
       }
@@ -3657,7 +3757,6 @@ function openChatterInfoModal(msg: ChatMessage): void {
       tabBarTextNode.content = renderTabBar(tabSessionCount, tabAlltimeCount, tabContextCount);
 
       fillMessageScroll('session', msg.platform, msg.userId);
-
     } catch (err) {
       if (!activeChatterInfoModal) return;
       infoText.content = `  Error loading info: ${String(err)}`;
@@ -3669,7 +3768,15 @@ function openChatterInfoModal(msg: ChatMessage): void {
 // ─── History modal ───────────────────────────────────────────────────────────
 
 function openHistoryModal(opts?: { query?: string }): void {
-  if (!uiNodes || activeModal || activeStreamModal || activeSettingsModal || activeChatterInfoModal || activeHistoryModal) return;
+  if (
+    !uiNodes ||
+    activeModal ||
+    activeStreamModal ||
+    activeSettingsModal ||
+    activeChatterInfoModal ||
+    activeHistoryModal
+  )
+    return;
   const { renderer } = uiNodes;
 
   const platColor = (p: string): string => {
@@ -3725,7 +3832,11 @@ function openHistoryModal(opts?: { query?: string }): void {
   searchRow.add(new TextRenderable(renderer, { content: '  Search: ', fg: '#888888' }));
   searchRow.add(searchInput);
 
-  const headerText = new TextRenderable(renderer, { content: ' ', fg: '#888888', wrapMode: 'none' });
+  const headerText = new TextRenderable(renderer, {
+    content: ' ',
+    fg: '#888888',
+    wrapMode: 'none',
+  });
   const tabBarNode = new TextRenderable(renderer, { content: '' });
   const footerText = new TextRenderable(renderer, { content: '', fg: '#888888' });
 
@@ -3783,18 +3894,22 @@ function openHistoryModal(opts?: { query?: string }): void {
     headerText.content = ' ';
 
     if (streams.length === 0) {
-      contentScroll.add(new TextRenderable(renderer, {
-        content: '  (no streams — messages need stream IDs to appear here)',
-        fg: '#888888',
-      }));
+      contentScroll.add(
+        new TextRenderable(renderer, {
+          content: '  (no streams — messages need stream IDs to appear here)',
+          fg: '#888888',
+        }),
+      );
       streamListNodes = [];
       return;
     }
 
-    contentScroll.add(new TextRenderable(renderer, {
-      content: '     Stream ID                Platform(s)       Messages    Users   Started',
-      fg: '#555555',
-    }));
+    contentScroll.add(
+      new TextRenderable(renderer, {
+        content: '     Stream ID                Platform(s)       Messages    Users   Started',
+        fg: '#555555',
+      }),
+    );
 
     streamListNodes = [];
     for (let i = 0; i < streams.length; i++) {
@@ -3830,25 +3945,37 @@ function openHistoryModal(opts?: { query?: string }): void {
     clearScroll();
     footerText.content = '  [↑] load older  [↓] scroll  [Backspace] back to list  [Esc] close';
 
-    const idDisplay = stream.streamId.length > 26 ? `${stream.streamId.slice(0, 23)}...` : stream.streamId;
+    const idDisplay =
+      stream.streamId.length > 26 ? `${stream.streamId.slice(0, 23)}...` : stream.streamId;
     headerText.content = new StyledText([
       fg('#888888')('  Stream '),
       fg('cyan')(idDisplay),
-      fg('#888888')(` · ${stream.platforms.join(',')} · ${stream.messageCount.toLocaleString()} msgs · ${stream.userCount} users · ${fmtDate(stream.startTime)}`),
+      fg('#888888')(
+        ` · ${stream.platforms.join(',')} · ${stream.messageCount.toLocaleString()} msgs · ${stream.userCount} users · ${fmtDate(stream.startTime)}`,
+      ),
     ]);
 
     _loadStreamPage();
-    setTimeout(() => { contentScroll.scrollTo(99999); }, 32);
+    setTimeout(() => {
+      contentScroll.scrollTo(99999);
+    }, 32);
   }
 
   function _loadStreamPage(): void {
     if (streamLoading || streamExhausted || !viewStream) return;
     streamLoading = true;
     try {
-      const batch = messageLog.getForStream(viewStream.streamId, STREAM_PAGE, streamPage * STREAM_PAGE);
+      const batch = messageLog.getForStream(
+        viewStream.streamId,
+        STREAM_PAGE,
+        streamPage * STREAM_PAGE,
+      );
       if (batch.length === 0) {
         streamExhausted = true;
-        contentScroll.add(new TextRenderable(renderer, { content: '  ── beginning of stream ──', fg: '#555555' }), 0);
+        contentScroll.add(
+          new TextRenderable(renderer, { content: '  ── beginning of stream ──', fg: '#555555' }),
+          0,
+        );
         return;
       }
 
@@ -3859,15 +3986,27 @@ function openHistoryModal(opts?: { query?: string }): void {
       let idx = 0;
       for (const m of chrono) {
         const row = new BoxRenderable(renderer, { flexDirection: 'row' });
-        row.add(new TextRenderable(renderer, { content: fmtTimestamp(m.timestamp), fg: '#888888' }));
-        row.add(new TextRenderable(renderer, { content: `[${m.platform}] `, fg: platColor(m.platform) }));
-        row.add(new TextRenderable(renderer, { content: `${m.username}: `, fg: m.color ?? platColor(m.platform) }));
+        row.add(
+          new TextRenderable(renderer, { content: fmtTimestamp(m.timestamp), fg: '#888888' }),
+        );
+        row.add(
+          new TextRenderable(renderer, { content: `[${m.platform}] `, fg: platColor(m.platform) }),
+        );
+        row.add(
+          new TextRenderable(renderer, {
+            content: `${m.username}: `,
+            fg: m.color ?? platColor(m.platform),
+          }),
+        );
         row.add(new TextRenderable(renderer, { content: m.message, fg: 'white' }));
         contentScroll.add(row, idx++);
       }
 
       if (streamExhausted) {
-        contentScroll.add(new TextRenderable(renderer, { content: '  ── beginning of stream ──', fg: '#555555' }), 0);
+        contentScroll.add(
+          new TextRenderable(renderer, { content: '  ── beginning of stream ──', fg: '#555555' }),
+          0,
+        );
       }
 
       streamMessages = [...chrono, ...streamMessages];
@@ -3880,28 +4019,45 @@ function openHistoryModal(opts?: { query?: string }): void {
     clearScroll();
     const q = query.trim();
     if (!q) {
-      contentScroll.add(new TextRenderable(renderer, {
-        content: '  Type to search messages, users, or stream IDs...',
-        fg: '#555555',
-      }));
+      contentScroll.add(
+        new TextRenderable(renderer, {
+          content: '  Type to search messages, users, or stream IDs...',
+          fg: '#555555',
+        }),
+      );
       return;
     }
 
     const results = messageLog.searchMessages(q, { limit: 200 });
-    const countLabel = results.length >= 200 ? '200+ results (first 200 shown):' : `${results.length} result${results.length !== 1 ? 's' : ''}:`;
+    const countLabel =
+      results.length >= 200
+        ? '200+ results (first 200 shown):'
+        : `${results.length} result${results.length !== 1 ? 's' : ''}:`;
     contentScroll.add(new TextRenderable(renderer, { content: `  ${countLabel}`, fg: '#888888' }));
 
     for (const m of results) {
       const streamLabel = m.streamId ? ` [${m.streamId.slice(0, 8)}]` : '';
       const row = new BoxRenderable(renderer, { flexDirection: 'row' });
       row.add(new TextRenderable(renderer, { content: fmtTimestamp(m.timestamp), fg: '#888888' }));
-      row.add(new TextRenderable(renderer, { content: `[${m.platform}${streamLabel}] `, fg: platColor(m.platform) }));
-      row.add(new TextRenderable(renderer, { content: `${m.username}: `, fg: m.color ?? platColor(m.platform) }));
+      row.add(
+        new TextRenderable(renderer, {
+          content: `[${m.platform}${streamLabel}] `,
+          fg: platColor(m.platform),
+        }),
+      );
+      row.add(
+        new TextRenderable(renderer, {
+          content: `${m.username}: `,
+          fg: m.color ?? platColor(m.platform),
+        }),
+      );
       row.add(new TextRenderable(renderer, { content: m.message, fg: 'white' }));
       contentScroll.add(row);
     }
 
-    setTimeout(() => { contentScroll.scrollTo(0); }, 16);
+    setTimeout(() => {
+      contentScroll.scrollTo(0);
+    }, 16);
   }
 
   function switchToTab(tab: HistoryTab): void {
@@ -3919,7 +4075,9 @@ function openHistoryModal(opts?: { query?: string }): void {
       headerText.content = ' ';
       footerText.content = '  [↑/↓] scroll results  [B] broadcasts  [Esc] close';
       runSearch(searchInput.value);
-      setTimeout(() => { searchInput.focus(); }, 0);
+      setTimeout(() => {
+        searchInput.focus();
+      }, 0);
     }
   }
 
@@ -3938,13 +4096,24 @@ function openHistoryModal(opts?: { query?: string }): void {
 
     if (activeTab === 'broadcasts') {
       if (bcastView === 'list') {
-        if (sequence === '/' || sequence === '\t') { switchToTab('search'); return true; }
+        if (sequence === '/' || sequence === '\t') {
+          switchToTab('search');
+          return true;
+        }
         if (sequence === '\x1b[A') {
-          if (selectedIdx > 0) { const p = selectedIdx; selectedIdx--; moveCursor(p, selectedIdx); }
+          if (selectedIdx > 0) {
+            const p = selectedIdx;
+            selectedIdx--;
+            moveCursor(p, selectedIdx);
+          }
           return true;
         }
         if (sequence === '\x1b[B') {
-          if (selectedIdx < streams.length - 1) { const p = selectedIdx; selectedIdx++; moveCursor(p, selectedIdx); }
+          if (selectedIdx < streams.length - 1) {
+            const p = selectedIdx;
+            selectedIdx++;
+            moveCursor(p, selectedIdx);
+          }
           return true;
         }
         if (sequence === '\r' || sequence === '\n') {
@@ -3960,19 +4129,34 @@ function openHistoryModal(opts?: { query?: string }): void {
           return true;
         }
         if (sequence === '\x1b[A') {
-          if (contentScroll.scrollTop === 0 && !streamExhausted) { _loadStreamPage(); }
-          else { contentScroll.scrollBy(-3); }
+          if (contentScroll.scrollTop === 0 && !streamExhausted) {
+            _loadStreamPage();
+          } else {
+            contentScroll.scrollBy(-3);
+          }
           return true;
         }
-        if (sequence === '\x1b[B') { contentScroll.scrollBy(3); return true; }
+        if (sequence === '\x1b[B') {
+          contentScroll.scrollBy(3);
+          return true;
+        }
       }
       return true; // consume all unhandled keys in broadcasts mode
     }
 
     if (activeTab === 'search') {
-      if (sequence === 'b' || sequence === 'B') { switchToTab('broadcasts'); return true; }
-      if (sequence === '\x1b[A') { contentScroll.scrollBy(-3); return true; }
-      if (sequence === '\x1b[B') { contentScroll.scrollBy(3); return true; }
+      if (sequence === 'b' || sequence === 'B') {
+        switchToTab('broadcasts');
+        return true;
+      }
+      if (sequence === '\x1b[A') {
+        contentScroll.scrollBy(-3);
+        return true;
+      }
+      if (sequence === '\x1b[B') {
+        contentScroll.scrollBy(3);
+        return true;
+      }
       return false; // let remaining keys reach searchInput
     }
 
@@ -3986,7 +4170,9 @@ function openHistoryModal(opts?: { query?: string }): void {
   let searchDebounce: ReturnType<typeof setTimeout> | null = null;
   searchInput.on(InputRenderableEvents.INPUT, () => {
     if (searchDebounce) clearTimeout(searchDebounce);
-    searchDebounce = setTimeout(() => { runSearch(searchInput.value); }, 200);
+    searchDebounce = setTimeout(() => {
+      runSearch(searchInput.value);
+    }, 200);
   });
 
   searchInput.onKeyDown = ((key: { name: string }) => {
@@ -4007,7 +4193,9 @@ function openHistoryModal(opts?: { query?: string }): void {
     if (opts?.query) searchInput.value = opts.query;
     footerText.content = '  [↑/↓] scroll results  [B] broadcasts  [Esc] close';
     runSearch(opts?.query ?? '');
-    setTimeout(() => { searchInput.focus(); }, 0);
+    setTimeout(() => {
+      searchInput.focus();
+    }, 0);
   } else {
     (searchRow as any).visible = false;
     renderStreamList();
@@ -4018,7 +4206,10 @@ function openHistoryModal(opts?: { query?: string }): void {
 
 let isRunning = true;
 type ChatLinePart = { content: string; fg: string };
-type ChatLine = string | (ChatLinePart & { rawMsg?: ChatMessage }) | { parts: ChatLinePart[]; rawMsg?: ChatMessage };
+type ChatLine =
+  | string
+  | (ChatLinePart & { rawMsg?: ChatMessage })
+  | { parts: ChatLinePart[]; rawMsg?: ChatMessage };
 const lastMessages: ChatLine[] = [];
 let cliRenderer: Awaited<ReturnType<typeof createCliRenderer>> | null = null;
 const inputHistory: string[] = [];
@@ -4027,7 +4218,7 @@ let historyIndex = -1;
 // ─── Browse mode state ───────────────────────────────────────────────────────
 let browseModeActive = false;
 let browseSelectedIdx: number | null = null; // index into lastMessages
-let lastRawMessages: ChatMessage[] = []; // parallel to lastMessages (only chat platform messages)
+const lastRawMessages: ChatMessage[] = []; // parallel to lastMessages (only chat platform messages)
 
 function platformColor(platform: string): string {
   if (platform === 'youtube') return 'red';
@@ -4049,7 +4240,11 @@ function transformMessage(msg: ChatMessage): ChatLine {
     tsStr = ` ${hh}:${mi}:${ss}`;
   }
   if (userColor === platColor) {
-    return { content: `[${msg.platform}]${tsStr} ${msg.username}: ${msg.message}`, fg: platColor, rawMsg: msg };
+    return {
+      content: `[${msg.platform}]${tsStr} ${msg.username}: ${msg.message}`,
+      fg: platColor,
+      rawMsg: msg,
+    };
   }
   return {
     parts: [
@@ -4090,7 +4285,9 @@ function renderHighlightedChatLine(
 ): TextRenderable | BoxRenderable {
   // Prefix the line with "> " indicator in cyan to show selection
   const row = new BoxRenderable(renderer, { flexDirection: 'row' });
-  row.add(new TextRenderable(renderer, { content: '> ', fg: 'cyan', attributes: TextAttributes.BOLD }));
+  row.add(
+    new TextRenderable(renderer, { content: '> ', fg: 'cyan', attributes: TextAttributes.BOLD }),
+  );
   row.add(renderChatLine(renderer, msg));
   return row;
 }
@@ -4234,8 +4431,7 @@ async function main() {
             return true;
           }
 
-          const continuing =
-            autocycleIndex >= 0 && autocycleSuggestions[autocycleIndex] === val;
+          const continuing = autocycleIndex >= 0 && autocycleSuggestions[autocycleIndex] === val;
 
           if (continuing) {
             autocycleIndex = (autocycleIndex + 1) % autocycleSuggestions.length;
@@ -4263,7 +4459,12 @@ async function main() {
         }
 
         // Shift+Up (\x1b[1;2A) — enter browse mode
-        if (sequence === '\x1b[1;2A' && !activeModal && !activeStreamModal && !activeSettingsModal) {
+        if (
+          sequence === '\x1b[1;2A' &&
+          !activeModal &&
+          !activeStreamModal &&
+          !activeSettingsModal
+        ) {
           browseModeActive = true;
           browseSelectedIdx = lastMessages.length > 0 ? lastMessages.length - 1 : null;
           updateUI(lastMessages);
@@ -4271,7 +4472,12 @@ async function main() {
         }
 
         // Shift+Down (\x1b[1;2B) — exit browse mode
-        if (sequence === '\x1b[1;2B' && !activeModal && !activeStreamModal && !activeSettingsModal) {
+        if (
+          sequence === '\x1b[1;2B' &&
+          !activeModal &&
+          !activeStreamModal &&
+          !activeSettingsModal
+        ) {
           browseModeActive = false;
           browseSelectedIdx = null;
           updateUI(lastMessages);
@@ -4400,6 +4606,8 @@ async function main() {
   });
 
   await initializeServices();
+  startIpcServer(handleCommandForCli);
+
   if (youtube.isAuthenticated()) pushEvent('youtube', 'auth', 'Authenticated');
   if (twitch.isAuthenticated()) pushEvent('twitch', 'auth', 'Authenticated');
   if (kick.isAuthenticated()) pushEvent('kick', 'auth', 'Authenticated');
@@ -4474,14 +4682,17 @@ async function main() {
     }
   }, 2000);
 
-  process.on('SIGINT', async () => {
+  const shutdown = async () => {
     isRunning = false;
     clearInterval(updateLoop);
     authService.stopAutoRefresh();
     await obsService.disconnect();
     renderer.destroy();
     process.exit(0);
-  });
+  };
+
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
 }
 
 main().catch((err) => defaultLogger.error('TUI main failed', err));
