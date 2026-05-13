@@ -83,7 +83,13 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
         * `/connect <youtube|twitch|kick>` — authenticate a platform (all three redirect to real OAuth flows)
         * `/settings get <key>` — read a persistent setting via `/api/settings`
         * `/settings set <key> <value>` — write a persistent setting via `/api/settings`
-    * TUI-only commands (not available in WebUI): `/exit`, `/logs`, `/info`
+    * TUI-only commands (not available in WebUI or via CLI IPC): `/exit`, `/logs`, `/info`, `/stream`, `/setup-youtube`, `/history`, bare `/settings` (no arguments), `/chatter` (modal path)
+- Scriptable CLI interface via IPC
+    * `bun run cmd <command> [args...]` — forwards a command to the running yash TUI process and prints its output to stdout, then exits
+    * Both `/cmd` and `cmd` argument forms are accepted (the leading `/` is inserted automatically if omitted)
+    * Prints `yash is not running` to stderr and exits with code 1 when yash is not active (socket absent or connection refused)
+    * Commands available over IPC: `/marker`, `/markers`, `/settings get <key>`, `/settings set <key> <val>`, `/connect`, `/msg`, `/help`, and most non-modal commands
+    * Commands blocked over IPC (require the live TUI): `/exit`, `/stream`, `/setup-youtube`, `/history`, bare `/settings`, `/chatter`
 
 ## Out of scope (do not touch)
 - Contributing
@@ -135,6 +141,10 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
 - Runtime bootstrap config is stored in `YASH_DATA_DIR/config.json` (default `~/.yash/config.json`); mutable runtime settings are stored in `YASH_DATA_DIR/settings.json`; if the runtime config file does not exist yet and a legacy `[root]/config.json` is present, YASH migrates it once on startup and then moves mutable runtime state into `settings.json`
 - TUI and web server run as a single process (`bun run src/index.tsx`); `index.tsx` imports `index.ts` as a side-effect to start `Bun.serve` in the same process. Running them as separate processes causes port 3000 conflicts.
 - `Bun.serve` must use `development: false`. In development mode, Bun writes HTML bundle timing lines (e.g. `Bundled page in 31ms: index.html`) directly to fd 1 via native I/O, bypassing both `process.stdout` and the JS `console.*` API. Since `@opentui` renders the TUI on that same fd, these writes bleed into the TUI display and cannot be intercepted at the JS level. `development: false` suppresses this output; HMR is intentionally disabled as a result.
+- An IPC server (`src/ipc/server.ts`) is started after `initializeServices()` completes; it listens on a Unix Domain Socket at `YASH_DATA_DIR/yash.sock`. It cleans up any stale socket file on startup and removes the socket on `process.on('exit')`. SIGTERM is handled alongside SIGINT for a clean shutdown.
+- IPC protocol: one-round-trip newline-delimited JSON — request `{"command":"<cmd>"}`, response `{"ok":true,"output":"<text>"}` or `{"ok":false,"error":"<msg>"}`.
+- Socket path is resolved by `src/ipc/socket-path.ts` as `path.join(getDataDir(), 'yash.sock')`.
+- `commandHandlers` in `src/index.tsx` accept an `emit: (line: string) => void` callback so the same handler logic serves both TUI rendering and IPC output collection. TUI path: `(line) => lastMessages.push(line)`; IPC path (`handleCommandForCli()`): `(line) => lines.push(line)`, joined and returned as the response `output`.
 
 ### Platform Support
 - YouTube: Real OAuth2 integration via Google Data API v3
@@ -228,6 +238,7 @@ Mutable settings live in `settings.json`, including `demo`, `chat.*`, `stream.*`
 
 | Variable | Config key |
 |---|---|
+| `YASH_DATA_DIR` | Data directory for config, settings, log, message DB, and IPC socket (`yash.sock`); default `~/.yash` |
 | `YASH_DEMO` | `settings.demo` |
 | `YASH_OBS_SERVER` | `obs.websocket.server` |
 | `YASH_OBS_PORT` | `obs.websocket.port` |
@@ -319,6 +330,10 @@ Mutable settings live in `settings.json`, including `demo`, `chat.*`, `stream.*`
 ## Project Structure
 ```
 src/
+├── ipc/
+│   ├── socket-path.ts   # Resolves ${YASH_DATA_DIR}/yash.sock via resolveSocketPath()
+│   ├── server.ts        # UDS server (node:net); stale-socket cleanup on start; one-round-trip JSON protocol; process.on('exit') teardown
+│   └── client.ts        # IPC client; exits 1 + prints "yash is not running" on ENOENT/ECONNREFUSED
 ├── platforms/
 │   ├── base.ts          # PlatformProvider interface + shared types
 │   ├── youtube.ts       # Real OAuth2 + Google Data API v3; chat + status polling; chapter store
@@ -335,6 +350,7 @@ src/
 ├── utils/
 │   ├── webCommands.ts   # Shared WebUI command module (consumed by main.tsx + served as /api/js/commands.js)
 │   └── settings.ts      # Persistent settings store
+├── cli.ts               # CLI entry point; accepts /cmd or cmd arg form; forwards to running yash via IPC
 ├── index.ts             # Web server entry point
 └── index.tsx            # TUI entry point
 ```
@@ -431,6 +447,7 @@ interface PlatformProvider {
 - `bun test` - Run unit tests only (fast, skips lint/typecheck)
 - `bun run test` - Full check: lint → typecheck → tests
 - `bun typecheck` - Type-check only (`bun --bun tsc --noEmit`)
+- `bun run cmd <command> [args...]` - Send a command to the running yash TUI via IPC (e.g. `bun run cmd /marker "Intro | 0"`)
 - `biome check --write` - Lint and format code
 
 ## Release Automation
