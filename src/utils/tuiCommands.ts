@@ -1,3 +1,5 @@
+import { CHAT_CLEAR_TARGETS } from './chatClear';
+
 /**
  * TUI command constants and autocomplete helper.
  *
@@ -7,6 +9,7 @@
 
 /** All slash commands available in the TUI. */
 export const TUI_COMMANDS = [
+  '/chat',
   '/chatter',
   '/connect',
   '/exit',
@@ -60,6 +63,7 @@ const SETTINGS_KEYS = [
   'platforms.youtube.setup.chaptering.enabled',
   'platforms.youtube.setup.clearMarkersOnNewStream.enabled',
 ];
+const CHAT_ARGS = ['clear'];
 const LOGS_ARGS = ['clear', 'tail', 'visible'];
 const SETTINGS_OPS = ['get', 'set'];
 
@@ -128,6 +132,36 @@ export function getAutocomplete(input: string): {
 
   if (cmd === '/connect') {
     return completeToken(PLATFORMS, restLower);
+  }
+
+  if (cmd === '/chat') {
+    if (!rest.includes(' ')) {
+      return completeToken(CHAT_ARGS, restLower);
+    }
+
+    const parts = restLower.split(/\s+/).filter(Boolean);
+    const op = parts[0] ?? '';
+
+    if (op !== 'clear') return { completion: null, hints: [], completions: [] };
+
+    if (rest.endsWith(' ') && parts.length === 1) {
+      return { completion: null, hints: [...CHAT_CLEAR_TARGETS], completions: [] };
+    }
+
+    if (parts.length === 2) {
+      const partial = parts[1] ?? '';
+      const matches = CHAT_CLEAR_TARGETS.filter((target) => target.startsWith(partial));
+      if (matches.length === 0) return { completion: null, hints: [], completions: [] };
+      const prefix = longestCommonPrefix(matches);
+      const fullCompletion = `${cmd} clear ${prefix}`;
+      return {
+        completion: prefix.length > partial.length ? fullCompletion : null,
+        hints: matches,
+        completions: matches.map((target) => `${cmd} clear ${target}`),
+      };
+    }
+
+    return { completion: null, hints: [], completions: [] };
   }
 
   if (cmd === '/inject') {

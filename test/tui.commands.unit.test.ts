@@ -16,6 +16,7 @@ import { getAutocomplete, TUI_COMMANDS } from '../src/utils/tuiCommands';
 describe('TUI_COMMANDS', () => {
   test('contains all expected commands', () => {
     const expected = [
+      '/chat',
       '/connect',
       '/exit',
       '/help',
@@ -76,6 +77,13 @@ describe('getAutocomplete', () => {
     const result = getAutocomplete('/con');
     expect(result.completion).toBe('/connect');
     expect(result.hints).toEqual(['/connect']);
+  });
+
+  test('/cha → completes to shared prefix /chat', () => {
+    const result = getAutocomplete('/cha');
+    expect(result.completion).toBe('/chat');
+    expect(result.hints).toContain('/chat');
+    expect(result.hints).toContain('/chatter');
   });
 
   test('/lo → completes to /logs', () => {
@@ -169,9 +177,38 @@ describe('getAutocomplete', () => {
     expect(hints).toEqual(['/connect']);
   });
 
+  test('exact /chat → ambiguous with /chatter, so no advance but both hints remain', () => {
+    const result = getAutocomplete('/chat');
+    expect(result.completion).toBeNull();
+    expect(result.hints).toContain('/chat');
+    expect(result.hints).toContain('/chatter');
+  });
+
   test('/settings → only /settings in hints', () => {
     const { hints } = getAutocomplete('/settings');
     expect(hints).toEqual(['/settings']);
+  });
+
+  test('/chat  → hints clear', () => {
+    const result = getAutocomplete('/chat ');
+    expect(result.hints).toEqual(['clear']);
+  });
+
+  test('/chat c → completes to /chat clear', () => {
+    const result = getAutocomplete('/chat c');
+    expect(result.completion).toBe('/chat clear');
+    expect(result.hints).toEqual(['clear']);
+  });
+
+  test('/chat clear  → hints all, messages, events, logs', () => {
+    const result = getAutocomplete('/chat clear ');
+    expect(result.hints).toEqual(['all', 'messages', 'events', 'logs']);
+  });
+
+  test('/chat clear m → completes to /chat clear messages', () => {
+    const result = getAutocomplete('/chat clear m');
+    expect(result.completion).toBe('/chat clear messages');
+    expect(result.hints).toEqual(['messages']);
   });
 
   test('/markers  → hints clear, all, and providers', () => {
