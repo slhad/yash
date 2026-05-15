@@ -29,7 +29,7 @@ import {
 } from './services';
 import { ChatterCache } from './services/chatter-cache';
 import { messageLog, type StreamSummary } from './services/message-log';
-import { runChatClearCommand } from './utils/chatClear';
+import { type ChatClearLineKind, runChatClearCommand } from './utils/chatClear';
 import { isDemoMode, saveConfig } from './utils/config';
 import logCollector from './utils/logCollector';
 import { defaultLogger } from './utils/logger';
@@ -2552,8 +2552,7 @@ const commandHandlers: Record<
     const result = runChatClearCommand(parts, {
       lastMessages,
       lastRawMessages,
-      eventLog,
-      clearLogs: () => logCollector.clear(),
+      classifyLine: classifyChatLine,
       resetBrowseSelection: () => {
         browseModeActive = false;
         browseSelectedIdx = null;
@@ -2646,7 +2645,9 @@ const commandHandlers: Record<
     emit(
       '[help]   /chatter <@username>  — open chatter info modal for the most recent message from that user',
     );
-    emit('[help]   /chat clear <all|messages|events|logs>  — clear live chat, events, and logs');
+    emit(
+      '[help]   /chat clear <all|messages|events|logs>  — clear matching entries from Chat only',
+    );
     emit('[help]   /history  — browse all stream broadcasts and search message history');
     emit('[help]   /history search <query>  — open history with search pre-filled');
     emit('[help]   /history user <@name>  — search history filtered to a user');
@@ -4280,6 +4281,31 @@ function transformOutgoingMessage(target: MessageTarget, message: string): ChatL
       { content: `] ${message}`, fg: 'white' },
     ],
   };
+}
+
+function getChatLineText(msg: ChatLine): string {
+  if (typeof msg === 'string') return msg;
+  if ('parts' in msg) return msg.parts.map((part) => part.content).join('');
+  return msg.content;
+}
+
+function classifyChatLine(msg: ChatLine): ChatClearLineKind {
+  if (typeof msg !== 'string' && 'rawMsg' in msg && msg.rawMsg) {
+    return 'messages';
+  }
+
+  const text = getChatLineText(msg);
+  if (text.startsWith('[you')) return 'messages';
+
+  if (
+    text.startsWith('[logs]') ||
+    /^\[(INFO|WARN|ERROR|DEBUG|STDERR)\]/.test(text) ||
+    /\[(INFO|WARN|ERROR|DEBUG|STDERR)\]/.test(text)
+  ) {
+    return 'logs';
+  }
+
+  return 'events';
 }
 
 function renderChatLine(renderer: CliRenderer, msg: ChatLine): TextRenderable | BoxRenderable {

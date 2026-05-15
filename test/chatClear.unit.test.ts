@@ -1,81 +1,78 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
-import { chatClearUsage, clearChatSurfaces, runChatClearCommand } from '../src/utils/chatClear';
+import {
+  type ChatClearLineKind,
+  chatClearUsage,
+  clearChatSurfaces,
+  runChatClearCommand,
+} from '../src/utils/chatClear';
 
 describe('clearChatSurfaces', () => {
   let lastMessages: string[];
   let lastRawMessages: string[];
-  let eventLog: string[];
-  let clearLogs: ReturnType<typeof mock>;
   let resetBrowseSelection: ReturnType<typeof mock>;
+  let classifyLine: ReturnType<typeof mock<(message: string) => ChatClearLineKind>>;
 
   beforeEach(() => {
-    lastMessages = ['chat-1', 'chat-2'];
+    lastMessages = ['msg:a', 'event:a', 'log:a', 'msg:b', 'event:b'];
     lastRawMessages = ['raw-1', 'raw-2'];
-    eventLog = ['event-1', 'event-2'];
-    clearLogs = mock(() => {});
     resetBrowseSelection = mock(() => {});
+    classifyLine = mock((message: string) => {
+      if (message.startsWith('msg:')) return 'messages';
+      if (message.startsWith('log:')) return 'logs';
+      return 'events';
+    });
   });
 
-  test('clears messages and resets browse selection', () => {
+  test('clears chat messages and raw cache only', () => {
     const result = clearChatSurfaces({
       lastMessages,
       lastRawMessages,
-      eventLog,
-      clearLogs,
+      classifyLine,
       resetBrowseSelection,
       target: 'messages',
     });
 
     expect(result).toBe('[chat] cleared messages');
-    expect(lastMessages).toEqual([]);
+    expect(lastMessages).toEqual(['event:a', 'log:a', 'event:b']);
     expect(lastRawMessages).toEqual([]);
-    expect(eventLog).toEqual(['event-1', 'event-2']);
-    expect(clearLogs).not.toHaveBeenCalled();
     expect(resetBrowseSelection).toHaveBeenCalledTimes(1);
   });
 
-  test('clears events only', () => {
+  test('clears event lines from the chat pane only', () => {
     const result = clearChatSurfaces({
       lastMessages,
       lastRawMessages,
-      eventLog,
-      clearLogs,
+      classifyLine,
       resetBrowseSelection,
       target: 'events',
     });
 
     expect(result).toBe('[chat] cleared events');
-    expect(lastMessages).toEqual(['chat-1', 'chat-2']);
+    expect(lastMessages).toEqual(['msg:a', 'log:a', 'msg:b']);
     expect(lastRawMessages).toEqual(['raw-1', 'raw-2']);
-    expect(eventLog).toEqual([]);
-    expect(clearLogs).not.toHaveBeenCalled();
-    expect(resetBrowseSelection).not.toHaveBeenCalled();
+    expect(resetBrowseSelection).toHaveBeenCalledTimes(1);
   });
 
-  test('clears logs only', () => {
+  test('clears log lines from the chat pane only', () => {
     const result = clearChatSurfaces({
       lastMessages,
       lastRawMessages,
-      eventLog,
-      clearLogs,
+      classifyLine,
       resetBrowseSelection,
       target: 'logs',
     });
 
     expect(result).toBe('[chat] cleared logs');
-    expect(lastMessages).toEqual(['chat-1', 'chat-2']);
+    expect(lastMessages).toEqual(['msg:a', 'event:a', 'msg:b', 'event:b']);
     expect(lastRawMessages).toEqual(['raw-1', 'raw-2']);
-    expect(eventLog).toEqual(['event-1', 'event-2']);
-    expect(clearLogs).toHaveBeenCalledTimes(1);
-    expect(resetBrowseSelection).not.toHaveBeenCalled();
+    expect(resetBrowseSelection).toHaveBeenCalledTimes(1);
   });
 
-  test('clears all surfaces', () => {
+  test('clears all chat lines and raw cache', () => {
     const result = clearChatSurfaces({
       lastMessages,
       lastRawMessages,
-      eventLog,
-      clearLogs,
+      classifyLine,
       resetBrowseSelection,
       target: 'all',
     });
@@ -83,8 +80,6 @@ describe('clearChatSurfaces', () => {
     expect(result).toBe('[chat] cleared all');
     expect(lastMessages).toEqual([]);
     expect(lastRawMessages).toEqual([]);
-    expect(eventLog).toEqual([]);
-    expect(clearLogs).toHaveBeenCalledTimes(1);
     expect(resetBrowseSelection).toHaveBeenCalledTimes(1);
   });
 
@@ -92,16 +87,13 @@ describe('clearChatSurfaces', () => {
     const result = runChatClearCommand(['/chat', 'clear'], {
       lastMessages,
       lastRawMessages,
-      eventLog,
-      clearLogs,
+      classifyLine,
       resetBrowseSelection,
     });
 
     expect(result).toBe(chatClearUsage());
-    expect(lastMessages).toEqual(['chat-1', 'chat-2']);
+    expect(lastMessages).toEqual(['msg:a', 'event:a', 'log:a', 'msg:b', 'event:b']);
     expect(lastRawMessages).toEqual(['raw-1', 'raw-2']);
-    expect(eventLog).toEqual(['event-1', 'event-2']);
-    expect(clearLogs).not.toHaveBeenCalled();
     expect(resetBrowseSelection).not.toHaveBeenCalled();
   });
 
@@ -109,16 +101,13 @@ describe('clearChatSurfaces', () => {
     const result = runChatClearCommand(['/chat', 'clear', 'sidebar'], {
       lastMessages,
       lastRawMessages,
-      eventLog,
-      clearLogs,
+      classifyLine,
       resetBrowseSelection,
     });
 
     expect(result).toBe(chatClearUsage());
-    expect(lastMessages).toEqual(['chat-1', 'chat-2']);
+    expect(lastMessages).toEqual(['msg:a', 'event:a', 'log:a', 'msg:b', 'event:b']);
     expect(lastRawMessages).toEqual(['raw-1', 'raw-2']);
-    expect(eventLog).toEqual(['event-1', 'event-2']);
-    expect(clearLogs).not.toHaveBeenCalled();
     expect(resetBrowseSelection).not.toHaveBeenCalled();
   });
 
@@ -126,16 +115,13 @@ describe('clearChatSurfaces', () => {
     const result = runChatClearCommand(['/chat', 'list'], {
       lastMessages,
       lastRawMessages,
-      eventLog,
-      clearLogs,
+      classifyLine,
       resetBrowseSelection,
     });
 
     expect(result).toBe(chatClearUsage());
-    expect(lastMessages).toEqual(['chat-1', 'chat-2']);
+    expect(lastMessages).toEqual(['msg:a', 'event:a', 'log:a', 'msg:b', 'event:b']);
     expect(lastRawMessages).toEqual(['raw-1', 'raw-2']);
-    expect(eventLog).toEqual(['event-1', 'event-2']);
-    expect(clearLogs).not.toHaveBeenCalled();
     expect(resetBrowseSelection).not.toHaveBeenCalled();
   });
 
@@ -143,29 +129,25 @@ describe('clearChatSurfaces', () => {
     const result = runChatClearCommand(['/chat', 'clear', 'logs'], {
       lastMessages,
       lastRawMessages,
-      eventLog,
-      clearLogs,
+      classifyLine,
       resetBrowseSelection,
     });
 
     expect(result).toBe('[chat] cleared logs');
-    expect(clearLogs).toHaveBeenCalledTimes(1);
+    expect(lastMessages).toEqual(['msg:a', 'event:a', 'msg:b', 'event:b']);
   });
 
   test('accepts IPC-safe command parts for all', () => {
     const result = runChatClearCommand(['/chat', 'clear', 'all'], {
       lastMessages,
       lastRawMessages,
-      eventLog,
-      clearLogs,
+      classifyLine,
       resetBrowseSelection,
     });
 
     expect(result).toBe('[chat] cleared all');
     expect(lastMessages).toEqual([]);
     expect(lastRawMessages).toEqual([]);
-    expect(eventLog).toEqual([]);
-    expect(clearLogs).toHaveBeenCalledTimes(1);
     expect(resetBrowseSelection).toHaveBeenCalledTimes(1);
   });
 });

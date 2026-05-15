@@ -22,12 +22,12 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
     * Command /help - lists all available commands
         * Command /info - fetches current stream/channel info from all providers and prints one `[system] <platform>: …` line per provider in the TUI chat; Kick output also includes current event subscriptions
     * Command /logs [clear|tail <n>|visible <true|false>] - manage log display (TUI only)
-    * Command `/chat clear <all|messages|events|logs>` - clear live in-memory TUI surfaces without affecting persisted history
-        * `messages` clears the visible chat pane and raw-message cache used by browse/chatter actions
-        * `events` clears the in-memory entries shown in the merged "Events & Logs" sidebar
-        * `logs` clears the runtime log collector entries shown in the merged "Events & Logs" sidebar
-        * `all` clears messages, events, and logs together
-        * Available from both the live TUI and IPC (`bun run cmd`) because it does not open a modal or mutate persisted state
+    * Command `/chat clear <all|messages|events|logs>` - clear matching live entries from the TUI Chat pane without affecting persisted history
+        * `messages` clears visible chat messages and the raw-message cache used by browse/chatter actions
+        * `events` clears non-message operational entries currently shown in the Chat pane
+        * `logs` clears log-style entries currently shown in the Chat pane
+        * `all` clears all Chat pane entries together
+        * Available from both the live TUI and IPC (`bun run cmd`) because it does not open a modal or mutate persisted state; it does not clear the merged "Events & Logs" sidebar
     * Command /msg <all|youtube|twitch|kick> <text> - sends a message to the specified platform(s)
     * Command /marker [description] [| timestamp_s] - places a stream marker on all platforms
         * Optional description (chapter label, max 140 chars on Twitch)
