@@ -1,12 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import {
-  SettingsStore,
-  deepMerge,
-  getValueAtPath,
-  setValueAtPath,
-} from '../src/utils/settings';
+import { deepMerge, getValueAtPath, SettingsStore, setValueAtPath } from '../src/utils/settings';
 import { makeRepoTempDirSync, removeRepoTempDirSync } from './helpers/testDataDir';
 
 // ---------------------------------------------------------------------------

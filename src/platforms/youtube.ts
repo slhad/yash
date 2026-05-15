@@ -47,8 +47,8 @@ import {
 } from '../utils/youtubeLiveChatGrpc';
 import type {
   AuthResult,
-  ChatterInfo,
   ChatMessage,
+  ChatterInfo,
   GetMarkersOptions,
   MetadataUpdateResult,
   PlatformProvider,

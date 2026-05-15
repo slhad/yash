@@ -17,6 +17,7 @@
     "test:e2e:run": "playwright test",
     "build": "bun build --target=bun src/index.ts --outdir dist && mv dist/index.js dist/main.js",
     "build:web": "bun build --target=browser --format=esm --outfile src/utils/webCommands.bundle.js src/utils/webCommands.ts",
+    "cmd": "bun run src/cli.ts",
     "lint": "biome check --write",
     "typecheck": "bun --bun tsc --noEmit"
   },

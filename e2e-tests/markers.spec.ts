@@ -18,10 +18,7 @@ if (process.env.RUN_PLAYWRIGHT === '1') {
   }
 
   // Helper: type text into the message input and press Enter to submit.
-  async function typeAndSend(
-    page: import('@playwright/test').Page,
-    text: string,
-  ): Promise<void> {
+  async function typeAndSend(page: import('@playwright/test').Page, text: string): Promise<void> {
     const input = page.locator('#message-input');
     await input.fill(text);
     await input.press('Enter');
@@ -33,9 +30,7 @@ if (process.env.RUN_PLAYWRIGHT === '1') {
     page: import('@playwright/test').Page,
     substring: string,
   ): Promise<import('@playwright/test').Locator> {
-    const locator = page
-      .locator('#messages .msg .text')
-      .filter({ hasText: substring });
+    const locator = page.locator('#messages .msg .text').filter({ hasText: substring });
     await locator.first().waitFor({ state: 'visible', timeout: 5000 });
     return locator.first();
   }
@@ -77,10 +72,7 @@ if (process.env.RUN_PLAYWRIGHT === '1') {
 
     await page.route('**/api/stream/marker', async (route) => {
       if (route.request().method() === 'POST') {
-        capturedBody = JSON.parse(route.request().postData() ?? '{}') as Record<
-          string,
-          unknown
-        >;
+        capturedBody = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>;
         return route.fulfill({
           json: {
             markers: [

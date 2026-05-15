@@ -1,6 +1,6 @@
-import { describe, test, expect, beforeEach } from 'bun:test';
-import { ChatterCache } from '../src/services/chatter-cache';
+import { beforeEach, describe, expect, test } from 'bun:test';
 import type { ChatMessage, ChatterInfo } from '../src/platforms/base';
+import { ChatterCache } from '../src/services/chatter-cache';
 
 function makeMessage(overrides: Partial<ChatMessage> = {}): ChatMessage {
   return {

@@ -85,13 +85,13 @@ if (process.env.RUN_PLAYWRIGHT === '1') {
 
     const platforms = [
       { id: 'youtube', label: 'YouTube' },
-      { id: 'twitch',  label: 'Twitch' },
-      { id: 'kick',    label: 'Kick' },
+      { id: 'twitch', label: 'Twitch' },
+      { id: 'kick', label: 'Kick' },
     ] as const;
 
     for (const { id, label } of platforms) {
       const toggleBtn = page.locator(`#toggle-${id}`);
-      const column    = page.locator(`#col-${id}`);
+      const column = page.locator(`#col-${id}`);
 
       // Initially visible — button shows a checkmark
       await expect(toggleBtn).toHaveText(`${label} ✓`);

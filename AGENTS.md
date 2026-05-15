@@ -5,6 +5,9 @@
 - **Check specifications**: `cat SPECS.md`
 - **Read project info**: `cat README.md`
 - **Read on going work**: `cat tmp/ONGOING.md 2>/dev/null||echo "No on going work, analyse codebase to find work to do"`
+- **Send a command to a running yash instance**: `bun run cmd <command>` (e.g. `bun run cmd /marker Intro`)
+  - Requires yash to be running; exits 1 with "yash is not running" if the socket is absent
+  - The slash prefix is optional: `bun run cmd marker Intro` is equivalent to `bun run cmd /marker Intro`
 
 ## Alias
 - [root]: workspace repository.
@@ -88,7 +91,7 @@ Prefer `bun run test` for the normal repo test flow so `pretest` checks run firs
 
 - Any test that can read, write, clear, or mutate persisted runtime state must isolate itself under repository-local `tmp/tests/...`.
 - Tests must never read from or write to the real user data directory such as `~/.yash`, even indirectly through default provider/service paths.
-- When a test exercises code that uses persisted auth, tokens, webhook cache, logs, or other filesystem-backed state, it must override `YASH_DATA_DIR` to a dedicated temp directory under `[tmp]` and clean it up after the test or suite finishes.
+- When a test exercises code that uses persisted auth, tokens, webhook cache, logs, IPC socket (`yash.sock`), or other filesystem-backed state, it must override `YASH_DATA_DIR` to a dedicated temp directory under `[tmp]` and clean it up after the test or suite finishes.
 - Prefer shared helpers for test temp directories instead of ad hoc paths so this behavior stays consistent across the suite.
 
 ```ts#index.test.ts
@@ -172,3 +175,68 @@ bun --hot ./index.ts
 ```
 
 For more information, read the Bun API docs in `node_modules/bun-types/docs/**.mdx`.
+
+## CLI IPC Subsystem
+
+yash exposes a Unix Domain Socket (UDS) so external processes can send commands to a running TUI instance.
+
+### Files
+
+| File | Role |
+|------|------|
+| `src/ipc/socket-path.ts` | Resolves `${YASH_DATA_DIR}/yash.sock` via `resolveSocketPath()` |
+| `src/ipc/server.ts` | UDS server started by the TUI at boot (`startIpcServer`); deletes any stale socket on startup; cleans up the socket on process exit |
+| `src/ipc/client.ts` | CLI client (`sendCliCommand`); prints response to stdout; exits 1 on ENOENT/ECONNREFUSED with "yash is not running" |
+| `src/cli.ts` | CLI entry point; invoked via `bun run cmd`; prepends `/` to commands that lack it |
+
+### Protocol
+
+One request / one response per connection, both newline-terminated JSON:
+
+- Request: `{"command": "/marker Intro"}\n`
+- Response (success): `{"ok": true, "output": "..."}\n`
+- Response (failure): `{"ok": false, "error": "..."}\n`
+
+The server calls `socket.end()` after writing the response.
+
+### `commandHandlers` and the `emit` callback
+
+`commandHandlers` in `src/index.tsx` is typed as:
+
+```ts
+Record<string, (parts: string[], emit: (line: string) => void) => Promise<void>>
+```
+
+- **TUI path**: `emit = (line) => lastMessages.push(line)` — output appears in the TUI chat area.
+- **IPC path**: `emit = (line) => lines.push(line)` — lines are joined with `\n` and returned as the IPC `output`.
+
+When adding a new command handler, always use `emit` for all output. Never write directly to `lastMessages` or `process.stdout` inside a handler.
+
+### Blocked commands over IPC
+
+The following commands are rejected when called via IPC:
+
+| Command | Reason |
+|---------|--------|
+| `/exit` | Would kill the live TUI before the response is sent |
+| `/stream` | Opens a TUI modal |
+| `/setup-youtube` | Opens a TUI modal |
+| `/history` | Opens a TUI modal |
+| `/chatter` | Opens a TUI modal |
+| `/settings` (bare) | Opens a TUI modal |
+
+`/settings get <key>` and `/settings set <key> <value>` work fine over IPC. When adding a new command that opens a modal or performs a TUI-only side effect, add it to the `tuiOnlyCommands` set in `handleCommandForCli` in `src/index.tsx`.
+
+### Testing with IPC / socket isolation
+
+- The socket path derives from `YASH_DATA_DIR` via `getDataDir()`. Tests that exercise IPC or anything touching `resolveSocketPath()` must set `YASH_DATA_DIR` to a directory under `tmp/tests/` to avoid colliding with a real running yash instance.
+- Clean up the socket file (`yash.sock`) in `afterAll` if the test starts a server directly — `process.on('exit', cleanup)` only fires on clean exit and will not run if a test crashes.
+- Example isolation pattern:
+  ```ts
+  const origDataDir = process.env.YASH_DATA_DIR;
+  beforeAll(() => { process.env.YASH_DATA_DIR = 'tmp/tests/ipc-my-test'; });
+  afterAll(() => {
+    if (origDataDir === undefined) delete process.env.YASH_DATA_DIR;
+    else process.env.YASH_DATA_DIR = origDataDir;
+  });
+  ```

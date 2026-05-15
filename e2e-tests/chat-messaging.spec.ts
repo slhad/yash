@@ -9,11 +9,19 @@ if (process.env.RUN_PLAYWRIGHT === '1') {
   test('unified: send message to all platforms via Enter key', async ({ page }) => {
     let capturedBody: unknown = null;
 
-    await page.route('**/api/chat/history', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }));
-    await page.route('**/api/status', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: '{}' }));
+    await page.route('**/api/chat/history', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }),
+    );
+    await page.route('**/api/status', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: '{}' }),
+    );
     await page.route('**/api/chat/send', async (route) => {
       capturedBody = JSON.parse(route.request().postData() ?? '{}');
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true }),
+      });
     });
 
     await page.goto('/unified');
@@ -37,11 +45,19 @@ if (process.env.RUN_PLAYWRIGHT === '1') {
   test('unified: send message to all platforms via send button', async ({ page }) => {
     let capturedBody: unknown = null;
 
-    await page.route('**/api/chat/history', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }));
-    await page.route('**/api/status', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: '{}' }));
+    await page.route('**/api/chat/history', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }),
+    );
+    await page.route('**/api/status', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: '{}' }),
+    );
     await page.route('**/api/chat/send', async (route) => {
       capturedBody = JSON.parse(route.request().postData() ?? '{}');
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true }),
+      });
     });
 
     await page.goto('/unified');
@@ -64,11 +80,19 @@ if (process.env.RUN_PLAYWRIGHT === '1') {
   test('unified: Shift+Enter adds newline without sending', async ({ page }) => {
     let sendCalled = false;
 
-    await page.route('**/api/chat/history', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }));
-    await page.route('**/api/status', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: '{}' }));
+    await page.route('**/api/chat/history', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }),
+    );
+    await page.route('**/api/status', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: '{}' }),
+    );
     await page.route('**/api/chat/send', async (route) => {
       sendCalled = true;
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true }),
+      });
     });
 
     await page.goto('/unified');
@@ -89,14 +113,24 @@ if (process.env.RUN_PLAYWRIGHT === '1') {
     expect(value).toContain('\n');
   });
 
-  test('unified: selecting a platform targets that platform in the request body', async ({ page }) => {
+  test('unified: selecting a platform targets that platform in the request body', async ({
+    page,
+  }) => {
     let capturedBody: unknown = null;
 
-    await page.route('**/api/chat/history', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }));
-    await page.route('**/api/status', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: '{}' }));
+    await page.route('**/api/chat/history', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }),
+    );
+    await page.route('**/api/status', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: '{}' }),
+    );
     await page.route('**/api/chat/send', async (route) => {
       capturedBody = JSON.parse(route.request().postData() ?? '{}');
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true }),
+      });
     });
 
     await page.goto('/unified');
