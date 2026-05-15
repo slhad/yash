@@ -29,6 +29,7 @@ import {
 } from './services';
 import { ChatterCache } from './services/chatter-cache';
 import { messageLog, type StreamSummary } from './services/message-log';
+import { runChatClearCommand } from './utils/chatClear';
 import { isDemoMode, saveConfig } from './utils/config';
 import logCollector from './utils/logCollector';
 import { defaultLogger } from './utils/logger';
@@ -2547,6 +2548,21 @@ const commandHandlers: Record<
     }
   },
 
+  '/chat': async (parts, emit) => {
+    const result = runChatClearCommand(parts, {
+      lastMessages,
+      lastRawMessages,
+      eventLog,
+      clearLogs: () => logCollector.clear(),
+      resetBrowseSelection: () => {
+        browseModeActive = false;
+        browseSelectedIdx = null;
+      },
+    });
+    emit(result);
+    updateUI(lastMessages);
+  },
+
   '/logs': async (parts, emit) => {
     const op = parts[1];
     if (op === 'clear') {
@@ -2630,6 +2646,7 @@ const commandHandlers: Record<
     emit(
       '[help]   /chatter <@username>  — open chatter info modal for the most recent message from that user',
     );
+    emit('[help]   /chat clear <all|messages|events|logs>  — clear live chat, events, and logs');
     emit('[help]   /history  — browse all stream broadcasts and search message history');
     emit('[help]   /history search <query>  — open history with search pre-filled');
     emit('[help]   /history user <@name>  — search history filtered to a user');
