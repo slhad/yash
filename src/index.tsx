@@ -35,6 +35,7 @@ import logCollector from './utils/logCollector';
 import { defaultLogger } from './utils/logger';
 import { formatMarkerCreationSummary } from './utils/markerSummary';
 import { buildTargetedStreamMetadataUpdate } from './utils/streamMetadata';
+import { buildChatHistoryMessages } from './utils/chatHistoryLoader';
 import { getAutocomplete, initTuiCommands } from './utils/tuiCommands';
 import { installTuiErrorCapture } from './utils/tuiErrorCapture';
 import { type MessageTarget } from './utils/tuiMessageInput';
@@ -4483,6 +4484,27 @@ async function fetchPlatformInfo(platform: string): Promise<Record<string, unkno
   return { error: `unsupported platform: ${platform}` };
 }
 
+function loadChatHistory(): { lines: ChatLine[]; rawMsgs: ChatMessage[] } {
+  const maxHistory = Number(settings.get('chat.maxHistorySize', 1000));
+  const streamIds: string[] = [];
+
+  const ytInfo = youtube.getChannelInfo();
+  if (ytInfo.broadcastId) streamIds.push(ytInfo.broadcastId);
+
+  const twitchStart = twitch.getStreamStartTime();
+  if (twitchStart) streamIds.push(twitchStart.toISOString());
+
+  const kickStart = kick.getStreamStartTime();
+  if (kickStart) streamIds.push(kickStart.toISOString());
+
+  const rawMsgs = buildChatHistoryMessages(
+    streamIds,
+    (id, limit, offset) => messageLog.getForStream(id, limit, offset),
+    maxHistory,
+  );
+  return { lines: rawMsgs.map(transformMessage), rawMsgs };
+}
+
 async function main() {
   const renderer = await createCliRenderer({
     screenMode:
@@ -4696,6 +4718,13 @@ async function main() {
     'obs.connect',
     obsService.isConnected() ? 'OBS connected' : 'OBS unavailable',
   );
+
+  const { lines: histLines, rawMsgs: histRaw } = loadChatHistory();
+  if (histLines.length > 0) {
+    lastMessages.push('[system] --- chat history ---');
+    lastMessages.push(...histLines);
+    lastRawMessages.push(...histRaw);
+  }
 
   // Build UI tree once — no flicker on periodic updates
   uiNodes = initUI(renderer, lastMessages);
