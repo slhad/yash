@@ -45,6 +45,7 @@ import {
   SETTINGS_WIDTH_OPTIONS,
   validateTuiSettingsDraft,
 } from './utils/tuiSettings';
+import { runIpcCommand } from './utils/ipcCommandRunner';
 import { parseMarkerArgs, parseSettingsValue } from './utils/webCommands';
 import './index.ts'; // start Bun.serve web server in the same process
 import { startIpcServer } from './ipc/server';
@@ -2756,27 +2757,7 @@ async function handleCommand(trimmed: string): Promise<void> {
 }
 
 async function handleCommandForCli(trimmed: string): Promise<string> {
-  const parts = trimmed.split(/\s+/);
-  const cmd = parts[0].toLowerCase();
-
-  if (cmd === '/exit') return 'Cannot exit the TUI via IPC';
-
-  const tuiOnlyCommands = new Set(['/stream', '/setup-youtube', '/history', '/chatter']);
-  if (tuiOnlyCommands.has(cmd)) return 'This command requires the TUI';
-  if (cmd === '/settings' && !parts[1]) return 'This command requires the TUI';
-
-  const lines: string[] = [];
-  const emit = (line: string) => lines.push(line);
-
-  const handler = commandHandlers[cmd];
-  if (handler) {
-    await handler(parts, emit);
-    pushEvent('ipc', 'command', trimmed);
-  } else {
-    emit(`[system] Unknown command: ${trimmed}`);
-  }
-
-  return lines.join('\n');
+  return runIpcCommand(trimmed, commandHandlers, pushEvent);
 }
 
 function openSettingsModal(): void {
