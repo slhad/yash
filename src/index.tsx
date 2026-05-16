@@ -73,8 +73,7 @@ interface ActivityEvent {
 }
 
 const activityEvents: ActivityEvent[] = [];
-let activityBarHideTimer: ReturnType<typeof setTimeout> | null = null;
-let activityBarVisible = true; // tracks timed-mode visibility
+let activityRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 
 function _getActivityLogPath(): string {
   return `${getDataDir()}/activity-events.json`;
@@ -103,27 +102,43 @@ function _saveActivityEvents(): void {
   }
 }
 
-function _showActivityBar(): void {
-  if (!uiNodes?.activityBar) return;
-  if (!boolSetting(settings.get('activity.visible', true), true)) return;
-  activityBarVisible = true;
-  uiNodes.activityBar.visible = true;
-  if (activityBarHideTimer) clearTimeout(activityBarHideTimer);
+function _timedVisibleEvents(): ActivityEvent[] {
+  const secs = numSetting(settings.get('activity.timeout', 10), 10);
+  const cutoff = Date.now() - secs * 1000;
+  return activityEvents.filter((ev) => ev.ts > cutoff);
+}
+
+function _activityBarShouldBeVisible(): boolean {
+  if (!boolSetting(settings.get('activity.visible', true), true)) return false;
   const mode = settings.get('activity.mode', 'permanent') as string;
-  if (mode === 'timed') {
-    const secs = numSetting(settings.get('activity.timeout', 10), 10);
-    activityBarHideTimer = setTimeout(() => {
-      activityBarVisible = false;
-      if (uiNodes?.activityBar) uiNodes.activityBar.visible = false;
-    }, secs * 1000);
-  }
+  if (mode !== 'timed') return true;
+  if (activityEvents.length === 0) return true; // show "No events yet" until first event
+  return _timedVisibleEvents().length > 0;
+}
+
+function _scheduleActivityBarRefresh(): void {
+  if (activityRefreshTimer) clearTimeout(activityRefreshTimer);
+  activityRefreshTimer = null;
+  const mode = settings.get('activity.mode', 'permanent') as string;
+  if (mode !== 'timed') return;
+  const secs = numSetting(settings.get('activity.timeout', 10), 10);
+  const now = Date.now();
+  const nextExpiry = activityEvents
+    .map((ev) => ev.ts + secs * 1000)
+    .filter((t) => t > now)
+    .sort((a, b) => a - b)[0];
+  if (nextExpiry === undefined) return;
+  activityRefreshTimer = setTimeout(() => {
+    if (uiNodes) updateUI(lastMessages);
+    _scheduleActivityBarRefresh();
+  }, nextExpiry - now + 50);
 }
 
 function pushActivityEvent(platform: string, type: string, message: string): void {
   const ev: ActivityEvent = { ts: Date.now(), platform, type, message };
   activityEvents.push(ev);
   _saveActivityEvents();
-  _showActivityBar();
+  _scheduleActivityBarRefresh();
   if (uiNodes) updateUI(lastMessages);
 }
 
@@ -152,8 +167,8 @@ function applySettingSideEffects(key: string, value: unknown): void {
       chatService.setMaxHistorySize(parsed);
     }
   }
-  if (key === 'activity.mode' && value === 'timed') {
-    _showActivityBar();
+  if (key === 'activity.mode') {
+    _scheduleActivityBarRefresh();
   }
 }
 
@@ -498,10 +513,7 @@ function initUI(renderer: CliRenderer, messages: ChatLine[]): UINodes {
   activityBar.add(activityBarText);
   activityBar.onMouseDown = () => openActivityModal();
   _updateActivityBarText(activityBarText);
-  const activitySettingVisible = boolSetting(settings.get('activity.visible', true), true);
-  const activityMode = settings.get('activity.mode', 'permanent') as string;
-  activityBar.visible =
-    activitySettingVisible && (activityMode === 'permanent' || activityBarVisible);
+  activityBar.visible = _activityBarShouldBeVisible();
 
   // ── Content row: chat (center, grows) + sidebar (right) ─────────
   const contentRow = new BoxRenderable(renderer, {
@@ -682,21 +694,23 @@ function _activityPlatformColor(platform: string): string {
 }
 
 function _updateActivityBarText(node: TextRenderable): void {
-  if (activityEvents.length === 0) {
+  const mode = settings.get('activity.mode', 'permanent') as string;
+  const source = mode === 'timed' ? _timedVisibleEvents() : activityEvents;
+  if (source.length === 0) {
     node.content = 'No events yet';
     node.fg = 'gray';
     return;
   }
   node.fg = 'white';
-  const recent = activityEvents.slice(-ACTIVITY_MAX_VISIBLE);
+  const recent = source.slice(-ACTIVITY_MAX_VISIBLE);
   const parts: ReturnType<typeof fg>[] = [];
   for (let i = 0; i < recent.length; i++) {
     const ev = recent[i]!;
     if (i > 0) parts.push(fg('gray')('  │  '));
     parts.push(fg(_activityPlatformColor(ev.platform))(ev.message));
   }
-  if (activityEvents.length > ACTIVITY_MAX_VISIBLE) {
-    parts.push(fg('gray')(` … +${activityEvents.length - ACTIVITY_MAX_VISIBLE} older`));
+  if (source.length > ACTIVITY_MAX_VISIBLE) {
+    parts.push(fg('gray')(` … +${source.length - ACTIVITY_MAX_VISIBLE} older`));
   }
   parts.push(fg('#555555')('  [click to view all]'));
   node.content = new StyledText(parts);
@@ -866,10 +880,7 @@ function updateUI(messages: ChatLine[]): void {
 
   // Activity bar
   const { activityBar, activityBarText } = uiNodes;
-  const activitySettingVisible = boolSetting(settings.get('activity.visible', true), true);
-  const activityMode = settings.get('activity.mode', 'permanent') as string;
-  activityBar.visible =
-    activitySettingVisible && (activityMode === 'permanent' || activityBarVisible);
+  activityBar.visible = _activityBarShouldBeVisible();
   _updateActivityBarText(activityBarText);
 
   // Sidebar: clear and refill
@@ -5083,6 +5094,7 @@ async function main() {
   if (restoredActivity.length > 0) {
     activityEvents.push(...restoredActivity);
   }
+  _scheduleActivityBarRefresh();
 
   if (youtube.isAuthenticated()) pushEvent('youtube', 'auth', 'Authenticated');
   if (twitch.isAuthenticated()) pushEvent('twitch', 'auth', 'Authenticated');
