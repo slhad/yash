@@ -4497,6 +4497,14 @@ function loadChatHistory(): { lines: ChatLine[]; rawMsgs: ChatMessage[] } {
   const kickStart = kick.getStreamStartTime();
   if (kickStart) streamIds.push(kickStart.toISOString());
 
+  // Allow explicit override via settings (useful for demos / dev without live streams)
+  const overrideIds = settings.get('chat.historyStreamIds', []);
+  if (Array.isArray(overrideIds)) {
+    for (const id of overrideIds) {
+      if (typeof id === 'string' && !streamIds.includes(id)) streamIds.push(id);
+    }
+  }
+
   const rawMsgs = buildChatHistoryMessages(
     streamIds,
     (id, limit, offset) => messageLog.getForStream(id, limit, offset),
