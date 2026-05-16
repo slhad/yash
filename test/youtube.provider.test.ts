@@ -599,9 +599,12 @@ describe('YouTubeProvider — markers', () => {
       defaultPlaylist: { enabled: false, playlistId: '', playlistTitle: '' },
       subjectPlaylist: { enabled: false },
       chaptering: { enabled: false },
+      clearMarkersOnNewStream: { enabled: false },
       tags: { enabled: false },
       description: { enabled: false },
       subjectTitle: { enabled: false },
+      defaultMarkerAtStart: { enabled: false, message: 'start' },
+      markerSyncDelay: { enabled: false, offsetSeconds: 0 },
     });
     p._findStreamIdByKey = async () => 'stream-saved';
     p._request = async (url: string) => {
@@ -672,9 +675,12 @@ describe('YouTubeProvider — markers', () => {
       defaultPlaylist: { enabled: false, playlistId: '', playlistTitle: '' },
       subjectPlaylist: { enabled: false },
       chaptering: { enabled: true },
+      clearMarkersOnNewStream: { enabled: false },
       tags: { enabled: false },
       description: { enabled: false },
       subjectTitle: { enabled: false },
+      defaultMarkerAtStart: { enabled: false, message: 'start' },
+      markerSyncDelay: { enabled: false, offsetSeconds: 0 },
     });
 
     const broadcastPutBodies: any[] = [];
@@ -723,8 +729,8 @@ describe('YouTubeProvider — markers', () => {
 
     expect(broadcastPutBodies).toHaveLength(2);
     expect(videoPutBodies).toHaveLength(2);
-    expect(videoPutBodies[0].snippet.description).toContain('Timestamps :\n0:00 Intro');
-    expect(videoPutBodies[1].snippet.description).toContain('Timestamps :\n0:00 Intro\n1:00 Topic');
+    expect(videoPutBodies[0].snippet.description).toContain('Timestamps :\n00:00:00 - Intro');
+    expect(videoPutBodies[1].snippet.description).toContain('Timestamps :\n00:00:00 - Intro\n00:01:00 - Topic');
   });
 
   test('createMarker rolls back the marker when description sync fails', async () => {
@@ -744,9 +750,12 @@ describe('YouTubeProvider — markers', () => {
       defaultPlaylist: { enabled: false, playlistId: '', playlistTitle: '' },
       subjectPlaylist: { enabled: false },
       chaptering: { enabled: true },
+      clearMarkersOnNewStream: { enabled: false },
       tags: { enabled: false },
       description: { enabled: false },
       subjectTitle: { enabled: false },
+      defaultMarkerAtStart: { enabled: false, message: 'start' },
+      markerSyncDelay: { enabled: false, offsetSeconds: 0 },
     });
     p._request = async (url: string) => {
       if (url.includes('/liveBroadcasts?part=id,snippet&id=live-broadcast')) {
@@ -902,7 +911,7 @@ describe('YouTubeProvider — getChapterDescriptionBlock', () => {
     const p = makeProvider();
     await p.createMarker('Intro', 0);
     await p.createMarker('Topic A', 90);
-    expect(p.getChapterDescriptionBlock()).toBe('0:00 Intro\n1:30 Topic A');
+    expect(p.getChapterDescriptionBlock()).toBe('00:00:00 - Intro\n00:01:30 - Topic A');
   });
 
   test('formats hour:minute:second timestamps for long videos', async () => {
@@ -910,7 +919,7 @@ describe('YouTubeProvider — getChapterDescriptionBlock', () => {
     await p.createMarker('Intro', 0);
     await p.createMarker('Finale', 3661);
     const block = p.getChapterDescriptionBlock();
-    expect(block).toContain('1:01:01 Finale');
+    expect(block).toContain('01:01:01 - Finale');
   });
 
   test('pads minutes and seconds to two digits', async () => {
@@ -918,7 +927,7 @@ describe('YouTubeProvider — getChapterDescriptionBlock', () => {
     await p.createMarker('Start', 0);
     await p.createMarker('Early', 65); // 1:05
     const block = p.getChapterDescriptionBlock();
-    expect(block).toContain('1:05 Early');
+    expect(block).toContain('00:01:05 - Early');
   });
 
   test('sorts markers by position regardless of insertion order', async () => {
@@ -978,9 +987,12 @@ describe('YouTubeProvider — updateStreamMetadata target selection', () => {
       defaultPlaylist: { enabled: false, playlistId: '', playlistTitle: '' },
       subjectPlaylist: { enabled: false },
       chaptering: { enabled: false },
+      clearMarkersOnNewStream: { enabled: false },
       tags: { enabled: false },
       description: { enabled: false },
       subjectTitle: { enabled: false },
+      defaultMarkerAtStart: { enabled: false, message: 'start' },
+      markerSyncDelay: { enabled: false, offsetSeconds: 0 },
     });
     p._findStreamIdByKey = async () => 'stream-saved';
 
@@ -1076,9 +1088,12 @@ describe('YouTubeProvider — updateStreamMetadata target selection', () => {
       defaultPlaylist: { enabled: false, playlistId: '', playlistTitle: '' },
       subjectPlaylist: { enabled: false },
       chaptering: { enabled: false },
+      clearMarkersOnNewStream: { enabled: false },
       tags: { enabled: false },
       description: { enabled: false },
       subjectTitle: { enabled: false },
+      defaultMarkerAtStart: { enabled: false, message: 'start' },
+      markerSyncDelay: { enabled: false, offsetSeconds: 0 },
     });
     p._findStreamIdByKey = async () => 'stream-saved';
 

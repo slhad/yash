@@ -482,6 +482,14 @@ export async function handleWebCommand(text: string, ctx: WebCommandContext): Pr
             'youtube-setup',
             `  Description      : ${s.description?.enabled ? 'ON  — uses description from /stream' : 'OFF'}`,
           );
+          fb(
+            'youtube-setup',
+            `  Auto-Start Marker: ${s.defaultMarkerAtStart?.enabled ? `ON  — message: "${s.defaultMarkerAtStart.message || 'start'}"` : 'OFF'}`,
+          );
+          fb(
+            'youtube-setup',
+            `  Marker Delay (s) : ${s.markerSyncDelay?.enabled ? `ON  — offset: ${s.markerSyncDelay.offsetSeconds ?? 0}s` : 'OFF'}`,
+          );
         } else {
           fb('youtube-setup', 'Could not fetch YouTube setup.');
         }
@@ -500,7 +508,33 @@ export async function handleWebCommand(text: string, ctx: WebCommandContext): Pr
       description: 'description',
       subject: 'subjectPlaylist',
       playlist: 'defaultPlaylist',
+      'default-marker': 'defaultMarkerAtStart',
     };
+
+    if (sub === 'marker-delay') {
+      const rawVal = parts[2];
+      const offset = rawVal !== undefined ? parseInt(rawVal, 10) : NaN;
+      if (isNaN(offset)) {
+        fb('youtube-setup', 'Usage: /setup-youtube marker-delay <seconds>');
+        return true;
+      }
+      try {
+        const res = await fetch('/api/youtube/setup');
+        const current = res.ok ? await res.json() : {};
+        const patch = {
+          markerSyncDelay: { ...(current.markerSyncDelay ?? {}), offsetSeconds: offset },
+        };
+        await fetch('/api/youtube/setup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(patch),
+        });
+        fb('youtube-setup', `marker-delay set to ${offset}s.`);
+      } catch {
+        fb('youtube-setup', 'Failed to update YouTube setup.');
+      }
+      return true;
+    }
 
     if (sub in toggleMap && bool !== null) {
       try {
@@ -522,8 +556,9 @@ export async function handleWebCommand(text: string, ctx: WebCommandContext): Pr
 
     fb(
       'youtube-setup',
-      'Usage: /setup-youtube [chaptering|clear-markers|tags|description|subject|playlist] [on|off]',
+      'Usage: /setup-youtube [chaptering|clear-markers|tags|description|subject|playlist|default-marker] [on|off]',
     );
+    fb('youtube-setup', '       /setup-youtube marker-delay <seconds>');
     return true;
   }
 
