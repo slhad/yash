@@ -522,7 +522,7 @@ export async function handleWebCommand(text: string, ctx: WebCommandContext): Pr
         const res = await fetch('/api/youtube/setup');
         const current = res.ok ? await res.json() : {};
         const patch = {
-          markerSyncDelay: { ...(current.markerSyncDelay ?? {}), offsetSeconds: offset },
+          markerSyncDelay: { ...(current.markerSyncDelay ?? {}), enabled: true, offsetSeconds: offset },
         };
         await fetch('/api/youtube/setup', {
           method: 'POST',

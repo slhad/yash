@@ -1426,9 +1426,11 @@ export class YouTubeProvider implements PlatformProvider {
       resolvedSeconds = Math.max(0, Math.floor((Date.now() - this.streamStartTime.getTime()) / 1000));
     }
 
-    const setup = this.getSetup();
-    if (setup.markerSyncDelay.enabled && setup.markerSyncDelay.offsetSeconds !== 0) {
-      resolvedSeconds = Math.max(0, resolvedSeconds + setup.markerSyncDelay.offsetSeconds);
+    if (timestamp === undefined) {
+      const setup = this.getSetup();
+      if (setup.markerSyncDelay.enabled && setup.markerSyncDelay.offsetSeconds !== 0) {
+        resolvedSeconds = Math.max(0, resolvedSeconds + setup.markerSyncDelay.offsetSeconds);
+      }
     }
     return resolvedSeconds;
   }
