@@ -2873,6 +2873,10 @@ const commandHandlers: Record<
     }
   },
 
+  '/activity': async (_parts, _emit) => {
+    openActivityModal();
+  },
+
   '/setup-youtube': async (_parts, emit) => {
     if (!youtube.isAuthenticated()) {
       emit('[system] YouTube is not authenticated. Run /connect youtube first.');
@@ -2919,6 +2923,7 @@ const commandHandlers: Record<
     emit(
       '[help]   /chat clear <all|messages|events|logs>  — clear matching entries from Chat only',
     );
+    emit('[help]   /activity  — open the activity bar modal (follows, subs, cheers, raids)');
     emit('[help]   /history  — browse all stream broadcasts and search message history');
     emit('[help]   /history search <query>  — open history with search pre-filled');
     emit('[help]   /history user <@name>  — search history filtered to a user');
