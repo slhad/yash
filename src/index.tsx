@@ -146,10 +146,14 @@ function getSettingValue(key: string): unknown {
 }
 
 function applySettingSideEffects(key: string, value: unknown): void {
-  if (key !== 'chat.maxHistorySize') return;
-  const parsed = typeof value === 'number' ? value : Number.parseInt(String(value), 10);
-  if (Number.isFinite(parsed) && parsed > 0) {
-    chatService.setMaxHistorySize(parsed);
+  if (key === 'chat.maxHistorySize') {
+    const parsed = typeof value === 'number' ? value : Number.parseInt(String(value), 10);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      chatService.setMaxHistorySize(parsed);
+    }
+  }
+  if (key === 'activity.mode' && value === 'timed') {
+    _showActivityBar();
   }
 }
 
