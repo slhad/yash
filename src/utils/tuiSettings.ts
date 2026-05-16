@@ -1,6 +1,7 @@
 export const SETTINGS_VIEWER_MODES = ['per-platform', 'cumulative', 'both'] as const;
 export const SETTINGS_MESSAGE_POSITIONS = ['top', 'bottom', 'hide'] as const;
 export const SETTINGS_WIDTH_OPTIONS = ['25%', '30%', '35%', '40%', '45%', '50%'] as const;
+export const SETTINGS_ACTIVITY_MODES = ['permanent', 'timed'] as const;
 
 export interface TuiSettingsDraftInput {
   demo: boolean;
@@ -19,6 +20,9 @@ export interface TuiSettingsDraftInput {
   youtubeShowViewers: boolean;
   twitchShowViewers: boolean;
   kickShowViewers: boolean;
+  activityVisible: boolean;
+  activityMode: string;
+  activityTimeout: string;
 }
 
 export interface TuiSettingsValues {
@@ -38,6 +42,9 @@ export interface TuiSettingsValues {
   youtubeShowViewers: boolean;
   twitchShowViewers: boolean;
   kickShowViewers: boolean;
+  activityVisible: boolean;
+  activityMode: (typeof SETTINGS_ACTIVITY_MODES)[number];
+  activityTimeout: number;
 }
 
 export interface TuiSettingsEntry {
@@ -67,6 +74,7 @@ export function validateTuiSettingsDraft(draft: TuiSettingsDraftInput): {
   const eventsTail = parsePositiveInt(draft.eventsTail, 'events.tail', errors);
   const logsHeight = parsePositiveInt(draft.logsHeight, 'logs.height', errors);
   const logsTail = parsePositiveInt(draft.logsTail, 'logs.tail', errors);
+  const activityTimeout = parsePositiveInt(draft.activityTimeout, 'activity.timeout', errors);
 
   if (
     !SETTINGS_VIEWER_MODES.includes(draft.viewersMode as (typeof SETTINGS_VIEWER_MODES)[number])
@@ -84,6 +92,13 @@ export function validateTuiSettingsDraft(draft: TuiSettingsDraftInput): {
     !SETTINGS_WIDTH_OPTIONS.includes(draft.eventsWidth as (typeof SETTINGS_WIDTH_OPTIONS)[number])
   ) {
     errors.push(`events.width must be one of: ${SETTINGS_WIDTH_OPTIONS.join(', ')}`);
+  }
+  if (
+    !SETTINGS_ACTIVITY_MODES.includes(
+      draft.activityMode as (typeof SETTINGS_ACTIVITY_MODES)[number],
+    )
+  ) {
+    errors.push(`activity.mode must be one of: ${SETTINGS_ACTIVITY_MODES.join(', ')}`);
   }
 
   if (errors.length > 0) {
@@ -108,6 +123,9 @@ export function validateTuiSettingsDraft(draft: TuiSettingsDraftInput): {
       youtubeShowViewers: draft.youtubeShowViewers,
       twitchShowViewers: draft.twitchShowViewers,
       kickShowViewers: draft.kickShowViewers,
+      activityVisible: draft.activityVisible,
+      activityMode: draft.activityMode as (typeof SETTINGS_ACTIVITY_MODES)[number],
+      activityTimeout: activityTimeout as number,
     },
     errors,
   };
@@ -131,5 +149,8 @@ export function buildTuiSettingsEntries(values: TuiSettingsValues): TuiSettingsE
     { key: 'platforms.youtube.showViewers', value: values.youtubeShowViewers },
     { key: 'platforms.twitch.showViewers', value: values.twitchShowViewers },
     { key: 'platforms.kick.showViewers', value: values.kickShowViewers },
+    { key: 'activity.visible', value: values.activityVisible },
+    { key: 'activity.mode', value: values.activityMode },
+    { key: 'activity.timeout', value: values.activityTimeout },
   ];
 }

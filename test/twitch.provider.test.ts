@@ -543,3 +543,85 @@ describe('TwitchProvider — getAuthUrl', () => {
     expect(url).toContain('id.twitch.tv/oauth2/authorize');
   });
 });
+
+// ---------------------------------------------------------------------------
+// activity events
+// ---------------------------------------------------------------------------
+describe('TwitchProvider — activity events', () => {
+  test('onActivityEvent registers a callback that fires on _dispatchActivity', () => {
+    const p = makeProvider();
+    const received: { type: string; message: string }[] = [];
+    p.onActivityEvent((event) => received.push(event));
+
+    (p as any)._dispatchActivity('follow', 'user123 followed');
+
+    expect(received).toHaveLength(1);
+    expect(received[0].type).toBe('follow');
+    expect(received[0].message).toBe('user123 followed');
+  });
+
+  test('multiple callbacks all fire on _dispatchActivity', () => {
+    const p = makeProvider();
+    const a: { type: string; message: string }[] = [];
+    const b: { type: string; message: string }[] = [];
+    p.onActivityEvent((event) => a.push(event));
+    p.onActivityEvent((event) => b.push(event));
+
+    (p as any)._dispatchActivity('sub', 'viewer subscribed');
+
+    expect(a).toHaveLength(1);
+    expect(b).toHaveLength(1);
+    expect(a[0].type).toBe('sub');
+    expect(b[0].type).toBe('sub');
+  });
+
+  test('unsubscribe removes only the unsubscribed callback', () => {
+    const p = makeProvider();
+    const a: string[] = [];
+    const b: string[] = [];
+    const unsub = p.onActivityEvent((event) => a.push(event.type));
+    p.onActivityEvent((event) => b.push(event.type));
+
+    (p as any)._dispatchActivity('raid', 'raider arrived');
+    unsub();
+    (p as any)._dispatchActivity('cheer', 'bits donated');
+
+    expect(a).toHaveLength(1);
+    expect(a[0]).toBe('raid');
+    expect(b).toHaveLength(2);
+    expect(b[0]).toBe('raid');
+    expect(b[1]).toBe('cheer');
+  });
+
+  test('calling unsubscribe twice is safe (idempotent)', () => {
+    const p = makeProvider();
+    const received: string[] = [];
+    const unsub = p.onActivityEvent((event) => received.push(event.type));
+
+    unsub();
+    expect(() => unsub()).not.toThrow();
+
+    (p as any)._dispatchActivity('follow', 'someone followed');
+    expect(received).toHaveLength(0);
+  });
+
+  test('_dispatchActivity with no registered callbacks is a no-op', () => {
+    const p = makeProvider();
+    expect(() => (p as any)._dispatchActivity('follow', 'ghost follow')).not.toThrow();
+  });
+
+  test('callback receives correct { type, message } shape', () => {
+    const p = makeProvider();
+    let received: { type: string; message: string } | null = null;
+    p.onActivityEvent((event) => {
+      received = event;
+    });
+
+    (p as any)._dispatchActivity('cheer', '100 bits from viewer99');
+
+    expect(received).not.toBeNull();
+    expect(received!.type).toBe('cheer');
+    expect(received!.message).toBe('100 bits from viewer99');
+    expect(Object.keys(received!).sort()).toEqual(['message', 'type']);
+  });
+});

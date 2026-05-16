@@ -30,7 +30,7 @@ import {
 import { ChatterCache } from './services/chatter-cache';
 import { messageLog, type StreamSummary } from './services/message-log';
 import { type ChatClearLineKind, runChatClearCommand } from './utils/chatClear';
-import { isDemoMode, saveConfig } from './utils/config';
+import { getDataDir, isDemoMode, saveConfig } from './utils/config';
 import logCollector from './utils/logCollector';
 import { defaultLogger } from './utils/logger';
 import { formatMarkerCreationSummary } from './utils/markerSummary';
@@ -41,6 +41,7 @@ import { installTuiErrorCapture } from './utils/tuiErrorCapture';
 import { type MessageTarget } from './utils/tuiMessageInput';
 import {
   buildTuiSettingsEntries,
+  SETTINGS_ACTIVITY_MODES,
   SETTINGS_MESSAGE_POSITIONS,
   SETTINGS_VIEWER_MODES,
   SETTINGS_WIDTH_OPTIONS,
@@ -59,6 +60,71 @@ installTuiErrorCapture();
 const eventLog: Array<{ ts: number; platform: string; type: string; message: string }> = [];
 function pushEvent(platform: string, type: string, message: string): void {
   eventLog.push({ ts: Date.now(), platform, type, message });
+}
+
+// ─── Activity log ────────────────────────────────────────────────────────────
+// Persisted to disk; tracks sub/follow/cheer/raid events from live platforms.
+
+interface ActivityEvent {
+  ts: number;
+  platform: string;
+  type: string;
+  message: string;
+}
+
+const activityEvents: ActivityEvent[] = [];
+let activityBarHideTimer: ReturnType<typeof setTimeout> | null = null;
+let activityBarVisible = true; // tracks timed-mode visibility
+
+function _getActivityLogPath(): string {
+  return `${getDataDir()}/activity-events.json`;
+}
+
+function _loadActivityEvents(): ActivityEvent[] {
+  try {
+    const raw = require('node:fs').readFileSync(_getActivityLogPath(), 'utf8');
+    const parsed = JSON.parse(raw);
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+    return Array.isArray(parsed) ? parsed.filter((e: ActivityEvent) => e.ts > cutoff) : [];
+  } catch {
+    return [];
+  }
+}
+
+function _saveActivityEvents(): void {
+  try {
+    require('node:fs').writeFileSync(
+      _getActivityLogPath(),
+      JSON.stringify(activityEvents),
+      'utf8',
+    );
+  } catch {
+    /* ignore */
+  }
+}
+
+function _showActivityBar(): void {
+  if (!uiNodes?.activityBar) return;
+  if (!boolSetting(settings.get('activity.visible', true), true)) return;
+  activityBarVisible = true;
+  uiNodes.activityBar.visible = true;
+  if (activityBarHideTimer) clearTimeout(activityBarHideTimer);
+  const mode = settings.get('activity.mode', 'permanent') as string;
+  if (mode === 'timed') {
+    const secs = numSetting(settings.get('activity.timeout', 10), 10);
+    activityBarHideTimer = setTimeout(() => {
+      activityBarVisible = false;
+      if (uiNodes?.activityBar) uiNodes.activityBar.visible = false;
+    }, secs * 1000);
+  }
+}
+
+function pushActivityEvent(platform: string, type: string, message: string): void {
+  const ev: ActivityEvent = { ts: Date.now(), platform, type, message };
+  activityEvents.push(ev);
+  _saveActivityEvents();
+  _showActivityBar();
+  if (uiNodes) updateUI(lastMessages);
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -183,6 +249,8 @@ interface UINodes {
   obsText: TextRenderable;
   demoText: TextRenderable;
   totalViewersText: TextRenderable;
+  activityBar: BoxRenderable;
+  activityBarText: TextRenderable;
   chatScroll: ScrollBoxRenderable;
   sidebarBox: BoxRenderable;
   sidebarScroll: ScrollBoxRenderable;
@@ -220,6 +288,7 @@ let activeStreamModal: StreamModal | null = null;
 let activeSettingsModal: SettingsModal | null = null;
 let activeChatterInfoModal: { box: BoxRenderable } | null = null;
 let activeHistoryModal: { box: BoxRenderable } | null = null;
+let activeActivityModal: { box: BoxRenderable } | null = null;
 
 const chatterCache = new ChatterCache();
 
@@ -230,7 +299,8 @@ function ensureMainInputFocus(): void {
     activeStreamModal ||
     activeSettingsModal ||
     activeChatterInfoModal ||
-    activeHistoryModal
+    activeHistoryModal ||
+    activeActivityModal
   )
     return;
   if (!uiNodes.inputEl.focused) {
@@ -406,6 +476,29 @@ function initUI(renderer: CliRenderer, messages: ChatLine[]): UINodes {
   demoText.visible = isDemoMode();
   platformRow.add(demoText);
 
+  // ── Activity bar ────────────────────────────────────────────────
+  const activityBarLabel = new TextRenderable(renderer, {
+    content: 'Activity  ',
+    fg: 'gray',
+  });
+  const activityBarText = new TextRenderable(renderer, {
+    content: '',
+    fg: 'white',
+  });
+  const activityBar = new BoxRenderable(renderer, {
+    flexDirection: 'row',
+    width: '100%',
+    paddingLeft: 1,
+  });
+  activityBar.add(activityBarLabel);
+  activityBar.add(activityBarText);
+  activityBar.onMouseDown = () => openActivityModal();
+  _updateActivityBarText(activityBarText);
+  const activitySettingVisible = boolSetting(settings.get('activity.visible', true), true);
+  const activityMode = settings.get('activity.mode', 'permanent') as string;
+  activityBar.visible =
+    activitySettingVisible && (activityMode === 'permanent' || activityBarVisible);
+
   // ── Content row: chat (center, grows) + sidebar (right) ─────────
   const contentRow = new BoxRenderable(renderer, {
     flexDirection: 'row',
@@ -492,9 +585,11 @@ function initUI(renderer: CliRenderer, messages: ChatLine[]): UINodes {
   // ── Assemble ─────────────────────────────────────────────────────
   if (messagesPosition === 'top') {
     mainBox.add(contentRow);
+    mainBox.add(activityBar);
     mainBox.add(platformRow);
   } else {
     mainBox.add(platformRow);
+    mainBox.add(activityBar);
     mainBox.add(contentRow);
   }
   if (messagesPosition !== 'hide') {
@@ -512,6 +607,8 @@ function initUI(renderer: CliRenderer, messages: ChatLine[]): UINodes {
     obsText,
     demoText,
     totalViewersText,
+    activityBar,
+    activityBarText,
     chatScroll,
     sidebarBox,
     sidebarScroll,
@@ -567,6 +664,115 @@ function _fillSidebar(
       }
     } catch {}
   }
+}
+
+// ─── Activity bar helpers ─────────────────────────────────────────────────────
+
+const ACTIVITY_MAX_VISIBLE = 5;
+
+function _activityPlatformColor(platform: string): string {
+  if (platform === 'twitch') return '#9146FF';
+  if (platform === 'youtube') return '#FF0000';
+  if (platform === 'kick') return '#53FC18';
+  return 'gray';
+}
+
+function _updateActivityBarText(node: TextRenderable): void {
+  if (activityEvents.length === 0) {
+    node.content = 'No events yet';
+    node.fg = 'gray';
+    return;
+  }
+  node.fg = 'white';
+  const recent = activityEvents.slice(-ACTIVITY_MAX_VISIBLE);
+  const parts: ReturnType<typeof fg>[] = [];
+  for (let i = 0; i < recent.length; i++) {
+    const ev = recent[i]!;
+    if (i > 0) parts.push(fg('gray')('  │  '));
+    parts.push(fg(_activityPlatformColor(ev.platform))(ev.message));
+  }
+  if (activityEvents.length > ACTIVITY_MAX_VISIBLE) {
+    parts.push(fg('gray')(` … +${activityEvents.length - ACTIVITY_MAX_VISIBLE} older`));
+  }
+  parts.push(fg('#555555')('  [click to view all]'));
+  node.content = new StyledText(parts);
+}
+
+function openActivityModal(): void {
+  if (!uiNodes || activeActivityModal) return;
+  const { renderer } = uiNodes;
+
+  const box = new BoxRenderable(renderer, {
+    position: 'absolute',
+    top: '5%',
+    left: '5%',
+    width: '90%',
+    zIndex: 110,
+    border: true,
+    borderStyle: 'rounded',
+    borderColor: 'yellow',
+    backgroundColor: 'black',
+    shouldFill: true,
+    padding: 1,
+    flexDirection: 'column',
+    gap: 0,
+    title: ' Activity Events ',
+  });
+
+  box.add(
+    new TextRenderable(renderer, {
+      content: '  ↑↓ scroll  •  Esc close',
+      fg: 'gray',
+    }),
+  );
+
+  const scroll = new ScrollBoxRenderable(renderer, {
+    flexGrow: 1,
+    stickyScroll: false,
+    stickyStart: 'bottom',
+  });
+
+  const events = [...activityEvents].reverse();
+  if (events.length === 0) {
+    scroll.add(new TextRenderable(renderer, { content: '  No activity events yet.', fg: 'gray' }));
+  } else {
+    for (const ev of events) {
+      const time = new Date(ev.ts).toLocaleTimeString();
+      scroll.add(
+        new TextRenderable(renderer, {
+          content: new StyledText([
+            fg('gray')(`  [${time}] `),
+            fg(_activityPlatformColor(ev.platform))(`[${ev.platform}] ${ev.type}: ${ev.message}`),
+          ]),
+        }),
+      );
+    }
+  }
+
+  box.add(scroll);
+  renderer.root.add(box);
+  activeActivityModal = { box };
+
+  const keyHandler = (sequence: string): boolean => {
+    if (!activeActivityModal) return false;
+    if (sequence === '\x1b' || sequence === '\x1b\x1b') {
+      renderer.removeInputHandler(keyHandler);
+      renderer.root.remove(box.id);
+      activeActivityModal = null;
+      uiNodes?.inputEl.focus();
+      return true;
+    }
+    if (sequence === '\x1b[A') {
+      scroll.scrollBy(-1);
+      return true;
+    }
+    if (sequence === '\x1b[B') {
+      scroll.scrollBy(1);
+      return true;
+    }
+    return false;
+  };
+  renderer.prependInputHandler(keyHandler);
 }
 
 // ─── updateUI ────────────────────────────────────────────────────────────────
@@ -653,6 +859,14 @@ function updateUI(messages: ChatLine[]): void {
   } else {
     updateInputAssist();
   }
+
+  // Activity bar
+  const { activityBar, activityBarText } = uiNodes;
+  const activitySettingVisible = boolSetting(settings.get('activity.visible', true), true);
+  const activityMode = settings.get('activity.mode', 'permanent') as string;
+  activityBar.visible =
+    activitySettingVisible && (activityMode === 'permanent' || activityBarVisible);
+  _updateActivityBarText(activityBarText);
 
   // Sidebar: clear and refill
   const eventsVisible = boolSetting(settings.get('events.visible', true), true);
@@ -2837,6 +3051,9 @@ function openSettingsModal(): void {
     youtubeShowViewers: boolSetting(settings.get('platforms.youtube.showViewers', true), true),
     twitchShowViewers: boolSetting(settings.get('platforms.twitch.showViewers', true), true),
     kickShowViewers: boolSetting(settings.get('platforms.kick.showViewers', true), true),
+    activityVisible: boolSetting(settings.get('activity.visible', true), true),
+    activityMode: String(settings.get('activity.mode', 'permanent') ?? 'permanent'),
+    activityTimeout: String(numSetting(settings.get('activity.timeout', 10), 10)),
   };
   const initialSettingsResult = validateTuiSettingsDraft(draft);
   const initialEntries = initialSettingsResult.values
@@ -2861,6 +3078,7 @@ function openSettingsModal(): void {
     top: '4%',
     left: '8%',
     width: '84%',
+    height: '90%',
     zIndex: 100,
     border: true,
     borderStyle: 'rounded',
@@ -2869,8 +3087,20 @@ function openSettingsModal(): void {
     shouldFill: true,
     padding: 1,
     flexDirection: 'column',
-    gap: 1,
+    gap: 0,
     title: ' Settings ',
+  });
+
+  // Scrollable content area — everything below the intro header lives here
+  const contentScroll = new ScrollBoxRenderable(renderer, {
+    flexGrow: 1,
+    stickyScroll: false,
+    stickyStart: 'top',
+  });
+  const contentBox = new BoxRenderable(renderer, {
+    flexDirection: 'column',
+    gap: 1,
+    width: '100%',
   });
 
   const intro = new TextRenderable(renderer, {
@@ -2938,30 +3168,58 @@ function openSettingsModal(): void {
   const twitchViewersRow = new TextRenderable(renderer, { content: '', fg: 'white' });
   const kickViewersRow = new TextRenderable(renderer, { content: '', fg: 'white' });
 
+  const activityHeading = new TextRenderable(renderer, {
+    content: ' Activity bar',
+    fg: 'cyan',
+    attributes: TextAttributes.BOLD,
+  });
+  const activityVisibleRow = new TextRenderable(renderer, { content: '', fg: 'white' });
+  const activityModeRow = new TextRenderable(renderer, { content: '', fg: 'white' });
+  const activityTimeoutLabel = makeLabel(
+    '  activity.timeout: seconds before the bar auto-hides in timed mode',
+  );
+  const activityTimeoutInput = new InputRenderable(renderer, {
+    placeholder: '10',
+    width: '100%',
+  });
+  const activityTimeoutInputRow = createIndentedInputRow(renderer, activityTimeoutInput, '    ');
+  activityTimeoutInput.value = draft.activityTimeout;
+
+  // Fixed header
   box.add(intro);
-  box.add(displayHeading);
-  box.add(demoRow);
-  box.add(titleVisibleRow);
-  box.add(viewersVisibleRow);
-  box.add(viewersModeRow);
-  box.add(messagesPositionRow);
-  box.add(chatTimestampsRow);
-  box.add(historySizeLabel);
-  box.add(historySizeInputRow);
-  box.add(sidebarHeading);
-  box.add(eventsVisibleRow);
-  box.add(eventsTailLabel);
-  box.add(eventsTailInputRow);
-  box.add(eventsWidthRow);
-  box.add(logsVisibleRow);
-  box.add(logsHeightLabel);
-  box.add(logsHeightInputRow);
-  box.add(logsTailLabel);
-  box.add(logsTailInputRow);
-  box.add(providerHeading);
-  box.add(ytViewersRow);
-  box.add(twitchViewersRow);
-  box.add(kickViewersRow);
+  box.add(new TextRenderable(renderer, { content: '', fg: 'gray' })); // spacer
+
+  // Scrollable content
+  contentBox.add(displayHeading);
+  contentBox.add(demoRow);
+  contentBox.add(titleVisibleRow);
+  contentBox.add(viewersVisibleRow);
+  contentBox.add(viewersModeRow);
+  contentBox.add(messagesPositionRow);
+  contentBox.add(chatTimestampsRow);
+  contentBox.add(historySizeLabel);
+  contentBox.add(historySizeInputRow);
+  contentBox.add(sidebarHeading);
+  contentBox.add(eventsVisibleRow);
+  contentBox.add(eventsTailLabel);
+  contentBox.add(eventsTailInputRow);
+  contentBox.add(eventsWidthRow);
+  contentBox.add(logsVisibleRow);
+  contentBox.add(logsHeightLabel);
+  contentBox.add(logsHeightInputRow);
+  contentBox.add(logsTailLabel);
+  contentBox.add(logsTailInputRow);
+  contentBox.add(providerHeading);
+  contentBox.add(ytViewersRow);
+  contentBox.add(twitchViewersRow);
+  contentBox.add(kickViewersRow);
+  contentBox.add(activityHeading);
+  contentBox.add(activityVisibleRow);
+  contentBox.add(activityModeRow);
+  contentBox.add(activityTimeoutLabel);
+  contentBox.add(activityTimeoutInputRow);
+  contentScroll.add(contentBox);
+  box.add(contentScroll);
   renderer.root.add(box);
 
   type SettingsFocusItem =
@@ -2983,6 +3241,33 @@ function openSettingsModal(): void {
     const currentIndex = Math.max(0, options.indexOf(current));
     const nextIndex = (currentIndex + direction + options.length) % options.length;
     return options[nextIndex] ?? options[0] ?? current;
+  }
+
+  // Approximate scroll-line target for each focusable item.
+  // contentBox has gap:1, so each child is 2 lines wide (content + gap).
+  // Non-focusable items (headings, labels) each consume 2 lines and shift subsequent offsets.
+  // items: [demo, title, viewers, viewersMode, msgPos, chatTs, histSize,
+  //         eventsVis, eventsTail, eventsW, logsVis, logsH, logsT,
+  //         ytV, twitchV, kickV, actVis, actMode, actTimeout]
+  const FOCUS_SCROLL_TARGETS = [
+    2, 4, 6, 8, 10, 12,   // Display section (displayHeading=0, then items at 2..12)
+    16,                    // historySizeInput (historySizeLabel at 14)
+    20,                    // eventsVisible (sidebarHeading at 18)
+    24, 26, 28,            // eventsTailInput, eventsWidth, logsVisible (eventsTailLabel at 22)
+    32, 36,                // logsHeightInput, logsTailInput (labels at 30, 34)
+    40, 42, 44,            // per-platform viewers (providerHeading at 38)
+    48, 50, 54,            // activity section (activityHeading at 46, label at 52)
+  ] as const;
+
+  let settingsScrollLine = 0;
+
+  function scrollToFocusItem(idx: number): void {
+    const target = FOCUS_SCROLL_TARGETS[idx] ?? 0;
+    const delta = target - settingsScrollLine;
+    if (delta !== 0) {
+      contentScroll.scrollBy(delta);
+      settingsScrollLine = target;
+    }
   }
 
   const items: SettingsFocusItem[] = [
@@ -3166,6 +3451,37 @@ function openSettingsModal(): void {
         draft.kickShowViewers = !draft.kickShowViewers;
       },
     },
+    {
+      kind: 'toggle',
+      node: activityVisibleRow,
+      render: (focused) => {
+        activityVisibleRow.content = makeToggleRow(
+          'activity.visible',
+          draft.activityVisible,
+          focused,
+        ).concat('  - show or hide the activity bar (follows, subs, etc.)');
+        activityVisibleRow.fg = focused ? 'cyan' : 'white';
+      },
+      toggle: () => {
+        draft.activityVisible = !draft.activityVisible;
+      },
+    },
+    {
+      kind: 'enum',
+      node: activityModeRow,
+      render: (focused) => {
+        activityModeRow.content = makeEnumRow(
+          'activity.mode',
+          draft.activityMode,
+          focused,
+        ).concat('  - permanent: always visible; timed: hides after timeout');
+        activityModeRow.fg = focused ? 'cyan' : 'white';
+      },
+      cycle: (direction) => {
+        draft.activityMode = cycleOption(draft.activityMode, SETTINGS_ACTIVITY_MODES, direction);
+      },
+    },
+    { kind: 'input', node: activityTimeoutInput },
   ];
 
   let focusIdx = 0;
@@ -3203,6 +3519,7 @@ function openSettingsModal(): void {
       eventsTail: eventsTailInput.value,
       logsHeight: logsHeightInput.value,
       logsTail: logsTailInput.value,
+      activityTimeout: activityTimeoutInput.value,
     });
     if (!result.values) {
       for (const error of result.errors) {
@@ -3252,8 +3569,21 @@ function openSettingsModal(): void {
     if (sequence === '\t' || sequence === '\x1b[Z') {
       blurCurrent();
       const direction = sequence === '\t' ? 1 : -1;
+      const prevIdx = focusIdx;
       focusIdx = (focusIdx + direction + items.length) % items.length;
       activeSettingsModal.focusIndex = focusIdx;
+      if (direction === 1 && focusIdx < prevIdx) {
+        // Wrapped forward: scroll back to top
+        contentScroll.scrollBy(-settingsScrollLine);
+        settingsScrollLine = 0;
+      } else if (direction === -1 && focusIdx > prevIdx) {
+        // Wrapped backward: scroll to last item
+        const lastTarget = FOCUS_SCROLL_TARGETS[items.length - 1] ?? 0;
+        contentScroll.scrollBy(lastTarget - settingsScrollLine);
+        settingsScrollLine = lastTarget;
+      } else {
+        scrollToFocusItem(focusIdx);
+      }
       focusCurrent();
       return true;
     }
@@ -3283,7 +3613,16 @@ function openSettingsModal(): void {
       cancelAndClose();
       return true;
     }
-    if (sequence === '\x1b[A' || sequence === '\x1b[B') return true;
+    if (sequence === '\x1b[A') {
+      contentScroll.scrollBy(-1);
+      settingsScrollLine = Math.max(0, settingsScrollLine - 1);
+      return true;
+    }
+    if (sequence === '\x1b[B') {
+      contentScroll.scrollBy(1);
+      settingsScrollLine += 1;
+      return true;
+    }
     return false;
   };
 
@@ -3292,7 +3631,13 @@ function openSettingsModal(): void {
   const escapeViaKeyDown = (key: { name: string }) => {
     if (key.name === 'escape' && activeSettingsModal) cancelAndClose();
   };
-  for (const input of [historySizeInput, eventsTailInput, logsHeightInput, logsTailInput]) {
+  for (const input of [
+    historySizeInput,
+    eventsTailInput,
+    logsHeightInput,
+    logsTailInput,
+    activityTimeoutInput,
+  ]) {
     input.onKeyDown = escapeViaKeyDown as any;
   }
 }
@@ -4718,6 +5063,17 @@ async function main() {
 
   await initializeServices();
   startIpcServer(handleCommandForCli);
+
+  // Subscribe to platform activity events (follow, sub, cheer, raid)
+  twitch.onActivityEvent(({ type, message }) => {
+    pushActivityEvent('twitch', type, message);
+  });
+
+  // Load persisted activity events from disk (last 24h)
+  const restoredActivity = _loadActivityEvents();
+  if (restoredActivity.length > 0) {
+    activityEvents.push(...restoredActivity);
+  }
 
   if (youtube.isAuthenticated()) pushEvent('youtube', 'auth', 'Authenticated');
   if (twitch.isAuthenticated()) pushEvent('twitch', 'auth', 'Authenticated');
