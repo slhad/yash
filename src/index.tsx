@@ -35,6 +35,7 @@ import logCollector from './utils/logCollector';
 import { defaultLogger } from './utils/logger';
 import { formatMarkerCreationSummary } from './utils/markerSummary';
 import { buildTargetedStreamMetadataUpdate } from './utils/streamMetadata';
+import { buildChatHistoryMessages } from './utils/chatHistoryLoader';
 import { getAutocomplete, initTuiCommands } from './utils/tuiCommands';
 import { installTuiErrorCapture } from './utils/tuiErrorCapture';
 import { type MessageTarget } from './utils/tuiMessageInput';
@@ -4483,6 +4484,36 @@ async function fetchPlatformInfo(platform: string): Promise<Record<string, unkno
   return { error: `unsupported platform: ${platform}` };
 }
 
+function loadChatHistory(): { lines: ChatLine[]; rawMsgs: ChatMessage[] } {
+  const rawMax = Number(settings.get('chat.maxHistorySize', 1000));
+  const maxHistory = Number.isFinite(rawMax) && rawMax > 0 ? Math.floor(rawMax) : 1000;
+  const streamIds: string[] = [];
+
+  const ytInfo = youtube.getChannelInfo();
+  if (ytInfo.broadcastId) streamIds.push(ytInfo.broadcastId);
+
+  const twitchStart = twitch.getStreamStartTime();
+  if (twitchStart) streamIds.push(twitchStart.toISOString());
+
+  const kickStart = kick.getStreamStartTime();
+  if (kickStart) streamIds.push(kickStart.toISOString());
+
+  // Allow explicit override via settings (useful for demos / dev without live streams)
+  const overrideIds = settings.get('chat.historyStreamIds', []);
+  if (Array.isArray(overrideIds)) {
+    for (const id of overrideIds) {
+      if (typeof id === 'string' && !streamIds.includes(id)) streamIds.push(id);
+    }
+  }
+
+  const rawMsgs = buildChatHistoryMessages(
+    streamIds,
+    (id, limit, offset) => messageLog.getForStream(id, limit, offset),
+    maxHistory,
+  );
+  return { lines: rawMsgs.map(transformMessage), rawMsgs };
+}
+
 async function main() {
   const renderer = await createCliRenderer({
     screenMode:
@@ -4696,6 +4727,18 @@ async function main() {
     'obs.connect',
     obsService.isConnected() ? 'OBS connected' : 'OBS unavailable',
   );
+
+  const { lines: histLines, rawMsgs: histRaw } = loadChatHistory();
+  if (histRaw.length > 0) {
+    const seenIds = new Set(lastRawMessages.map((m) => m.id));
+    const newLines = histLines.filter((_, i) => !seenIds.has(histRaw[i]!.id));
+    const newRaw = histRaw.filter((m) => !seenIds.has(m.id));
+    if (newLines.length > 0) {
+      lastMessages.push('[system] --- chat history ---');
+      lastMessages.push(...newLines);
+      lastRawMessages.push(...newRaw);
+    }
+  }
 
   // Build UI tree once — no flicker on periodic updates
   uiNodes = initUI(renderer, lastMessages);
