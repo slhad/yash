@@ -188,6 +188,8 @@ export interface YouTubeStreamSetup {
   tags: { enabled: boolean };
   description: { enabled: boolean };
   subjectTitle: { enabled: boolean };
+  defaultMarkerAtStart: { enabled: boolean; message: string };
+  markerSyncDelay: { enabled: boolean; offsetSeconds: number };
 }
 
 const DEFAULT_SETUP: YouTubeStreamSetup = {
@@ -198,6 +200,8 @@ const DEFAULT_SETUP: YouTubeStreamSetup = {
   tags: { enabled: false },
   description: { enabled: false },
   subjectTitle: { enabled: false },
+  defaultMarkerAtStart: { enabled: false, message: 'start' },
+  markerSyncDelay: { enabled: false, offsetSeconds: 0 },
 };
 
 // YouTube video categories (snippet.categoryId) — US region, commonly assignable
@@ -1247,6 +1251,18 @@ export class YouTubeProvider implements PlatformProvider {
           }
         }
 
+        if (broadcastChanged) {
+          const setup = this.getSetup();
+          if (setup.defaultMarkerAtStart.enabled) {
+            const hasZeroMarker = this.chapterMarkers.some((m) => m.positionInSeconds === 0);
+            if (!hasZeroMarker) {
+              await this.createMarker(setup.defaultMarkerAtStart.message, 0).catch((err) =>
+                defaultLogger.error('[YouTube] auto-start marker error:', err),
+              );
+            }
+          }
+        }
+
         // Viewer count from liveStreamingDetails
         const videoResp = await this._request(
           `${YT_API}/videos?part=liveStreamingDetails&id=${this.broadcastId}`,
@@ -1382,30 +1398,41 @@ export class YouTubeProvider implements PlatformProvider {
   }
 
   private async _resolveMarkerTimestamp(timestamp?: number): Promise<number> {
-    if (timestamp !== undefined) return timestamp;
-    if (this.streamStartTime) {
-      return Math.max(0, Math.floor((Date.now() - this.streamStartTime.getTime()) / 1000));
+    let resolvedSeconds: number;
+
+    if (timestamp !== undefined) {
+      resolvedSeconds = timestamp;
+    } else if (this.streamStartTime) {
+      resolvedSeconds = Math.max(0, Math.floor((Date.now() - this.streamStartTime.getTime()) / 1000));
+    } else {
+      const activeBroadcast = await this._findActiveBroadcast();
+      if (!activeBroadcast) return 0;
+
+      this.broadcastId = activeBroadcast.id;
+      this.liveChatId = activeBroadcast.liveChatId;
+
+      const videoResp = await this._request(
+        `${YT_API}/videos?part=liveStreamingDetails&id=${activeBroadcast.id}`,
+      );
+      if (!videoResp.ok) return 0;
+
+      const videoData = (await videoResp.json()) as {
+        items?: Array<{ liveStreamingDetails?: { actualStartTime?: string } }>;
+      };
+      const actualStartTime = videoData.items?.[0]?.liveStreamingDetails?.actualStartTime;
+      if (!actualStartTime) return 0;
+
+      this.streamStartTime = new Date(actualStartTime);
+      resolvedSeconds = Math.max(0, Math.floor((Date.now() - this.streamStartTime.getTime()) / 1000));
     }
 
-    const activeBroadcast = await this._findActiveBroadcast();
-    if (!activeBroadcast) return 0;
-
-    this.broadcastId = activeBroadcast.id;
-    this.liveChatId = activeBroadcast.liveChatId;
-
-    const videoResp = await this._request(
-      `${YT_API}/videos?part=liveStreamingDetails&id=${activeBroadcast.id}`,
-    );
-    if (!videoResp.ok) return 0;
-
-    const videoData = (await videoResp.json()) as {
-      items?: Array<{ liveStreamingDetails?: { actualStartTime?: string } }>;
-    };
-    const actualStartTime = videoData.items?.[0]?.liveStreamingDetails?.actualStartTime;
-    if (!actualStartTime) return 0;
-
-    this.streamStartTime = new Date(actualStartTime);
-    return Math.max(0, Math.floor((Date.now() - this.streamStartTime.getTime()) / 1000));
+    if (timestamp === undefined) {
+      const setup = this.getSetup();
+      if (setup.markerSyncDelay.enabled && setup.markerSyncDelay.offsetSeconds !== 0) {
+        resolvedSeconds = Math.max(0, resolvedSeconds + setup.markerSyncDelay.offsetSeconds);
+      }
+    }
+    return resolvedSeconds;
   }
 
   private async _persistChapterDescription(): Promise<void> {
@@ -1532,8 +1559,8 @@ export class YouTubeProvider implements PlatformProvider {
 
   /**
    * Serialise chapter markers as a YouTube description timestamp block.
-   * Format: "0:00 Intro\n1:23 Main topic\n..."
-   * The first chapter must start at 0:00 for YouTube to recognise them.
+   * Format: "00:00:00 - Intro\n00:01:23 - Main topic\n..."
+   * The first chapter must start at 00:00:00 for YouTube to recognise them.
    */
   getChapterDescriptionBlock(): string {
     if (this.chapterMarkers.length === 0) return '';
@@ -1544,11 +1571,8 @@ export class YouTubeProvider implements PlatformProvider {
         const h = Math.floor(m.positionInSeconds / 3600);
         const min = Math.floor((m.positionInSeconds % 3600) / 60);
         const sec = m.positionInSeconds % 60;
-        const ts =
-          h > 0
-            ? `${h}:${String(min).padStart(2, '0')}:${String(sec).padStart(2, '0')}`
-            : `${min}:${String(sec).padStart(2, '0')}`;
-        return `${ts} ${m.description}`;
+        const ts = `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+        return `${ts} - ${m.description}`;
       })
       .join('\n');
   }
@@ -1601,6 +1625,8 @@ export class YouTubeProvider implements PlatformProvider {
       tags: { ...DEFAULT_SETUP.tags, ...(cfg.tags ?? {}) },
       description: { ...DEFAULT_SETUP.description, ...(cfg.description ?? {}) },
       subjectTitle: { ...DEFAULT_SETUP.subjectTitle, ...(cfg.subjectTitle ?? {}) },
+      defaultMarkerAtStart: { ...DEFAULT_SETUP.defaultMarkerAtStart, ...(cfg.defaultMarkerAtStart ?? {}) },
+      markerSyncDelay: { ...DEFAULT_SETUP.markerSyncDelay, ...(cfg.markerSyncDelay ?? {}) },
     };
   }
 

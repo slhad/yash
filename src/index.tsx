@@ -1569,7 +1569,9 @@ function openYouTubeSetupModal(): void {
     | 'clearMarkersOnNewStream'
     | 'tags'
     | 'description'
-    | 'subjectTitle';
+    | 'subjectTitle'
+    | 'defaultMarkerAtStart'
+    | 'markerSyncDelay';
   const state: Record<ToggleKey, boolean> = {
     defaultPlaylist: saved.defaultPlaylist.enabled,
     subjectPlaylist: saved.subjectPlaylist.enabled,
@@ -1578,6 +1580,8 @@ function openYouTubeSetupModal(): void {
     tags: saved.tags.enabled,
     description: saved.description.enabled,
     subjectTitle: saved.subjectTitle.enabled,
+    defaultMarkerAtStart: saved.defaultMarkerAtStart.enabled,
+    markerSyncDelay: saved.markerSyncDelay.enabled,
   };
   let playlistId = saved.defaultPlaylist.playlistId;
 
@@ -1589,6 +1593,8 @@ function openYouTubeSetupModal(): void {
     tags: 'Tags             ',
     description: 'Description      ',
     subjectTitle: 'Subject in Title ',
+    defaultMarkerAtStart: 'Auto-Start Marker',
+    markerSyncDelay: 'Marker Delay (s) ',
   };
 
   function badge(key: ToggleKey, focused: boolean): string {
@@ -1618,6 +1624,14 @@ function openYouTubeSetupModal(): void {
     }),
     subjectTitle: new TextRenderable(renderer, {
       content: badge('subjectTitle', false),
+      fg: 'white',
+    }),
+    defaultMarkerAtStart: new TextRenderable(renderer, {
+      content: badge('defaultMarkerAtStart', false),
+      fg: 'white',
+    }),
+    markerSyncDelay: new TextRenderable(renderer, {
+      content: badge('markerSyncDelay', false),
       fg: 'white',
     }),
   };
@@ -1657,6 +1671,29 @@ function openYouTubeSetupModal(): void {
     fg: 'gray',
   });
 
+  const defaultMarkerMessageInput = new InputRenderable(renderer, {
+    placeholder: 'marker message (default: start)',
+    width: '100%',
+  });
+  defaultMarkerMessageInput.value = saved.defaultMarkerAtStart.message;
+  const defaultMarkerAtStartHint = new TextRenderable(renderer, {
+    content: '  ↳ creates a marker at 00:00:00 automatically when a new broadcast goes live',
+    fg: 'gray',
+  });
+
+  const markerDelayInput = new InputRenderable(renderer, {
+    placeholder: 'offset in seconds (e.g. -5 or 3)',
+    width: '100%',
+  });
+  markerDelayInput.value =
+    saved.markerSyncDelay.offsetSeconds !== 0
+      ? String(saved.markerSyncDelay.offsetSeconds)
+      : '';
+  const markerSyncDelayHint = new TextRenderable(renderer, {
+    content: '  ↳ adds this offset (seconds, may be negative) to every marker timestamp',
+    fg: 'gray',
+  });
+
   const hint = new TextRenderable(renderer, {
     content: '  [Tab] navigate  [Space] toggle  [Ctrl+P] pick playlist  [Enter] save  [Esc] cancel',
     fg: 'gray',
@@ -1671,9 +1708,13 @@ function openYouTubeSetupModal(): void {
     { kind: 'toggle', key: 'subjectPlaylist' }, // 2
     { kind: 'toggle', key: 'chaptering' }, // 3
     { kind: 'toggle', key: 'clearMarkersOnNewStream' }, // 4
-    { kind: 'toggle', key: 'tags' }, // 5
-    { kind: 'toggle', key: 'description' }, // 6
-    { kind: 'toggle', key: 'subjectTitle' }, // 7
+    { kind: 'toggle', key: 'defaultMarkerAtStart' }, // 5
+    { kind: 'input', node: defaultMarkerMessageInput }, // 6
+    { kind: 'toggle', key: 'markerSyncDelay' }, // 7
+    { kind: 'input', node: markerDelayInput }, // 8
+    { kind: 'toggle', key: 'tags' }, // 9
+    { kind: 'toggle', key: 'description' }, // 10
+    { kind: 'toggle', key: 'subjectTitle' }, // 11
   ];
 
   const box = new BoxRenderable(renderer, {
@@ -1702,6 +1743,12 @@ function openYouTubeSetupModal(): void {
   box.add(chapteringHint);
   box.add(toggleNodes.clearMarkersOnNewStream);
   box.add(clearMarkersHint);
+  box.add(toggleNodes.defaultMarkerAtStart);
+  box.add(defaultMarkerAtStartHint);
+  box.add(defaultMarkerMessageInput);
+  box.add(toggleNodes.markerSyncDelay);
+  box.add(markerSyncDelayHint);
+  box.add(markerDelayInput);
   box.add(toggleNodes.tags);
   box.add(tagsHint);
   box.add(toggleNodes.description);
@@ -1795,6 +1842,14 @@ function openYouTubeSetupModal(): void {
       tags: { enabled: state.tags },
       description: { enabled: state.description },
       subjectTitle: { enabled: state.subjectTitle },
+      defaultMarkerAtStart: {
+        enabled: state.defaultMarkerAtStart,
+        message: defaultMarkerMessageInput.value.trim() || 'start',
+      },
+      markerSyncDelay: {
+        enabled: state.markerSyncDelay,
+        offsetSeconds: parseInt(markerDelayInput.value.trim(), 10) || 0,
+      },
     });
     lastMessages.push('[system] YouTube setup saved.');
     updateUI(lastMessages);

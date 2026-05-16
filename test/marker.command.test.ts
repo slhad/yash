@@ -95,7 +95,7 @@ describe('YouTubeProvider — getChapterDescriptionBlock', () => {
     const p = new YouTubeProvider();
     await p.createMarker('Intro', 0);
     const block = (p as any).getChapterDescriptionBlock();
-    expect(block).toBe('0:00 Intro');
+    expect(block).toBe('00:00:00 - Intro');
   });
 
   test('formats minutes and seconds', async () => {
@@ -103,7 +103,7 @@ describe('YouTubeProvider — getChapterDescriptionBlock', () => {
     await p.createMarker('Start', 0);
     await p.createMarker('Main', 123); // 2:03
     const block = (p as any).getChapterDescriptionBlock();
-    expect(block).toBe('0:00 Start\n2:03 Main');
+    expect(block).toBe('00:00:00 - Start\n00:02:03 - Main');
   });
 
   test('formats hours when positionInSeconds >= 3600', async () => {
@@ -111,7 +111,7 @@ describe('YouTubeProvider — getChapterDescriptionBlock', () => {
     await p.createMarker('Start', 0);
     await p.createMarker('Late', 3723); // 1:02:03
     const block = (p as any).getChapterDescriptionBlock();
-    expect(block).toContain('1:02:03 Late');
+    expect(block).toContain('01:02:03 - Late');
   });
 
   test('sorts markers by positionInSeconds regardless of insertion order', async () => {
@@ -120,16 +120,16 @@ describe('YouTubeProvider — getChapterDescriptionBlock', () => {
     await p.createMarker('A', 0);
     await p.createMarker('C', 120);
     const lines = (p as any).getChapterDescriptionBlock().split('\n');
-    expect(lines[0]).toContain('0:00 A');
-    expect(lines[1]).toContain('1:00 B');
-    expect(lines[2]).toContain('2:00 C');
+    expect(lines[0]).toContain('00:00:00 - A');
+    expect(lines[1]).toContain('00:01:00 - B');
+    expect(lines[2]).toContain('00:02:00 - C');
   });
 
   test('pads seconds with leading zero', async () => {
     const p = new YouTubeProvider();
     await p.createMarker('X', 65); // 1:05
     const block = (p as any).getChapterDescriptionBlock();
-    expect(block).toBe('1:05 X');
+    expect(block).toBe('00:01:05 - X');
   });
 });
 
