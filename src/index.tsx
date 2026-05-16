@@ -4485,7 +4485,8 @@ async function fetchPlatformInfo(platform: string): Promise<Record<string, unkno
 }
 
 function loadChatHistory(): { lines: ChatLine[]; rawMsgs: ChatMessage[] } {
-  const maxHistory = Number(settings.get('chat.maxHistorySize', 1000));
+  const rawMax = Number(settings.get('chat.maxHistorySize', 1000));
+  const maxHistory = Number.isFinite(rawMax) && rawMax > 0 ? Math.floor(rawMax) : 1000;
   const streamIds: string[] = [];
 
   const ytInfo = youtube.getChannelInfo();
@@ -4728,10 +4729,15 @@ async function main() {
   );
 
   const { lines: histLines, rawMsgs: histRaw } = loadChatHistory();
-  if (histLines.length > 0) {
-    lastMessages.push('[system] --- chat history ---');
-    lastMessages.push(...histLines);
-    lastRawMessages.push(...histRaw);
+  if (histRaw.length > 0) {
+    const seenIds = new Set(lastRawMessages.map((m) => m.id));
+    const newLines = histLines.filter((_, i) => !seenIds.has(histRaw[i]!.id));
+    const newRaw = histRaw.filter((m) => !seenIds.has(m.id));
+    if (newLines.length > 0) {
+      lastMessages.push('[system] --- chat history ---');
+      lastMessages.push(...newLines);
+      lastRawMessages.push(...newRaw);
+    }
   }
 
   // Build UI tree once — no flicker on periodic updates
