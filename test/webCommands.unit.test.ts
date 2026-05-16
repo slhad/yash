@@ -561,6 +561,37 @@ describe('handleWebCommand — /setup-youtube', () => {
     expect(feedback.some(([, t]) => t.includes('disabled'))).toBe(true);
   });
 
+  test('/setup-youtube marker-delay <s> → POSTs with enabled:true and offsetSeconds', async () => {
+    const current = { markerSyncDelay: { enabled: false, offsetSeconds: 0 } };
+    const { calls } = mockFetch(() => ({ ok: true, body: current }));
+    const feedback: Array<[string, string]> = [];
+
+    const result = await handleWebCommand('/setup-youtube marker-delay -3', {
+      platforms: [],
+      feedback: (l, t) => feedback.push([l, t]),
+    });
+
+    expect(result).toBe(true);
+    const post = calls.find((c) => c.init?.method === 'POST' && c.url === '/api/youtube/setup');
+    expect(post).toBeDefined();
+    const body = JSON.parse(post!.init!.body as string);
+    expect(body.markerSyncDelay?.enabled).toBe(true);
+    expect(body.markerSyncDelay?.offsetSeconds).toBe(-3);
+  });
+
+  test('/setup-youtube marker-delay missing arg → shows usage, no POST', async () => {
+    const { calls } = mockFetch(() => ({ ok: true, body: {} }));
+    const feedback: Array<[string, string]> = [];
+
+    await handleWebCommand('/setup-youtube marker-delay', {
+      platforms: [],
+      feedback: (l, t) => feedback.push([l, t]),
+    });
+
+    expect(calls.some((c) => c.init?.method === 'POST')).toBe(false);
+    expect(feedback.some(([, t]) => t.includes('Usage'))).toBe(true);
+  });
+
   test('/setup-youtube unknown → shows usage', async () => {
     mockFetch(() => ({ ok: true, body: {} }));
     const feedback: Array<[string, string]> = [];

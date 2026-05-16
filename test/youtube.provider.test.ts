@@ -652,6 +652,43 @@ describe('YouTubeProvider — markers', () => {
     expect(marker!.positionInSeconds).toBe(0);
   });
 
+  test('createMarker does not apply sync offset when explicit timestamp provided', async () => {
+    const p = makeProvider() as any;
+    p.streamStartTime = new Date(Date.now() - 60_000);
+    p.getSetup = () => ({
+      defaultPlaylist: { enabled: false, playlistId: '', playlistTitle: '' },
+      subjectPlaylist: { enabled: false },
+      chaptering: { enabled: false },
+      clearMarkersOnNewStream: { enabled: false },
+      tags: { enabled: false },
+      description: { enabled: false },
+      subjectTitle: { enabled: false },
+      defaultMarkerAtStart: { enabled: false, message: 'start' },
+      markerSyncDelay: { enabled: true, offsetSeconds: 5 },
+    });
+    const marker = await p.createMarker('Auto-start', 0);
+    expect(marker!.positionInSeconds).toBe(0);
+  });
+
+  test('createMarker applies sync offset to computed timestamp', async () => {
+    const p = makeProvider() as any;
+    p.streamStartTime = new Date(Date.now() - 100_000);
+    p.getSetup = () => ({
+      defaultPlaylist: { enabled: false, playlistId: '', playlistTitle: '' },
+      subjectPlaylist: { enabled: false },
+      chaptering: { enabled: false },
+      clearMarkersOnNewStream: { enabled: false },
+      tags: { enabled: false },
+      description: { enabled: false },
+      subjectTitle: { enabled: false },
+      defaultMarkerAtStart: { enabled: false, message: 'start' },
+      markerSyncDelay: { enabled: true, offsetSeconds: -3 },
+    });
+    const marker = await p.createMarker('Chapter');
+    expect(marker!.positionInSeconds).toBeGreaterThanOrEqual(97);
+    expect(marker!.positionInSeconds).toBeLessThanOrEqual(98);
+  });
+
   test('createMarker stores provided timestamp', async () => {
     const p = makeProvider();
     const marker = await p.createMarker('Q&A', 3600);
