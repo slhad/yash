@@ -2771,6 +2771,7 @@ async function handleCommandForCli(trimmed: string): Promise<string> {
   const handler = commandHandlers[cmd];
   if (handler) {
     await handler(parts, emit);
+    pushEvent('ipc', 'command', trimmed);
   } else {
     emit(`[system] Unknown command: ${trimmed}`);
   }

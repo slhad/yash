@@ -524,7 +524,7 @@ export class YouTubeProvider implements PlatformProvider {
         id: item.id ?? `youtube_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
         platform: 'youtube',
         userId: item.authorDetails?.channelId ?? 'unknown',
-        username: item.authorDetails?.displayName ?? 'UnknownUser',
+        username: (item.authorDetails?.displayName ?? 'UnknownUser').replace(/^@/, ''),
         message: displayMessage,
         timestamp: Number.isFinite(publishedAt) ? publishedAt : Date.now(),
       });
