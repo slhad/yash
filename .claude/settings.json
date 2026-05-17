@@ -1,0 +1,24 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun run test",
+            "if": "Bash(git commit *)",
+            "timeout": 120,
+            "statusMessage": "Running tests before commit..."
+          },
+          {
+            "type": "command",
+            "command": "staged=$(git diff --cached --name-only | grep '^tmp/'); if [ -n \"$staged\" ]; then printf 'Commit blocked — tmp/ files staged:\\n%s\\n' \"$staged\"; exit 1; fi",
+            "if": "Bash(git commit *)",
+            "statusMessage": "Checking for staged tmp/ files..."
+          }
+        ]
+      }
+    ]
+  }
+}
