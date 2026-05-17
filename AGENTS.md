@@ -83,20 +83,7 @@ The double-form guard (`longModule?.fromNumber ?? longModule?.default`) is inten
 
 ## Pull Requests
 
-PR titles become the GitHub release changelog entries (via `generate_release_notes: true` in the release workflow). Use conventional commits format:
-
-| Prefix | When to use |
-|--------|-------------|
-| `feat:` | New user-facing feature |
-| `fix:` | Bug fix |
-| `chore:` | Maintenance, tooling, deps, renaming |
-| `docs:` | Documentation only |
-| `test:` | Tests only, no production code change |
-| `refactor:` | Restructuring with no behaviour change |
-
-Keep the title under 70 characters. No period at the end.
-
-The PR body template is at `.github/PULL_REQUEST_TEMPLATE.md`. Always follow it: `## Summary` (bullet list), `## Test plan` (checkboxes), Claude Code footer. Do not use the old `## Changes / ## Checklist / ## Notes for Reviewers` structure.
+Follow the conventions in `.github/PULL_REQUEST_TEMPLATE.md` for both the PR title format and body structure. PR titles feed directly into the GitHub release changelog.
 
 ## External References
 
