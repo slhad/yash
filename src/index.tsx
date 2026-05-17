@@ -2212,6 +2212,7 @@ function openStreamModal(preselected: string[]): void {
   let catSuggestions: string[] = [];
   let catSelectedIdx = -1;
   let catFetchTimer: ReturnType<typeof setTimeout> | null = null;
+  let isNavigatingTwitch = false;
 
   // ── Kick category ────────────────────────────────────────────────
   const kickCatLabel = makeLabel(' Category (Kick):');
@@ -2225,6 +2226,7 @@ function openStreamModal(preselected: string[]): void {
   kickCatHint.visible = false;
   let kickCatSuggestions: string[] = [];
   let kickCatSelectedIdx = -1;
+  let isNavigatingKick = false;
   let kickCatFetchTimer: ReturnType<typeof setTimeout> | null = null;
 
   // ── Tags ─────────────────────────────────────────────────────────
@@ -2589,6 +2591,7 @@ function openStreamModal(preselected: string[]): void {
           sequence === '\x1b[B'
             ? (catSelectedIdx + 1) % catSuggestions.length
             : (catSelectedIdx - 1 + catSuggestions.length) % catSuggestions.length;
+        isNavigatingTwitch = true;
         twitchGameInput.value = catSuggestions[catSelectedIdx] ?? '';
       }
       if (
@@ -2600,6 +2603,7 @@ function openStreamModal(preselected: string[]): void {
           sequence === '\x1b[B'
             ? (kickCatSelectedIdx + 1) % kickCatSuggestions.length
             : (kickCatSelectedIdx - 1 + kickCatSuggestions.length) % kickCatSuggestions.length;
+        isNavigatingKick = true;
         kickCatInput.value = kickCatSuggestions[kickCatSelectedIdx] ?? '';
       }
       return true;
@@ -2625,6 +2629,7 @@ function openStreamModal(preselected: string[]): void {
   }
 
   twitchGameInput.on(InputRenderableEvents.INPUT, () => {
+    if (isNavigatingTwitch) { isNavigatingTwitch = false; return; }
     const q = twitchGameInput.value.trim();
     catSuggestions = [];
     catSelectedIdx = -1;
@@ -2647,6 +2652,7 @@ function openStreamModal(preselected: string[]): void {
   });
 
   kickCatInput.on(InputRenderableEvents.INPUT, () => {
+    if (isNavigatingKick) { isNavigatingKick = false; return; }
     const q = kickCatInput.value.trim();
     kickCatSuggestions = [];
     kickCatSelectedIdx = -1;
