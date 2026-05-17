@@ -64,6 +64,13 @@ let currentPosition: (typeof POSITIONS)[number] =
     ? (qsPosition as (typeof POSITIONS)[number])
     : ((localStorage.getItem(STORAGE_KEY) || 'bottom') as (typeof POSITIONS)[number]);
 
+function syncUrl(): void {
+  const params = new URLSearchParams();
+  params.set('position', currentPosition);
+  params.set('platform', platformSelect.value);
+  history.replaceState(null, '', `?${params.toString()}`);
+}
+
 function applyPosition(pos: (typeof POSITIONS)[number]): void {
   currentPosition = pos;
   localStorage.setItem(STORAGE_KEY, pos);
@@ -81,6 +88,7 @@ function applyPosition(pos: (typeof POSITIONS)[number]): void {
     msgboxEl.style.display = 'flex';
     positionBtn.textContent = 'position: bottom ▼';
   }
+  syncUrl();
 }
 
 function platformTag(platform: string): string {
@@ -250,6 +258,9 @@ applyPosition(currentPosition);
 if (qsPlatform && VALID_PLATFORMS.includes(qsPlatform as (typeof VALID_PLATFORMS)[number])) {
   platformSelect.value = qsPlatform;
 }
+
+syncUrl();
+platformSelect.addEventListener('change', syncUrl);
 
 void fetchHistory();
 setInterval(() => {
