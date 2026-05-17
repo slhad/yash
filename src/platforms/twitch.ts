@@ -96,6 +96,20 @@ export class TwitchProvider implements PlatformProvider {
   private chatClient: ChatClient | null = null;
   private messageCallbacks: ((msg: ChatMessage) => void)[] = [];
 
+  // ---- activity events -------------------------------------------------------
+  private activityCallbacks: ((event: { type: string; message: string }) => void)[] = [];
+
+  onActivityEvent(cb: (event: { type: string; message: string }) => void): () => void {
+    this.activityCallbacks.push(cb);
+    return () => {
+      this.activityCallbacks = this.activityCallbacks.filter((c) => c !== cb);
+    };
+  }
+
+  private _dispatchActivity(type: string, message: string): void {
+    for (const cb of this.activityCallbacks) cb({ type, message });
+  }
+
   // ---- EventSub --------------------------------------------------------------
   private eventSubListener: EventSubWsListener | null = null;
 
@@ -709,6 +723,47 @@ export class TwitchProvider implements PlatformProvider {
       });
     } catch (err) {
       defaultLogger.info('[Twitch] EventSub chat scope unavailable, using IRC chat only:', err);
+    }
+
+    // channel.follow (requires moderator:read:followers scope)
+    try {
+      await this.eventSubListener.onChannelFollow(this.userId, this.userId, (e) => {
+        this._dispatchActivity('follow', `${e.userDisplayName} followed`);
+      });
+    } catch (err) {
+      defaultLogger.info('[Twitch] follow events unavailable (missing scope?):', err);
+    }
+
+    // channel.subscribe (requires channel:read:subscriptions scope)
+    try {
+      await this.eventSubListener.onChannelSubscription(this.userId, (e) => {
+        const tier = `T${e.tier.charAt(0)}`;
+        this._dispatchActivity('sub', `${e.userDisplayName} subscribed (${tier})`);
+      });
+    } catch (err) {
+      defaultLogger.info('[Twitch] sub events unavailable (missing scope?):', err);
+    }
+
+    // channel.cheer (requires bits:read scope)
+    try {
+      await this.eventSubListener.onChannelCheer(this.userId, (e) => {
+        const who = e.isAnonymous ? 'Anonymous' : (e.userDisplayName ?? 'Unknown');
+        this._dispatchActivity('cheer', `${who} cheered ${e.bits} bits`);
+      });
+    } catch (err) {
+      defaultLogger.info('[Twitch] cheer events unavailable (missing scope?):', err);
+    }
+
+    // channel.raid (incoming raids, no extra scope required)
+    try {
+      await this.eventSubListener.onChannelRaidTo(this.userId, (e) => {
+        this._dispatchActivity(
+          'raid',
+          `${e.raidingBroadcasterDisplayName} raided with ${e.viewers} viewers`,
+        );
+      });
+    } catch (err) {
+      defaultLogger.info('[Twitch] raid events unavailable:', err);
     }
 
     this.eventSubListener.start();
