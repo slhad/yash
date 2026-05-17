@@ -1,20 +1,28 @@
-# PR Title Convention
-# Use conventional commits format — this title becomes the release changelog entry:
-#   feat: short description       → new feature
-#   fix: short description        → bug fix
-#   chore: short description      → maintenance, tooling, deps
-#   docs: short description       → documentation only
-#   test: short description       → tests only
-#   refactor: short description   → no behaviour change
-# Keep it under 70 characters. No period at the end.
+<!--
+PR title: conventional commits format (becomes the changelog entry)
+  feat: short description       → new feature
+  fix: short description        → bug fix
+  chore: short description      → maintenance, tooling, deps
+  docs: short description       → documentation only
+  test: short description       → tests only
+  refactor: short description   → no behaviour change
+Keep it under 70 characters. No period at the end.
+-->
 
 ## Summary
 
 - What changed and why (1-3 bullets)
 
+## Demo
+
+<!-- TUI: paste VHS GIF link here -->
+<!-- Web UI: paste Playwright GIF link here -->
+
 ## Test plan
 
-- [ ] `bun run test` passes
-- [ ] Manually verified: ...
-
-🤖 Generated with [Claude Code](https://claude.com/claude-code)
+- [ ] `bun test` — N pass, 0 fail
+- [ ] `bun typecheck` — no errors
+- [ ] Live TUI check (tmux): ...
+- [ ] Live Web UI check: ...
+- [ ] VHS recording generated and linked in Demo (TUI)
+- [ ] Playwright recording generated and linked in Demo (Web UI)

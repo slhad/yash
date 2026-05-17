@@ -83,7 +83,24 @@ The double-form guard (`longModule?.fromNumber ?? longModule?.default`) is inten
 
 ## Pull Requests
 
-Follow the conventions in `.github/PULL_REQUEST_TEMPLATE.md` for both the PR title format and body structure. PR titles feed directly into the GitHub release changelog.
+Before opening a PR, you **must** complete every step below in order. Do not skip or mark a step done without actually running it.
+
+1. **Unit tests** — run the unit test file(s) relevant to your changes: `bun test test/<relevant>.unit.test.ts` — all must pass
+2. **Full test suite** — `bun run test` — 0 failures
+3. **Type check** — `bun typecheck` — no errors
+4. **Live TUI check** — verify the feature in the running yash tmux session (window `yash:all`); use the `/test-live` skill
+5. **Live Web UI check** — verify the feature in the web UI
+6. **VHS recording** — generate the TUI demo GIF last, once all checks above pass; host it via the `screenshots` release and link it in the Demo section
+7. **Playwright recording** — generate the Web UI demo GIF last, once all checks above pass:
+   ```bash
+   RECORD_VIDEO=1 npx playwright test --project=chromium
+   # videos land in tmp/playwright-output/<test-name>/video.webm
+   ffmpeg -i tmp/playwright-output/<test-name>/video.webm -vf "fps=10,scale=800:-1:flags=lanczos" tmp/<feature>-web.gif
+   gh release upload screenshots tmp/<feature>-web.gif --clobber
+   ```
+   Link the resulting URL in the Demo section alongside the VHS GIF.
+
+Only after all six steps pass, create the PR following the conventions in `.github/PULL_REQUEST_TEMPLATE.md`. PR titles feed directly into the GitHub release changelog.
 
 ## External References
 

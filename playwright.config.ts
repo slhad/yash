@@ -10,7 +10,9 @@ export default defineConfig({
   use: {
     baseURL: 'http://localhost:3000',
     trace: 'on-first-retry',
+    video: process.env.RECORD_VIDEO ? 'on' : 'off',
   },
+  outputDir: 'tmp/playwright-output',
   projects: [
     {
       name: 'chromium',
