@@ -12,42 +12,42 @@ Interact with the running yash TUI in the `yash` tmux session to verify behaviou
 | Key | Value |
 |-----|-------|
 | Session | `yash` |
-| TUI window | `yash:tui` (window named `tui`, always use this target) |
+| TUI window | `yash:all` (window named `all`, always use this target) |
 | Start command | `bun start` — always use this; starts TUI + WebUI on port 3000 |
 | VHS tapes | Use `YASH_PORT=3001` so recordings never conflict with a live test TUI on 3000 |
 
-## Always target `yash:tui` explicitly, never bare `yash`
+## Always target `yash:all` explicitly, never bare `yash`
 
-Bare `-t yash` targets the **active** window, which can change. Window 1 (`yash`) is a general-purpose shell that may be running other things (port conflicts, previous TUI runs, etc.). Always use **`-t yash:tui`** — a dedicated window — for every `send-keys`, `display-message`, and `capture-pane` call so the target is unambiguous regardless of which window is active.
+Bare `-t yash` targets the **active** window, which can change. Window 1 (`yash`) is a general-purpose shell that may be running other things (port conflicts, previous TUI runs, etc.). Always use **`-t yash:all`** — a dedicated window — for every `send-keys`, `display-message`, and `capture-pane` call so the target is unambiguous regardless of which window is active.
 
-If the `bun start` crashes immediately in the tui window, the most common cause is **port 3000 already in use** from a previous run. Check with `lsof -ti:3000` and kill the occupying process before retrying.
+If the `bun start` crashes immediately in the all window, the most common cause is **port 3000 already in use** from a previous run. Check with `lsof -ti:3000` and kill the occupying process before retrying.
 
 ## How the TUI renders
 
 The TUI draws using cursor-positioning escape codes (NOT alternate-screen mode). This means:
 
 - `tmux capture-pane -p` (no `-S`) only captures the current cursor viewport — it typically returns just the last shell line (e.g. `bun start`), NOT the TUI content.
-- **Always use `-S -<N>` to reach the TUI output in the scrollback**, e.g. `tmux capture-pane -t yash:tui -p -S -50 2>&1`.
+- **Always use `-S -<N>` to reach the TUI output in the scrollback**, e.g. `tmux capture-pane -t yash:all -p -S -50 2>&1`.
 - The pane can have thousands of lines of scrollback history from previous runs. **Never check for box-drawing chars alone** — they may come from old sessions. Always verify using the startup log line `YASH server running`.
 
 ## Standard Workflow
 
-### 0. Ensure the tui window exists
+### 0. Ensure the all window exists
 
 ```bash
 # Create the window if it doesn't exist yet (safe to run even if it already exists)
-tmux list-windows -t yash | grep -q "tui" || tmux new-window -t "yash:2" -n tui -c "$(git rev-parse --show-toplevel)"
+tmux list-windows -t yash | grep -q "all" || tmux new-window -t "yash:2" -n all -c "$(git rev-parse --show-toplevel)"
 ```
 
 ### 1. Check whether the app is running
 
 ```bash
 # Step 1: process check
-tmux display-message -t yash:tui -p "#{pane_current_command}"
+tmux display-message -t yash:all -p "#{pane_current_command}"
 # Returns "bun" if running, "bash" if stopped
 
 # Step 2: confirm it is the CURRENT run (not old scrollback)
-tmux capture-pane -t yash:tui -p -S -60 2>&1 | grep "YASH server running"
+tmux capture-pane -t yash:all -p -S -60 2>&1 | grep "YASH server running"
 # Must print a match — this line only appears once per startup
 ```
 
@@ -58,28 +58,28 @@ Both checks must pass. `pane_current_command=bun` alone is insufficient because:
 ### 2. Restart after a code change
 
 ```bash
-tmux send-keys -t yash:tui C-c
+tmux send-keys -t yash:all C-c
 sleep 1
-tmux send-keys -t yash:tui "bun start" Enter
+tmux send-keys -t yash:all "bun start" Enter
 sleep 5
 # Verify: process still alive AND startup log present in recent scrollback
-tmux display-message -t yash:tui -p "#{pane_current_command}"
+tmux display-message -t yash:all -p "#{pane_current_command}"
 # Expect: bun
-tmux capture-pane -t yash:tui -p -S -60 2>&1 | grep "YASH server running"
+tmux capture-pane -t yash:all -p -S -60 2>&1 | grep "YASH server running"
 # Expect: at least one match — confirms this is a live current run, not old history
 ```
 
 If `YASH server running` is absent but `bun` is still in `pane_current_command`, the app likely crashed during startup. Capture more scrollback to see the error:
 
 ```bash
-tmux capture-pane -t yash:tui -p -S -100 2>&1 | tail -40
+tmux capture-pane -t yash:all -p -S -100 2>&1 | tail -40
 ```
 
 ### 3. Capture the screen
 
 ```bash
 # Always use -S -<N> to include the TUI content from scrollback
-tmux capture-pane -t yash:tui -p -S -60 2>&1
+tmux capture-pane -t yash:all -p -S -60 2>&1
 ```
 
 The TUI uses box-drawing characters (`╭`, `│`, `╰`). Grep for those or specific labels to check state.
@@ -90,9 +90,9 @@ The TUI uses box-drawing characters (`╭`, `│`, `╰`). Grep for those or spe
 
 ```bash
 # Type the command without pressing Enter, then send Enter separately
-tmux send-keys -t yash:tui "/stream" && sleep 0.2 && tmux send-keys -t yash:tui Enter
+tmux send-keys -t yash:all "/stream" && sleep 0.2 && tmux send-keys -t yash:all Enter
 sleep 0.5
-tmux capture-pane -t yash:tui -p -S -50 2>&1 | grep -E "Stream Info|Platforms|Title"
+tmux capture-pane -t yash:all -p -S -50 2>&1 | grep -E "Stream Info|Platforms|Title"
 ```
 
 ### Verify a modal has exclusive input (no background bleed)
@@ -101,71 +101,71 @@ This pattern verifies that arrow keys pressed inside a modal do NOT change the b
 
 ```bash
 # 1. Note the message input line before pressing arrows
-BEFORE=$(tmux capture-pane -t yash:tui -p -S -50 2>&1 | grep "type a command\|> /\|> [a-z]")
+BEFORE=$(tmux capture-pane -t yash:all -p -S -50 2>&1 | grep "type a command\|> /\|> [a-z]")
 
 # 2. Open the modal
-tmux send-keys -t yash:tui "/stream" && sleep 0.2 && tmux send-keys -t yash:tui Enter
+tmux send-keys -t yash:all "/stream" && sleep 0.2 && tmux send-keys -t yash:all Enter
 sleep 0.5
 
 # 3. Press Up/Down several times
-tmux send-keys -t yash:tui Up Up Up Down Down
+tmux send-keys -t yash:all Up Up Up Down Down
 sleep 0.3
 
 # 4. Capture message input — must still show placeholder
-AFTER=$(tmux capture-pane -t yash:tui -p -S -50 2>&1 | grep "type a command\|> /\|> [a-z]")
+AFTER=$(tmux capture-pane -t yash:all -p -S -50 2>&1 | grep "type a command\|> /\|> [a-z]")
 echo "Before: $BEFORE"
 echo "After:  $AFTER"
 # If AFTER still shows "type a command" placeholder → exclusive input works ✓
 
 # 5. Close modal
-tmux send-keys -t yash:tui Escape
+tmux send-keys -t yash:all Escape
 ```
 
 ### Type into a modal field
 
 ```bash
 # Tab to next field, type text
-tmux send-keys -t yash:tui Tab
+tmux send-keys -t yash:all Tab
 sleep 0.2
-tmux send-keys -t yash:tui -l "My stream title"
+tmux send-keys -t yash:all -l "My stream title"
 sleep 0.2
-tmux capture-pane -t yash:tui -p -S -50 2>&1 | grep "My stream title"
+tmux capture-pane -t yash:all -p -S -50 2>&1 | grep "My stream title"
 ```
 
 ### Close a modal
 
 ```bash
-tmux send-keys -t yash:tui Escape      # cancel
+tmux send-keys -t yash:all Escape      # cancel
 # or
-tmux send-keys -t yash:tui Enter       # confirm
+tmux send-keys -t yash:all Enter       # confirm
 ```
 
 ### Send a chat message
 
 ```bash
 # Use -l (literal) so tmux does not interpret text as key names
-tmux send-keys -t yash:tui -l "hello world"
+tmux send-keys -t yash:all -l "hello world"
 sleep 0.1
-tmux send-keys -t yash:tui Enter
+tmux send-keys -t yash:all Enter
 sleep 0.5
-tmux capture-pane -t yash:tui -p -S -50 2>&1 | grep "hello world"
+tmux capture-pane -t yash:all -p -S -50 2>&1 | grep "hello world"
 ```
 
 ### Check history cycling (no modal open)
 
 ```bash
 # Send a message first so history is non-empty
-tmux send-keys -t yash:tui -l "/help" && tmux send-keys -t yash:tui Enter
+tmux send-keys -t yash:all -l "/help" && tmux send-keys -t yash:all Enter
 sleep 0.3
 
 # Press Up — input should fill with the last command
-tmux send-keys -t yash:tui Up
+tmux send-keys -t yash:all Up
 sleep 0.2
-tmux capture-pane -t yash:tui -p -S -50 2>&1 | grep "> /"
+tmux capture-pane -t yash:all -p -S -50 2>&1 | grep "> /"
 # Expect to see "> /help" or similar in the message input
 
 # Restore
-tmux send-keys -t yash:tui Escape 2>/dev/null || tmux send-keys -t yash:tui C-c 2>/dev/null
+tmux send-keys -t yash:all Escape 2>/dev/null || tmux send-keys -t yash:all C-c 2>/dev/null
 ```
 
 ### Check the activity bar
@@ -174,7 +174,7 @@ The activity bar sits below the status bar and shows the most recent follow/sub/
 
 ```bash
 # Capture and look for an activity entry (platform label + event type)
-tmux capture-pane -t yash:tui -p -S -60 2>&1 | grep -E "\[(kick|twitch|youtube)\]"
+tmux capture-pane -t yash:all -p -S -60 2>&1 | grep -E "\[(kick|twitch|youtube)\]"
 ```
 
 To trigger a test event, POST a webhook from another shell:
@@ -191,18 +191,18 @@ curl -s -X POST http://localhost:3000/api/kick/webhook \
 
 ```bash
 # Open the modal
-tmux send-keys -t yash:tui -l "/activity" && sleep 0.2 && tmux send-keys -t yash:tui Enter
+tmux send-keys -t yash:all -l "/activity" && sleep 0.2 && tmux send-keys -t yash:all Enter
 sleep 0.5
-tmux capture-pane -t yash:tui -p -S -60 2>&1 | grep -E "Activity|\[kick\]|\[youtube\]|\[twitch\]"
+tmux capture-pane -t yash:all -p -S -60 2>&1 | grep -E "Activity|\[kick\]|\[youtube\]|\[twitch\]"
 
 # Scroll through entries
-tmux send-keys -t yash:tui Down
+tmux send-keys -t yash:all Down
 sleep 0.3
-tmux send-keys -t yash:tui Down
+tmux send-keys -t yash:all Down
 sleep 0.3
 
 # Close
-tmux send-keys -t yash:tui Escape
+tmux send-keys -t yash:all Escape
 sleep 0.3
 ```
 
