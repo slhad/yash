@@ -59,7 +59,10 @@ const htmlRoutes: Record<string, any> = isTuiOnly
   ? {}
   : { '/': indexHtml, '/unified': unifiedHtml, '/sidebyside': sidebysidesHtml };
 
+const SERVER_PORT = Number(process.env.YASH_PORT) || 3000;
+
 Bun.serve({
+  port: SERVER_PORT,
   routes: {
     ...htmlRoutes,
     '/api/status': {
@@ -920,4 +923,4 @@ Bun.serve({
   development: false,
 });
 
-defaultLogger.info('YASH server running at http://localhost:3000');
+defaultLogger.info(`YASH server running at http://localhost:${SERVER_PORT}`);

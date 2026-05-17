@@ -2708,7 +2708,7 @@ const commandHandlers: Record<
           }
         } else if (res?.error?.startsWith('oauth_required:')) {
           const authUrl = res.error.slice('oauth_required:'.length);
-          const fallbackUrl = `http://localhost:3000/api/${platform}/auth`;
+          const fallbackUrl = `http://localhost:${process.env.YASH_PORT || 3000}/api/${platform}/auth`;
           emit(`[system] Opening browser for ${platform} OAuth...`);
           const proc = Bun.spawn(['xdg-open', authUrl]);
           proc.exited.then((code) => {
