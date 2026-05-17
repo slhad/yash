@@ -1,21 +1,20 @@
+# PR Title Convention
+# Use conventional commits format — this title becomes the release changelog entry:
+#   feat: short description       → new feature
+#   fix: short description        → bug fix
+#   chore: short description      → maintenance, tooling, deps
+#   docs: short description       → documentation only
+#   test: short description       → tests only
+#   refactor: short description   → no behaviour change
+# Keep it under 70 characters. No period at the end.
+
 ## Summary
 
-Briefly describe the change and why it's needed.
+- What changed and why (1-3 bullets)
 
-## Changes
-- Bullet list of primary changes made in this PR.
+## Test plan
 
-## Testing
-- Describe how the change was tested locally (commands run, expected results).
-- Include test output or describe manual verification steps.
+- [ ] `bun run test` passes
+- [ ] Manually verified: ...
 
-## Checklist
-- [ ] Tests added/updated where applicable
-- [ ] Changelog updated (if applicable)
-- [ ] CI passes (build + tests)
-
-## Notes for Reviewers
-- Any special considerations, migration steps, or areas that need careful review.
-
-## Linked Issues
-- Link relevant issue(s) or PR(s)
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
