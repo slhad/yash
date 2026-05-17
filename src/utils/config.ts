@@ -15,6 +15,10 @@ export function getDataDir(): string {
   return process.env.YASH_DATA_DIR || path.join(process.env.HOME || '.', '.yash');
 }
 
+export function resolvePort(): number {
+  return Number(process.env.YASH_PORT) || 3000;
+}
+
 export function getConfigPath(): string {
   return path.join(getDataDir(), CONFIG_FILENAME);
 }

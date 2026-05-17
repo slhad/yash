@@ -21,7 +21,7 @@ import {
   twitch,
   youtube,
 } from './services';
-import { isDemoMode } from './utils/config';
+import { isDemoMode, resolvePort } from './utils/config';
 import { defaultLogger } from './utils/logger';
 import { apiMetricsHandler, prometheusMetricsHandler } from './utils/metricsHandlers';
 
@@ -59,7 +59,7 @@ const htmlRoutes: Record<string, any> = isTuiOnly
   ? {}
   : { '/': indexHtml, '/unified': unifiedHtml, '/sidebyside': sidebysidesHtml };
 
-const SERVER_PORT = Number(process.env.YASH_PORT) || 3000;
+const SERVER_PORT = resolvePort();
 
 Bun.serve({
   port: SERVER_PORT,
