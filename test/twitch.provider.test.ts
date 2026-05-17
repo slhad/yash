@@ -556,8 +556,8 @@ describe('TwitchProvider — activity events', () => {
     (p as any)._dispatchActivity('follow', 'user123 followed');
 
     expect(received).toHaveLength(1);
-    expect(received[0].type).toBe('follow');
-    expect(received[0].message).toBe('user123 followed');
+    expect(received[0]!.type).toBe('follow');
+    expect(received[0]!.message).toBe('user123 followed');
   });
 
   test('multiple callbacks all fire on _dispatchActivity', () => {
@@ -571,8 +571,8 @@ describe('TwitchProvider — activity events', () => {
 
     expect(a).toHaveLength(1);
     expect(b).toHaveLength(1);
-    expect(a[0].type).toBe('sub');
-    expect(b[0].type).toBe('sub');
+    expect(a[0]!.type).toBe('sub');
+    expect(b[0]!.type).toBe('sub');
   });
 
   test('unsubscribe removes only the unsubscribed callback', () => {
