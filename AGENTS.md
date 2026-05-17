@@ -57,6 +57,30 @@ Never commit binary files (images, GIFs, fonts, archives, compiled artifacts, et
   ```
 - Never create a `docs/`, `assets/`, or similar directory just to store binaries in git.
 
+## Protobuf / Long integer shim (YouTube gRPC decoder)
+
+`protobufjs` silently mishandles 64-bit integers under Bun unless `Long` is explicitly patched in at startup. Without the shim, timestamps and IDs decoded from YouTube's live-chat gRPC stream will be wrong or zero.
+
+The shim must run before any protobuf decode call:
+
+```ts
+import { createRequire } from "node:module";
+const require = createRequire(import.meta.url);
+const longModule = require("long");
+const Long = typeof longModule?.fromNumber === "function" ? longModule : longModule?.default;
+if (Long && typeof Long.fromNumber === "function") {
+  const protobuf = require("protobufjs");
+  const protobufMinimal = require("protobufjs/minimal");
+  protobuf.util.Long = Long;
+  protobuf.configure();
+  protobufMinimal.util.Long = Long;
+  protobufMinimal.configure();
+  globalThis.Long = Long;
+}
+```
+
+The double-form guard (`longModule?.fromNumber ?? longModule?.default`) is intentional — the `long` package's ESM/CJS export shape differs between versions and Bun resolves it differently depending on context.
+
 ## External References
 
 - Kick event subscription docs: `https://docs.kick.com/events/subscribe-to-events`
