@@ -85,6 +85,8 @@ The double-form guard (`longModule?.fromNumber ?? longModule?.default`) is inten
 
 Before opening a PR, you **must** complete every step below in order. Do not skip or mark a step done without actually running it.
 
+For steps that are **not applicable** to the current change (e.g. no TUI changes → no VHS recording needed), mark the checklist item `[x]` with a short `N/A — reason` explanation. Never leave an unrelated item unchecked — an unchecked box signals a missing action, not an inapplicable one.
+
 1. **Unit tests** — run the unit test file(s) relevant to your changes: `bun test test/<relevant>.unit.test.ts` — all must pass
 2. **Full test suite** — `bun run test` — 0 failures
 3. **Type check** — `bun typecheck` — no errors
