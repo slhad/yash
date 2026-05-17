@@ -1,5 +1,5 @@
 ---
-name: test-tui
+name: test-live
 description: Test the yash TUI interactively via the tmux session. Use to verify UI behaviour after changes — modals, key input, commands, display state.
 ---
 
