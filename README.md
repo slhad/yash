@@ -54,7 +54,9 @@ Both forms are accepted — `bun run cmd marker` and `bun run cmd /marker` are e
 | `/stream` | Requires TUI modal interaction |
 | `/setup-youtube` | Requires TUI modal interaction |
 | `/history` | Requires TUI modal interaction |
+| `/activity` | Requires TUI modal interaction |
 | `/chatter` | Requires TUI modal interaction |
+| `/inject` | TUI-only dev/testing helper |
 | `/settings` (bare) | Requires TUI settings modal |
 
 `/settings get <key>` and `/settings set <key> <value>` work normally over IPC.

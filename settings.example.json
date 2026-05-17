@@ -2,10 +2,14 @@
   "demo": false,
   "chat": {
     "maxHistorySize": 1000,
-    "showTimestamps": true,
     "timestamps": {
       "visible": true
     }
+  },
+  "activity": {
+    "visible": true,
+    "mode": "permanent",
+    "timeout": 10
   },
   "stream": {
     "title": "",
