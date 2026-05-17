@@ -17,7 +17,7 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
             * position : top/bottom/hide
         * Element : Title (YASH heading)
             * visible: true/false (default: false, toggle with `/settings set title.visible true`)
-    * Command /connect [youtube|twitch|kick] to launch connection to platform with auth+save secrets in config
+    * Command /connect [youtube|twitch|kick|obs] to launch connection to platform with auth+save secrets in config
     * Command /exit - exits the application cleanly (TUI only)
     * Command /help - lists all available commands
         * Command /info - fetches current stream/channel info from all providers and prints one `[system] <platform>: …` line per provider in the TUI chat; Kick output also includes current event subscriptions
@@ -41,7 +41,9 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
         * Examples: `/markers`, `/markers youtube`, `/markers twitch 5`, `/markers clear`
     * Command /settings [get <key>|set <key> <value>] - get or set UI settings; running `/settings` with no arguments opens a TUI modal for display/sidebar/viewer preferences and persists changes to `settings.json`
         * Includes `chat.timestamps.visible` for WebUI unified chat timestamp display
-    * Command `/setup-youtube [chaptering|clear-markers|tags|description|subject|playlist] [on|off]` — configure YouTube stream options; `clear-markers` enables automatic chapter clearing when a new broadcast is detected
+    * Command `/activity` — opens the activity bar modal showing the full event history (follow, sub, cheer, raid) with platform labels and timestamps (TUI only)
+    * Command `/inject <platform> <username> <message>` — injects a fake incoming chat message for dev/testing without a live platform connection (TUI only)
+    * Command `/setup-youtube` — opens the YouTube stream setup modal (TUI only); configure chaptering, auto-start marker, sync delay, tags, description, subject, and playlist
     * `/stream` modal: per-platform category autocomplete with ↑/↓ navigation — Twitch field (`twitchGame`) calls `/api/twitch/categories` with 300 ms debounce; Kick field (`kickCategory`) calls `/api/kick/categories` with 300 ms debounce; YouTube field uses a static `<select>` dropdown from `/api/youtube/categories`
     * Message box to send message to [all|youtube|twitch|kick] platform and receive command "/" (without sending to platforms)
         * Input history: Up/Down arrow keys navigate previously-sent messages (like a shell history)
@@ -86,10 +88,10 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
         * `/msg <all|youtube|twitch|kick> <text>` — send targeted platform message
         * `/marker [description] [| timestamp_s]` — create stream marker on all (or selected) platforms
         * `/markers clear | [all|youtube|twitch|kick] [limit]` — list existing markers or clear persisted YouTube chapters
-        * `/connect <youtube|twitch|kick>` — authenticate a platform (all three redirect to real OAuth flows)
+        * `/connect <youtube|twitch|kick|obs>` — authenticate a platform (all three redirect to real OAuth flows)
         * `/settings get <key>` — read a persistent setting via `/api/settings`
         * `/settings set <key> <value>` — write a persistent setting via `/api/settings`
-    * TUI-only commands (not available in WebUI or via CLI IPC): `/exit`, `/logs`, `/info`, `/stream`, `/setup-youtube`, `/history`, bare `/settings` (no arguments), `/chatter` (modal path)
+    * TUI-only commands (not available in WebUI or via CLI IPC): `/exit`, `/logs`, `/info`, `/stream`, `/setup-youtube`, `/history`, `/activity`, `/inject`, bare `/settings` (no arguments), `/chatter` (modal path)
 - Scriptable CLI interface via IPC
     * `bun run cmd <command> [args...]` — forwards a command to the running yash TUI process and prints its output to stdout, then exits
     * Both `/cmd` and `cmd` argument forms are accepted (the leading `/` is inserted automatically if omitted)
@@ -265,6 +267,7 @@ Mutable settings live in `settings.json`, including `demo`, `chat.*`, `stream.*`
 | `KICK_CLIENT_SECRET` | `platforms.kick.clientSecret` |
 | `KICK_REDIRECT_URI` | `platforms.kick.redirectUri` |
 | `YASH_TUI_ONLY` | When set to `1`, skips HTML page routes (`/`, `/unified`, `/sidebyside`); only API + OAuth endpoints are registered |
+| `YASH_PORT` | HTTP server port; overrides `server.port` in config (default `3000`) |
 
 ### Features
 - OAuth authentication flows for all platforms
@@ -356,6 +359,7 @@ src/
 ├── utils/
 │   ├── webCommands.ts   # Shared WebUI command module (consumed by main.tsx + served as /api/js/commands.js)
 │   └── settings.ts      # Persistent settings store
+├── services.ts          # Aggregator — imports and exports all initialized service instances
 ├── cli.ts               # CLI entry point; accepts /cmd or cmd arg form; forwards to running yash via IPC
 ├── index.ts             # Web server entry point
 └── index.tsx            # TUI entry point
