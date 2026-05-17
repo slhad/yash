@@ -524,6 +524,12 @@ export class YouTubeProvider implements PlatformProvider {
       const messageType = snippet?.type;
       const displayMessage = snippet?.displayMessage ?? '';
 
+      // Skip activity events from pre-session history (same cutoff logic as text messages).
+      const publishedAt = snippet?.publishedAt ? Date.parse(snippet.publishedAt) : NaN;
+      if (cutoffMs !== null && Number.isFinite(publishedAt) && publishedAt < cutoffMs) {
+        continue;
+      }
+
       // Activity events — non-text chat items
       if (messageType === 'superChatEvent') {
         const superChatDetails = (snippet as any)?.superChatDetails;
@@ -532,10 +538,15 @@ export class YouTubeProvider implements PlatformProvider {
         this._dispatchActivity('superchat', `${who} sent a Super Chat${amount ? ` of ${amount}` : ''}`);
         continue;
       }
-      if (messageType === 'newSponsorEvent' || messageType === 'memberMilestoneChatEvent') {
-        const memberDetails = (snippet as any)?.memberDetails;
+      if (messageType === 'newSponsorEvent') {
         const who = item.authorDetails?.displayName ?? 'someone';
-        const level = String(memberDetails?.memberLevelName ?? '');
+        const level = String((snippet as any)?.newSponsorDetails?.memberLevelName ?? '');
+        this._dispatchActivity('member', `${who} became a member${level ? ` (${level})` : ''}`);
+        continue;
+      }
+      if (messageType === 'memberMilestoneChatEvent') {
+        const who = item.authorDetails?.displayName ?? 'someone';
+        const level = String((snippet as any)?.memberMilestoneChatDetails?.memberLevelName ?? '');
         this._dispatchActivity('member', `${who} became a member${level ? ` (${level})` : ''}`);
         continue;
       }
@@ -554,13 +565,7 @@ export class YouTubeProvider implements PlatformProvider {
       const isTextMessage =
         messageType === undefined || messageType === '' || messageType === 'textMessageEvent';
       if (!isTextMessage || displayMessage.length === 0) continue;
-      const publishedAt = snippet?.publishedAt ? Date.parse(snippet.publishedAt) : NaN;
-      if (
-        cutoffMs !== null &&
-        Number.isFinite(publishedAt) &&
-        publishedAt < cutoffMs &&
-        !this.chatInitialized
-      ) {
+      if (cutoffMs !== null && Number.isFinite(publishedAt) && publishedAt < cutoffMs && !this.chatInitialized) {
         continue;
       }
 

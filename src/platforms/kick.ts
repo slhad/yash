@@ -843,9 +843,10 @@ export class KickProvider implements PlatformProvider {
     );
 
     if (eventType === 'channel.followed') {
-      const name = (body?.data as Record<string, unknown> | undefined);
-      const userData = name?.user as Record<string, unknown> | undefined;
-      const username = String(userData?.username ?? 'someone');
+      // API v1 wraps user in data.user; some relay formats expose follower at the top level.
+      const data = body?.data as Record<string, unknown> | undefined;
+      const user = (data?.user ?? body?.follower) as Record<string, unknown> | undefined;
+      const username = String(user?.username ?? 'someone');
       this._dispatchActivity('follow', `${username} followed`);
       return;
     }

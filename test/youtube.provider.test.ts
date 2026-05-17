@@ -1533,14 +1533,17 @@ describe('YouTubeProvider — playlists', () => {
 // Activity events
 // ---------------------------------------------------------------------------
 
-function makeItem(messageType: string, overrides: Record<string, unknown> = {}) {
+function makeItem(
+  messageType: string,
+  overrides: { displayMessage?: unknown; displayName?: unknown; snippet?: Record<string, unknown> } = {},
+) {
   return {
     id: `item_${messageType}`,
     snippet: {
       type: messageType,
       displayMessage: overrides.displayMessage ?? '',
       publishedAt: new Date().toISOString(),
-      ...overrides.snippet,
+      ...(overrides.snippet ?? {}),
     },
     authorDetails: {
       channelId: 'channel_123',
@@ -1614,7 +1617,7 @@ describe('YouTubeProvider — _dispatchStreamItems activity events', () => {
 
     const item = makeItem('newSponsorEvent', {
       displayName: 'NewMember',
-      snippet: { memberDetails: { memberLevelName: 'Gold' } },
+      snippet: { newSponsorDetails: { memberLevelName: 'Gold' } },
     });
     p._dispatchStreamItems([item], true);
 
@@ -1631,7 +1634,7 @@ describe('YouTubeProvider — _dispatchStreamItems activity events', () => {
 
     const item = makeItem('memberMilestoneChatEvent', {
       displayName: 'MilestoneUser',
-      snippet: { memberDetails: { memberLevelName: 'Silver' } },
+      snippet: { memberMilestoneChatDetails: { memberLevelName: 'Silver' } },
     });
     p._dispatchStreamItems([item], true);
 

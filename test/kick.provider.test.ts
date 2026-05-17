@@ -427,6 +427,8 @@ describe('KickProvider — setupWebhooks', () => {
       expect(postBodies.some((b) => b.includes('"name":"chat.message.sent"'))).toBe(true);
       expect(postBodies.some((b) => b.includes('"name":"channel.followed"'))).toBe(true);
       expect(postBodies.some((b) => b.includes('"name":"channel.subscription.new"'))).toBe(true);
+      expect(postBodies.some((b) => b.includes('"name":"channel.subscription.renewal"'))).toBe(true);
+      expect(postBodies.some((b) => b.includes('"name":"channel.subscription.gifted"'))).toBe(true);
       expect(postBodies.every((b) => b.includes('"method":"webhook"'))).toBe(true);
     } finally {
       global.fetch = origFetch;
