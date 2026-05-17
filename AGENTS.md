@@ -100,7 +100,9 @@ Before opening a PR, you **must** complete every step below in order. Do not ski
    ```
    Link the resulting URL in the Demo section alongside the VHS GIF.
 
-Only after all six steps pass, create the PR following the conventions in `.github/PULL_REQUEST_TEMPLATE.md`. PR titles feed directly into the GitHub release changelog.
+8. **Docs update** — before opening the PR, update `SPECS.md` to reflect any new or changed commands, settings, API routes, env vars, or behavior; update `README.md` if setup steps, IPC behavior, or architecture changed.
+
+Only after all steps pass, create the PR following the conventions in `.github/PULL_REQUEST_TEMPLATE.md`. PR titles feed directly into the GitHub release changelog.
 
 ## External References
 

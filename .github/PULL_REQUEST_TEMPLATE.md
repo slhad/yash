@@ -26,3 +26,5 @@ Keep it under 70 characters. No period at the end.
 - [ ] Live Web UI check: ...
 - [ ] VHS recording generated and linked in Demo (TUI)
 - [ ] Playwright recording generated and linked in Demo (Web UI)
+- [ ] `SPECS.md` updated to reflect any new/changed commands, settings, routes, or behavior
+- [ ] `README.md` updated if setup, IPC, or architecture changed
