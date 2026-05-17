@@ -273,6 +273,20 @@ export class YouTubeProvider implements PlatformProvider {
   // ---- chat ------------------------------------------------------------------
   private messageCallbacks: ((msg: ChatMessage) => void)[] = [];
 
+  // ---- activity events -------------------------------------------------------
+  private activityCallbacks: ((event: { type: string; message: string }) => void)[] = [];
+
+  onActivityEvent(cb: (event: { type: string; message: string }) => void): () => void {
+    this.activityCallbacks.push(cb);
+    return () => {
+      this.activityCallbacks = this.activityCallbacks.filter((c) => c !== cb);
+    };
+  }
+
+  private _dispatchActivity(type: string, message: string): void {
+    for (const cb of this.activityCallbacks) cb({ type, message });
+  }
+
   // ---- markers (in-memory chapters) -----------------------------------------
   // YouTube chapters are encoded as timestamps in the video description.
   // The Data API v3 has no dedicated chapters endpoint; serialise via
@@ -509,16 +523,58 @@ export class YouTubeProvider implements PlatformProvider {
       const snippet = item.snippet;
       const messageType = snippet?.type;
       const displayMessage = snippet?.displayMessage ?? '';
+
+      // Skip activity events from pre-session history (same cutoff logic as text messages).
+      const publishedAt = snippet?.publishedAt ? Date.parse(snippet.publishedAt) : NaN;
+      if (cutoffMs !== null && Number.isFinite(publishedAt) && publishedAt < cutoffMs) {
+        continue;
+      }
+
+      // Activity events — non-text chat items.
+      // Structured detail fields (superChatDetails, newSponsorDetails, etc.) are populated
+      // when items come from the REST API. The gRPC decoder only provides displayMessage,
+      // type, and publishedAt, so detail fields may be absent; fall back to displayMessage.
+      if (messageType === 'superChatEvent') {
+        const who = item.authorDetails?.displayName ?? 'someone';
+        const amount = String((snippet as any)?.superChatDetails?.amountDisplayString ?? '');
+        const msg = amount
+          ? `${who} sent a Super Chat of ${amount}`
+          : displayMessage || `${who} sent a Super Chat`;
+        this._dispatchActivity('superchat', msg);
+        continue;
+      }
+      if (messageType === 'newSponsorEvent') {
+        const who = item.authorDetails?.displayName ?? 'someone';
+        const level = String((snippet as any)?.newSponsorDetails?.memberLevelName ?? '');
+        const msg = displayMessage || `${who} became a member${level ? ` (${level})` : ''}`;
+        this._dispatchActivity('member', msg);
+        continue;
+      }
+      if (messageType === 'memberMilestoneChatEvent') {
+        const who = item.authorDetails?.displayName ?? 'someone';
+        const level = String((snippet as any)?.memberMilestoneChatDetails?.memberLevelName ?? '');
+        const msg = displayMessage || `${who} became a member${level ? ` (${level})` : ''}`;
+        this._dispatchActivity('member', msg);
+        continue;
+      }
+      if (messageType === 'membershipGiftingEvent') {
+        const who = item.authorDetails?.displayName ?? 'someone';
+        const count = Number((snippet as any)?.membershipGiftingDetails?.giftMembershipsCount ?? 0);
+        const msg = count > 0
+          ? `${who} gifted ${count} membership${count !== 1 ? 's' : ''}`
+          : displayMessage || `${who} gifted memberships`;
+        this._dispatchActivity('gift', msg);
+        continue;
+      }
+      if (messageType === 'giftMembershipReceivedEvent') {
+        this._dispatchActivity('gift', displayMessage || 'Someone received a gifted membership');
+        continue;
+      }
+
       const isTextMessage =
         messageType === undefined || messageType === '' || messageType === 'textMessageEvent';
       if (!isTextMessage || displayMessage.length === 0) continue;
-      const publishedAt = snippet?.publishedAt ? Date.parse(snippet.publishedAt) : NaN;
-      if (
-        cutoffMs !== null &&
-        Number.isFinite(publishedAt) &&
-        publishedAt < cutoffMs &&
-        !this.chatInitialized
-      ) {
+      if (cutoffMs !== null && Number.isFinite(publishedAt) && publishedAt < cutoffMs && !this.chatInitialized) {
         continue;
       }
 

@@ -21,7 +21,7 @@ import {
   twitch,
   youtube,
 } from './services';
-import { isDemoMode } from './utils/config';
+import { isDemoMode, resolvePort } from './utils/config';
 import { defaultLogger } from './utils/logger';
 import { apiMetricsHandler, prometheusMetricsHandler } from './utils/metricsHandlers';
 
@@ -59,7 +59,10 @@ const htmlRoutes: Record<string, any> = isTuiOnly
   ? {}
   : { '/': indexHtml, '/unified': unifiedHtml, '/sidebyside': sidebysidesHtml };
 
+const SERVER_PORT = resolvePort();
+
 Bun.serve({
+  port: SERVER_PORT,
   routes: {
     ...htmlRoutes,
     '/api/status': {
@@ -794,7 +797,15 @@ Bun.serve({
       },
       POST: async (req) => {
         const payload = await req.json().catch(() => null);
-        if (payload) (kick as any).handleWebhookEvent(payload);
+        if (payload) {
+          const eventTypeHeader =
+            req.headers.get('Kick-Event-Type') ??
+            req.headers.get('kick-event-type') ??
+            req.headers.get('x-kick-event-type');
+          (kick as any).handleWebhookEvent(
+            eventTypeHeader ? { ...payload, 'Kick-Event-Type': eventTypeHeader } : payload,
+          );
+        }
         return new Response(JSON.stringify({ ok: true }), {
           headers: { 'Content-Type': 'application/json' },
         });
@@ -912,4 +923,4 @@ Bun.serve({
   development: false,
 });
 
-defaultLogger.info('YASH server running at http://localhost:3000');
+defaultLogger.info(`YASH server running at http://localhost:${SERVER_PORT}`);

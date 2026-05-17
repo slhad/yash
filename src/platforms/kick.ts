@@ -73,7 +73,13 @@ const REQUIRED_SCOPES = [
 ];
 
 const KICK_EVENTS_SUBSCRIPTIONS_URL = 'https://api.kick.com/public/v1/events/subscriptions';
-const REQUIRED_WEBHOOK_EVENTS = [{ name: 'chat.message.sent', version: 1 }] as const;
+const REQUIRED_WEBHOOK_EVENTS = [
+  { name: 'chat.message.sent',            version: 1 },
+  { name: 'channel.followed',             version: 1 },
+  { name: 'channel.subscription.new',     version: 1 },
+  { name: 'channel.subscription.renewal', version: 1 },
+  { name: 'channel.subscription.gifted',  version: 1 },
+] as const;
 
 export class KickProvider implements PlatformProvider {
   // ---- config ----------------------------------------------------------------
@@ -102,6 +108,20 @@ export class KickProvider implements PlatformProvider {
 
   // ---- chat ------------------------------------------------------------------
   private messageCallbacks: ((msg: ChatMessage) => void)[] = [];
+
+  // ---- activity events -------------------------------------------------------
+  private activityCallbacks: ((event: { type: string; message: string }) => void)[] = [];
+
+  onActivityEvent(cb: (event: { type: string; message: string }) => void): () => void {
+    this.activityCallbacks.push(cb);
+    return () => {
+      this.activityCallbacks = this.activityCallbacks.filter((c) => c !== cb);
+    };
+  }
+
+  private _dispatchActivity(type: string, message: string): void {
+    for (const cb of this.activityCallbacks) cb({ type, message });
+  }
 
   // ---- smee webhook relay ----------------------------------------------------
   private smeeRelay: SmeeRelay | null = null;
@@ -673,21 +693,30 @@ export class KickProvider implements PlatformProvider {
   }
 
   private async _ensureEventSubscriptions(): Promise<void> {
+    let missing: typeof REQUIRED_WEBHOOK_EVENTS[number][];
     try {
       const existing = new Set(await this._fetchEventSubscriptions());
-      const missing = REQUIRED_WEBHOOK_EVENTS.filter((event) => !existing.has(event.name));
+      missing = REQUIRED_WEBHOOK_EVENTS.filter((event) => !existing.has(event.name));
+    } catch (err) {
+      defaultLogger.warn('[Kick] Failed to fetch event subscriptions (non-fatal):', err);
+      return;
+    }
 
-      if (missing.length === 0) {
-        defaultLogger.info('[Kick] Event subscription already active for chat.message.sent');
-        return;
-      }
+    if (missing.length === 0) {
+      defaultLogger.info('[Kick] All event subscriptions already active');
+      return;
+    }
 
-      for (const event of missing) {
+    for (const event of missing) {
+      try {
         await this._createEventSubscription(event.name, event.version);
         defaultLogger.info(`[Kick] Created event subscription: ${event.name}@v${event.version}`);
+      } catch (err) {
+        defaultLogger.warn(
+          `[Kick] Failed to create event subscription ${event.name}@v${event.version} (non-fatal):`,
+          err,
+        );
       }
-    } catch (err) {
-      defaultLogger.warn('[Kick] Failed to ensure event subscriptions (non-fatal):', err);
     }
   }
 
@@ -822,6 +851,30 @@ export class KickProvider implements PlatformProvider {
       p['Kick-Event-Type'] ?? p['kick-event-type'] ?? p['x-kick-event-type'] ?? body.event ?? '',
     );
 
+    if (eventType === 'channel.followed') {
+      // API v1 wraps user in data.user; some relay formats expose follower at the top level.
+      const data = body?.data as Record<string, unknown> | undefined;
+      const user = (data?.user ?? body?.follower) as Record<string, unknown> | undefined;
+      const username = String(user?.username ?? 'someone');
+      this._dispatchActivity('follow', `${username} followed`);
+      return;
+    }
+    if (eventType === 'channel.subscription.new' || eventType === 'channel.subscription.renewal') {
+      const data = body?.data as Record<string, unknown> | undefined;
+      const userData = data?.user as Record<string, unknown> | undefined;
+      const username = String(userData?.username ?? 'someone');
+      this._dispatchActivity('sub', `${username} subscribed`);
+      return;
+    }
+    if (eventType === 'channel.subscription.gifted') {
+      const data = body?.data as Record<string, unknown> | undefined;
+      const userData = data?.gifted_by as Record<string, unknown> | undefined;
+      const username = String(userData?.username ?? 'someone');
+      const giftee = (data?.user as Record<string, unknown> | undefined);
+      const gifteeName = String(giftee?.username ?? 'someone');
+      this._dispatchActivity('gift', `${username} gifted a sub to ${gifteeName}`);
+      return;
+    }
     if (eventType !== 'chat.message.sent') {
       if (eventType) {
         defaultLogger.info(`[Kick] Ignoring webhook event type: ${eventType}`);

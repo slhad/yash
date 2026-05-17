@@ -2708,7 +2708,7 @@ const commandHandlers: Record<
           }
         } else if (res?.error?.startsWith('oauth_required:')) {
           const authUrl = res.error.slice('oauth_required:'.length);
-          const fallbackUrl = `http://localhost:3000/api/${platform}/auth`;
+          const fallbackUrl = `http://localhost:${process.env.YASH_PORT || 3000}/api/${platform}/auth`;
           emit(`[system] Opening browser for ${platform} OAuth...`);
           const proc = Bun.spawn(['xdg-open', authUrl]);
           proc.exited.then((code) => {
@@ -5107,13 +5107,20 @@ async function main() {
     updateUI(lastMessages);
   });
 
-  await initializeServices();
-  startIpcServer(handleCommandForCli);
-
-  // Subscribe to platform activity events (follow, sub, cheer, raid)
+  // Register activity callbacks before starting services so events emitted
+  // during initialization (first webhook poll, first chat page) are not dropped.
   twitch.onActivityEvent(({ type, message }) => {
     pushActivityEvent('twitch', type, message);
   });
+  kick.onActivityEvent(({ type, message }) => {
+    pushActivityEvent('kick', type, message);
+  });
+  youtube.onActivityEvent(({ type, message }) => {
+    pushActivityEvent('youtube', type, message);
+  });
+
+  await initializeServices();
+  startIpcServer(handleCommandForCli);
 
   // Establish session identity — reuse the persisted ID if present (same session/restart),
   // otherwise generate a fresh one (first launch or explicit clear).

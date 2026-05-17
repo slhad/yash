@@ -1528,3 +1528,234 @@ describe('YouTubeProvider — playlists', () => {
     expect(created).toEqual({ id: 'playlist-1', title: 'Subject A' });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Activity events
+// ---------------------------------------------------------------------------
+
+function makeItem(
+  messageType: string,
+  overrides: { displayMessage?: unknown; displayName?: unknown; snippet?: Record<string, unknown> } = {},
+) {
+  return {
+    id: `item_${messageType}`,
+    snippet: {
+      type: messageType,
+      displayMessage: overrides.displayMessage ?? '',
+      publishedAt: new Date().toISOString(),
+      ...(overrides.snippet ?? {}),
+    },
+    authorDetails: {
+      channelId: 'channel_123',
+      displayName: overrides.displayName ?? 'TestUser',
+    },
+  };
+}
+
+describe('YouTubeProvider — onActivityEvent', () => {
+  test('registers a callback and fires it via _dispatchActivity', () => {
+    const p = makeProvider() as any;
+    const received: { type: string; message: string }[] = [];
+    p.onActivityEvent((ev: { type: string; message: string }) => received.push(ev));
+    p._dispatchActivity('superchat', 'TestUser sent a Super Chat of $5.00');
+    expect(received).toHaveLength(1);
+    expect(received[0]).toEqual({ type: 'superchat', message: 'TestUser sent a Super Chat of $5.00' });
+  });
+
+  test('multiple callbacks all receive the event', () => {
+    const p = makeProvider() as any;
+    const a: string[] = [];
+    const b: string[] = [];
+    p.onActivityEvent((ev: { type: string }) => a.push(ev.type));
+    p.onActivityEvent((ev: { type: string }) => b.push(ev.type));
+    p._dispatchActivity('member', 'Someone became a member');
+    expect(a).toEqual(['member']);
+    expect(b).toEqual(['member']);
+  });
+
+  test('unsubscribe removes only that callback', () => {
+    const p = makeProvider() as any;
+    const a: string[] = [];
+    const b: string[] = [];
+    const unsub = p.onActivityEvent((ev: { type: string }) => a.push(ev.type));
+    p.onActivityEvent((ev: { type: string }) => b.push(ev.type));
+    unsub();
+    p._dispatchActivity('gift', 'Someone gifted');
+    expect(a).toHaveLength(0);
+    expect(b).toEqual(['gift']);
+  });
+
+  test('double-unsubscribe is safe', () => {
+    const p = makeProvider() as any;
+    const unsub = p.onActivityEvent(() => {});
+    expect(() => { unsub(); unsub(); }).not.toThrow();
+  });
+});
+
+describe('YouTubeProvider — _dispatchStreamItems activity events', () => {
+  test('superChatEvent dispatches superchat activity', () => {
+    const p = makeProvider() as any;
+    const events: { type: string; message: string }[] = [];
+    p.onActivityEvent((ev: { type: string; message: string }) => events.push(ev));
+
+    const item = makeItem('superChatEvent', {
+      displayName: 'SuperChatter',
+      snippet: { superChatDetails: { amountDisplayString: '€10.00' } },
+    });
+    p._dispatchStreamItems([item], true);
+
+    expect(events).toHaveLength(1);
+    expect(events[0]?.type).toBe('superchat');
+    expect(events[0]?.message).toContain('SuperChatter');
+    expect(events[0]?.message).toContain('€10.00');
+  });
+
+  test('newSponsorEvent dispatches member activity', () => {
+    const p = makeProvider() as any;
+    const events: { type: string; message: string }[] = [];
+    p.onActivityEvent((ev: { type: string; message: string }) => events.push(ev));
+
+    const item = makeItem('newSponsorEvent', {
+      displayName: 'NewMember',
+      snippet: { newSponsorDetails: { memberLevelName: 'Gold' } },
+    });
+    p._dispatchStreamItems([item], true);
+
+    expect(events).toHaveLength(1);
+    expect(events[0]?.type).toBe('member');
+    expect(events[0]?.message).toContain('NewMember');
+    expect(events[0]?.message).toContain('Gold');
+  });
+
+  test('memberMilestoneChatEvent dispatches member activity', () => {
+    const p = makeProvider() as any;
+    const events: { type: string; message: string }[] = [];
+    p.onActivityEvent((ev: { type: string; message: string }) => events.push(ev));
+
+    const item = makeItem('memberMilestoneChatEvent', {
+      displayName: 'MilestoneUser',
+      snippet: { memberMilestoneChatDetails: { memberLevelName: 'Silver' } },
+    });
+    p._dispatchStreamItems([item], true);
+
+    expect(events).toHaveLength(1);
+    expect(events[0]?.type).toBe('member');
+  });
+
+  test('membershipGiftingEvent dispatches gift activity with count', () => {
+    const p = makeProvider() as any;
+    const events: { type: string; message: string }[] = [];
+    p.onActivityEvent((ev: { type: string; message: string }) => events.push(ev));
+
+    const item = makeItem('membershipGiftingEvent', {
+      displayName: 'GifterUser',
+      snippet: { membershipGiftingDetails: { giftMembershipsCount: 5 } },
+    });
+    p._dispatchStreamItems([item], true);
+
+    expect(events).toHaveLength(1);
+    expect(events[0]?.type).toBe('gift');
+    expect(events[0]?.message).toContain('GifterUser');
+    expect(events[0]?.message).toContain('5');
+    expect(events[0]?.message).toContain('memberships');
+  });
+
+  test('giftMembershipReceivedEvent dispatches gift activity', () => {
+    const p = makeProvider() as any;
+    const events: { type: string; message: string }[] = [];
+    p.onActivityEvent((ev: { type: string; message: string }) => events.push(ev));
+
+    const item = makeItem('giftMembershipReceivedEvent', {
+      displayMessage: 'You received a gifted membership!',
+    });
+    p._dispatchStreamItems([item], true);
+
+    expect(events).toHaveLength(1);
+    expect(events[0]?.type).toBe('gift');
+    expect(events[0]?.message).toContain('gifted membership');
+  });
+
+  test('text messages still dispatch as chat (existing behaviour)', () => {
+    const p = makeProvider() as any;
+    const activityEvents: unknown[] = [];
+    const chatMessages: unknown[] = [];
+    p.onActivityEvent((ev: unknown) => activityEvents.push(ev));
+    p.onMessage((msg: unknown) => chatMessages.push(msg));
+    p.chatInitialized = true;
+
+    const item = makeItem('textMessageEvent', { displayMessage: 'Hello chat!' });
+    p._dispatchStreamItems([item], true);
+
+    expect(activityEvents).toHaveLength(0);
+    expect(chatMessages).toHaveLength(1);
+  });
+
+  test('unknown messageType is skipped silently (no activity, no chat)', () => {
+    const p = makeProvider() as any;
+    const activityEvents: unknown[] = [];
+    const chatMessages: unknown[] = [];
+    p.onActivityEvent((ev: unknown) => activityEvents.push(ev));
+    p.onMessage((msg: unknown) => chatMessages.push(msg));
+
+    const item = makeItem('unknownFutureEventType', { displayMessage: 'some message' });
+    p._dispatchStreamItems([item], true);
+
+    expect(activityEvents).toHaveLength(0);
+    expect(chatMessages).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// gRPC-path fallback: detail fields absent, only displayMessage available
+// The gRPC decoder only populates type/publishedAt/displayMessage on snippet;
+// the activity handlers must degrade gracefully to displayMessage.
+// ---------------------------------------------------------------------------
+describe('YouTubeProvider — _dispatchStreamItems gRPC-path fallback', () => {
+  function makeGrpcItem(messageType: string, displayMessage: string, displayName = 'GrpcUser') {
+    return {
+      id: `grpc_${messageType}`,
+      snippet: { type: messageType, displayMessage, publishedAt: new Date().toISOString() },
+      authorDetails: { channelId: 'ch_grpc', displayName },
+    };
+  }
+
+  test('superChatEvent falls back to displayMessage when superChatDetails absent', () => {
+    const p = makeProvider() as any;
+    const events: { type: string; message: string }[] = [];
+    p.onActivityEvent((ev: { type: string; message: string }) => events.push(ev));
+    p._dispatchStreamItems([makeGrpcItem('superChatEvent', 'Amazing stream! ❤️', 'Fan99')], true);
+    expect(events).toHaveLength(1);
+    expect(events[0]?.type).toBe('superchat');
+    expect(events[0]?.message).toBe('Amazing stream! ❤️');
+  });
+
+  test('newSponsorEvent falls back to displayMessage when newSponsorDetails absent', () => {
+    const p = makeProvider() as any;
+    const events: { type: string; message: string }[] = [];
+    p.onActivityEvent((ev: { type: string; message: string }) => events.push(ev));
+    p._dispatchStreamItems([makeGrpcItem('newSponsorEvent', 'NewFan joined as a member', 'NewFan')], true);
+    expect(events).toHaveLength(1);
+    expect(events[0]?.type).toBe('member');
+    expect(events[0]?.message).toBe('NewFan joined as a member');
+  });
+
+  test('memberMilestoneChatEvent falls back to displayMessage when detail absent', () => {
+    const p = makeProvider() as any;
+    const events: { type: string; message: string }[] = [];
+    p.onActivityEvent((ev: { type: string; message: string }) => events.push(ev));
+    p._dispatchStreamItems([makeGrpcItem('memberMilestoneChatEvent', 'Member for 12 months!', 'LongTimer')], true);
+    expect(events).toHaveLength(1);
+    expect(events[0]?.type).toBe('member');
+    expect(events[0]?.message).toBe('Member for 12 months!');
+  });
+
+  test('membershipGiftingEvent falls back to displayMessage when giftingDetails absent', () => {
+    const p = makeProvider() as any;
+    const events: { type: string; message: string }[] = [];
+    p.onActivityEvent((ev: { type: string; message: string }) => events.push(ev));
+    p._dispatchStreamItems([makeGrpcItem('membershipGiftingEvent', 'Gifter gave 3 memberships', 'Gifter')], true);
+    expect(events).toHaveLength(1);
+    expect(events[0]?.type).toBe('gift');
+    expect(events[0]?.message).toBe('Gifter gave 3 memberships');
+  });
+});
