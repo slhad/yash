@@ -70,10 +70,13 @@ interface ActivityEvent {
   platform: string;
   type: string;
   message: string;
+  sessionId?: string;
 }
 
 const activityEvents: ActivityEvent[] = [];
 let activityRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+let activityBarHovered = false;
+let currentActivitySessionId = '';
 
 function _getActivityLogPath(): string {
   return `${getDataDir()}/activity-events.json`;
@@ -83,8 +86,10 @@ function _loadActivityEvents(): ActivityEvent[] {
   try {
     const raw = require('node:fs').readFileSync(_getActivityLogPath(), 'utf8');
     const parsed = JSON.parse(raw);
-    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-    return Array.isArray(parsed) ? parsed.filter((e: ActivityEvent) => e.ts > cutoff) : [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (e: ActivityEvent) => !e.sessionId || e.sessionId === currentActivitySessionId,
+    );
   } catch {
     return [];
   }
@@ -103,6 +108,7 @@ function _saveActivityEvents(): void {
 }
 
 function _timedVisibleEvents(): ActivityEvent[] {
+  if (activityBarHovered) return activityEvents; // freeze expiry while mouse is over the bar
   const secs = numSetting(settings.get('activity.timeout', 10), 10);
   const cutoff = Date.now() - secs * 1000;
   return activityEvents.filter((ev) => ev.ts > cutoff);
@@ -119,6 +125,7 @@ function _activityBarShouldBeVisible(): boolean {
 function _scheduleActivityBarRefresh(): void {
   if (activityRefreshTimer) clearTimeout(activityRefreshTimer);
   activityRefreshTimer = null;
+  if (activityBarHovered) return; // paused while mouse is over the bar
   const mode = settings.get('activity.mode', 'permanent') as string;
   if (mode !== 'timed') return;
   const secs = numSetting(settings.get('activity.timeout', 10), 10);
@@ -134,8 +141,17 @@ function _scheduleActivityBarRefresh(): void {
   }, nextExpiry - now + 50);
 }
 
+function _rotateActivitySession(): void {
+  currentActivitySessionId = crypto.randomUUID();
+  settings.set('activity.sessionId', currentActivitySessionId).catch(() => {});
+  activityEvents.length = 0;
+  _saveActivityEvents();
+  _scheduleActivityBarRefresh();
+  if (uiNodes) updateUI(lastMessages);
+}
+
 function pushActivityEvent(platform: string, type: string, message: string): void {
-  const ev: ActivityEvent = { ts: Date.now(), platform, type, message };
+  const ev: ActivityEvent = { ts: Date.now(), platform, type, message, sessionId: currentActivitySessionId };
   activityEvents.push(ev);
   _saveActivityEvents();
   _scheduleActivityBarRefresh();
@@ -512,6 +528,16 @@ function initUI(renderer: CliRenderer, messages: ChatLine[]): UINodes {
   activityBar.add(activityBarLabel);
   activityBar.add(activityBarText);
   activityBar.onMouseDown = () => openActivityModal();
+  activityBar.onMouseOver = () => {
+    activityBarHovered = true;
+    if (activityRefreshTimer) { clearTimeout(activityRefreshTimer); activityRefreshTimer = null; }
+    updateUI(lastMessages);
+  };
+  activityBar.onMouseOut = () => {
+    activityBarHovered = false;
+    _scheduleActivityBarRefresh();
+    updateUI(lastMessages);
+  };
   _updateActivityBarText(activityBarText);
   activityBar.visible = _activityBarShouldBeVisible();
 
@@ -5089,7 +5115,17 @@ async function main() {
     pushActivityEvent('twitch', type, message);
   });
 
-  // Load persisted activity events from disk (last 24h)
+  // Establish session identity — reuse the persisted ID if present (same session/restart),
+  // otherwise generate a fresh one (first launch or explicit clear).
+  const savedSessionId = settings.get('activity.sessionId', null) as string | null;
+  if (savedSessionId) {
+    currentActivitySessionId = savedSessionId;
+  } else {
+    currentActivitySessionId = crypto.randomUUID();
+    await settings.set('activity.sessionId', currentActivitySessionId);
+  }
+
+  // Load persisted activity events — only those matching the current session
   const restoredActivity = _loadActivityEvents();
   if (restoredActivity.length > 0) {
     activityEvents.push(...restoredActivity);
@@ -5156,9 +5192,18 @@ async function main() {
 
   updateInputAssist();
 
+  // Track Twitch stream status to detect OFFLINE→ONLINE transitions (new broadcast)
+  let lastTwitchStreamStatus = twitch.getStreamStatus();
+
   // Periodic refresh — in-place mutations only, no flicker
   const updateLoop = setInterval(async () => {
     if (!isRunning) return;
+    // Detect new Twitch broadcast going live → rotate activity session
+    const nowTwitchStatus = twitch.getStreamStatus();
+    if (lastTwitchStreamStatus !== nowTwitchStatus && String(nowTwitchStatus) === 'ONLINE') {
+      _rotateActivitySession();
+    }
+    lastTwitchStreamStatus = nowTwitchStatus;
     // If a platform isn't authenticated, retry silently — it may have been
     // authorized via the web OAuth flow while the TUI was running.
     for (const [name, provider] of [
