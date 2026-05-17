@@ -259,6 +259,7 @@ if (qsPlatform && VALID_PLATFORMS.includes(qsPlatform as (typeof VALID_PLATFORMS
   platformSelect.value = qsPlatform;
 }
 
+syncUrl();
 platformSelect.addEventListener('change', syncUrl);
 
 void fetchHistory();
