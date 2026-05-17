@@ -5107,10 +5107,8 @@ async function main() {
     updateUI(lastMessages);
   });
 
-  await initializeServices();
-  startIpcServer(handleCommandForCli);
-
-  // Subscribe to platform activity events (follow, sub, cheer, raid)
+  // Register activity callbacks before starting services so events emitted
+  // during initialization (first webhook poll, first chat page) are not dropped.
   twitch.onActivityEvent(({ type, message }) => {
     pushActivityEvent('twitch', type, message);
   });
@@ -5120,6 +5118,9 @@ async function main() {
   youtube.onActivityEvent(({ type, message }) => {
     pushActivityEvent('youtube', type, message);
   });
+
+  await initializeServices();
+  startIpcServer(handleCommandForCli);
 
   // Establish session identity — reuse the persisted ID if present (same session/restart),
   // otherwise generate a fresh one (first launch or explicit clear).

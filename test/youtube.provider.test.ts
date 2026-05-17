@@ -1704,3 +1704,58 @@ describe('YouTubeProvider — _dispatchStreamItems activity events', () => {
     expect(chatMessages).toHaveLength(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// gRPC-path fallback: detail fields absent, only displayMessage available
+// The gRPC decoder only populates type/publishedAt/displayMessage on snippet;
+// the activity handlers must degrade gracefully to displayMessage.
+// ---------------------------------------------------------------------------
+describe('YouTubeProvider — _dispatchStreamItems gRPC-path fallback', () => {
+  function makeGrpcItem(messageType: string, displayMessage: string, displayName = 'GrpcUser') {
+    return {
+      id: `grpc_${messageType}`,
+      snippet: { type: messageType, displayMessage, publishedAt: new Date().toISOString() },
+      authorDetails: { channelId: 'ch_grpc', displayName },
+    };
+  }
+
+  test('superChatEvent falls back to displayMessage when superChatDetails absent', () => {
+    const p = makeProvider() as any;
+    const events: { type: string; message: string }[] = [];
+    p.onActivityEvent((ev: { type: string; message: string }) => events.push(ev));
+    p._dispatchStreamItems([makeGrpcItem('superChatEvent', 'Amazing stream! ❤️', 'Fan99')], true);
+    expect(events).toHaveLength(1);
+    expect(events[0]?.type).toBe('superchat');
+    expect(events[0]?.message).toBe('Amazing stream! ❤️');
+  });
+
+  test('newSponsorEvent falls back to displayMessage when newSponsorDetails absent', () => {
+    const p = makeProvider() as any;
+    const events: { type: string; message: string }[] = [];
+    p.onActivityEvent((ev: { type: string; message: string }) => events.push(ev));
+    p._dispatchStreamItems([makeGrpcItem('newSponsorEvent', 'NewFan joined as a member', 'NewFan')], true);
+    expect(events).toHaveLength(1);
+    expect(events[0]?.type).toBe('member');
+    expect(events[0]?.message).toBe('NewFan joined as a member');
+  });
+
+  test('memberMilestoneChatEvent falls back to displayMessage when detail absent', () => {
+    const p = makeProvider() as any;
+    const events: { type: string; message: string }[] = [];
+    p.onActivityEvent((ev: { type: string; message: string }) => events.push(ev));
+    p._dispatchStreamItems([makeGrpcItem('memberMilestoneChatEvent', 'Member for 12 months!', 'LongTimer')], true);
+    expect(events).toHaveLength(1);
+    expect(events[0]?.type).toBe('member');
+    expect(events[0]?.message).toBe('Member for 12 months!');
+  });
+
+  test('membershipGiftingEvent falls back to displayMessage when giftingDetails absent', () => {
+    const p = makeProvider() as any;
+    const events: { type: string; message: string }[] = [];
+    p.onActivityEvent((ev: { type: string; message: string }) => events.push(ev));
+    p._dispatchStreamItems([makeGrpcItem('membershipGiftingEvent', 'Gifter gave 3 memberships', 'Gifter')], true);
+    expect(events).toHaveLength(1);
+    expect(events[0]?.type).toBe('gift');
+    expect(events[0]?.message).toBe('Gifter gave 3 memberships');
+  });
+});

@@ -693,21 +693,30 @@ export class KickProvider implements PlatformProvider {
   }
 
   private async _ensureEventSubscriptions(): Promise<void> {
+    let missing: typeof REQUIRED_WEBHOOK_EVENTS[number][];
     try {
       const existing = new Set(await this._fetchEventSubscriptions());
-      const missing = REQUIRED_WEBHOOK_EVENTS.filter((event) => !existing.has(event.name));
+      missing = REQUIRED_WEBHOOK_EVENTS.filter((event) => !existing.has(event.name));
+    } catch (err) {
+      defaultLogger.warn('[Kick] Failed to fetch event subscriptions (non-fatal):', err);
+      return;
+    }
 
-      if (missing.length === 0) {
-        defaultLogger.info('[Kick] All event subscriptions already active');
-        return;
-      }
+    if (missing.length === 0) {
+      defaultLogger.info('[Kick] All event subscriptions already active');
+      return;
+    }
 
-      for (const event of missing) {
+    for (const event of missing) {
+      try {
         await this._createEventSubscription(event.name, event.version);
         defaultLogger.info(`[Kick] Created event subscription: ${event.name}@v${event.version}`);
+      } catch (err) {
+        defaultLogger.warn(
+          `[Kick] Failed to create event subscription ${event.name}@v${event.version} (non-fatal):`,
+          err,
+        );
       }
-    } catch (err) {
-      defaultLogger.warn('[Kick] Failed to ensure event subscriptions (non-fatal):', err);
     }
   }
 

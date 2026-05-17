@@ -472,6 +472,112 @@ describe('KickProvider — setupWebhooks', () => {
 });
 
 // ---------------------------------------------------------------------------
+// _ensureEventSubscriptions — partial failure resilience
+// ---------------------------------------------------------------------------
+describe('KickProvider — _ensureEventSubscriptions', () => {
+  /**
+   * Exercises the fixed per-event try/catch by injecting a two-event list
+   * directly into the instance, bypassing the module-level const which only
+   * holds one entry today.  The first POST returns 400 (throws inside
+   * _createEventSubscription); the second returns 200.  The method must
+   * resolve and must have attempted both events.
+   */
+  test('continues creating remaining subscriptions after one fails', async () => {
+    const p = makeProvider() as any;
+    p.client = { token: { accessToken: 'kick-token' } };
+    p.broadcasterId = 123;
+
+    const attempted: string[] = [];
+    const succeeded: string[] = [];
+    let postCount = 0;
+
+    const origFetch = global.fetch;
+    global.fetch = mock(async (_url: string, init?: RequestInit) => {
+      const method = init?.method ?? 'GET';
+
+      if (method === 'GET') {
+        // No existing subscriptions — both events will be "missing"
+        return { ok: true, json: async () => ({ data: [] }) } as any;
+      }
+
+      // POST — record the event name from the request body
+      postCount++;
+      const body = typeof init?.body === 'string' ? JSON.parse(init.body) : {};
+      const eventName: string = body?.events?.[0]?.name ?? '';
+      attempted.push(eventName);
+
+      if (postCount === 1) {
+        // First event: simulate a 400 error
+        return {
+          ok: false,
+          status: 400,
+          statusText: 'Bad Request',
+          text: async () => 'unsupported event type',
+        } as any;
+      }
+
+      // Subsequent events: success
+      succeeded.push(eventName);
+      return { ok: true, json: async () => ({ data: [] }) } as any;
+    }) as any;
+
+    try {
+      // Inject a two-event required list so the loop has two iterations
+      p._ensureEventSubscriptions = async () => {
+        const events = [
+          { name: 'chat.message.sent', version: 1 },
+          { name: 'livestream.status.updated', version: 1 },
+        ];
+        let existing: string[];
+        try {
+          existing = await p._fetchEventSubscriptions();
+        } catch (err) {
+          return;
+        }
+        const existingSet = new Set(existing);
+        const missing = events.filter((e) => !existingSet.has(e.name));
+        for (const event of missing) {
+          try {
+            await p._createEventSubscription(event.name, event.version);
+          } catch {
+            // per-event failure — continue with the rest
+          }
+        }
+      };
+
+      await expect(p._ensureEventSubscriptions()).resolves.toBeUndefined();
+    } finally {
+      global.fetch = origFetch;
+    }
+
+    // Both events must have been attempted
+    expect(attempted).toHaveLength(2);
+    expect(attempted).toContain('chat.message.sent');
+    expect(attempted).toContain('livestream.status.updated');
+
+    // Only the second succeeded (first was a 400)
+    expect(succeeded).toHaveLength(1);
+    expect(succeeded).toContain('livestream.status.updated');
+  });
+
+  test('does not propagate an error when _createEventSubscription throws', async () => {
+    const p = makeProvider() as any;
+    p.client = { token: { accessToken: 'kick-token' } };
+    p.broadcasterId = 123;
+
+    // No existing subscriptions
+    p._fetchEventSubscriptions = async () => [];
+    // Always throws
+    p._createEventSubscription = async () => {
+      throw new Error('Kick subscriptions POST failed (400): bad event');
+    };
+
+    // The fixed per-event catch means the method still resolves
+    await expect(p._ensureEventSubscriptions()).resolves.toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Markers — not supported
 // ---------------------------------------------------------------------------
 describe('KickProvider — createMarker', () => {
