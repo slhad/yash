@@ -33,6 +33,10 @@ const STORAGE_KEYS: Record<Platform, string> = {
 const STORAGE_KEY_POS = 'yash_sbs_msgbox_position';
 const POSITIONS = ['bottom', 'top', 'hide'] as const;
 
+const qs = new URLSearchParams(location.search);
+const qsPosition = qs.get('position');
+const qsPlatformsParam = qs.get('platforms');
+
 const enabled = {} as Record<Platform, boolean>;
 const knownIds: Record<Platform, Set<string>> = {
   youtube: new Set<string>(),
@@ -55,13 +59,25 @@ const autocompleteHint = byId<HTMLDivElement>('autocomplete-hint');
 
 const inputHistory: string[] = [];
 let historyIdx = -1;
-let currentPosition = (localStorage.getItem(STORAGE_KEY_POS) || 'bottom') as
-  | (typeof POSITIONS)[number]
-  | string;
+let currentPosition = (
+  qsPosition && POSITIONS.includes(qsPosition as (typeof POSITIONS)[number])
+    ? qsPosition
+    : (localStorage.getItem(STORAGE_KEY_POS) || 'bottom')
+) as (typeof POSITIONS)[number] | string;
 
 function loadEnabled(platform: Platform): boolean {
+  if (qsPlatformsParam !== null) {
+    return qsPlatformsParam.split(',').includes(platform);
+  }
   const stored = localStorage.getItem(STORAGE_KEYS[platform]);
   return stored === null ? true : stored === 'true';
+}
+
+function syncUrl(): void {
+  const params = new URLSearchParams();
+  params.set('position', currentPosition);
+  params.set('platforms', PLATFORMS.filter((p) => enabled[p]).join(','));
+  history.replaceState(null, '', `?${params.toString()}`);
 }
 
 function applyToggle(platform: Platform): void {
@@ -125,6 +141,7 @@ function applyPosition(pos: (typeof POSITIONS)[number]): void {
     msgboxEl.style.display = 'flex';
     positionBtn.textContent = 'msgbox: bottom ▼';
   }
+  syncUrl();
 }
 
 function appendSys(label: string, text: string): void {
@@ -182,6 +199,7 @@ for (const platform of PLATFORMS) {
     enabled[platform] = !enabled[platform];
     localStorage.setItem(STORAGE_KEYS[platform], String(enabled[platform]));
     applyToggle(platform);
+    syncUrl();
   });
 
   byId<HTMLDivElement>(`msgs-${platform}`).addEventListener('scroll', () => {
