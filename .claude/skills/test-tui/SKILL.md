@@ -13,8 +13,7 @@ Interact with the running yash TUI in the `yash` tmux session to verify behaviou
 |-----|-------|
 | Session | `yash` |
 | TUI window | `yash:tui` (window named `tui`, always use this target) |
-| Start command | `bun start` (port 3000 by default) |
-| TUI-only mode | `bun run start:tui` |
+| Start command | `bun start` — always use this; starts TUI + WebUI on port 3000 |
 | VHS tapes | Use `YASH_PORT=3001` so recordings never conflict with a live test TUI on 3000 |
 
 ## Always target `yash:tui` explicitly, never bare `yash`
@@ -37,7 +36,7 @@ The TUI draws using cursor-positioning escape codes (NOT alternate-screen mode).
 
 ```bash
 # Create the window if it doesn't exist yet (safe to run even if it already exists)
-tmux list-windows -t yash | grep -q "tui" || tmux new-window -t "yash:2" -n tui -c /home/slash/dev/git/yash
+tmux list-windows -t yash | grep -q "tui" || tmux new-window -t "yash:2" -n tui -c "$(git rev-parse --show-toplevel)"
 ```
 
 ### 1. Check whether the app is running
@@ -144,6 +143,7 @@ tmux send-keys -t yash:tui Enter       # confirm
 ### Send a chat message
 
 ```bash
+# Use -l (literal) so tmux does not interpret text as key names
 tmux send-keys -t yash:tui -l "hello world"
 sleep 0.1
 tmux send-keys -t yash:tui Enter
@@ -168,6 +168,44 @@ tmux capture-pane -t yash:tui -p -S -50 2>&1 | grep "> /"
 tmux send-keys -t yash:tui Escape 2>/dev/null || tmux send-keys -t yash:tui C-c 2>/dev/null
 ```
 
+### Check the activity bar
+
+The activity bar sits below the status bar and shows the most recent follow/sub/cheer/raid/gift events. Events scroll through automatically; the bar is always visible.
+
+```bash
+# Capture and look for an activity entry (platform label + event type)
+tmux capture-pane -t yash:tui -p -S -60 2>&1 | grep -E "\[(kick|twitch|youtube)\]"
+```
+
+To trigger a test event, POST a webhook from another shell:
+
+```bash
+# Simulate a Kick follow event
+curl -s -X POST http://localhost:3000/api/kick/webhook \
+  -H "Content-Type: application/json" \
+  -H "Kick-Event-Type: channel.followed" \
+  -d '{"data":{"user":{"username":"testuser"}}}'
+```
+
+### Open and navigate the /activity modal
+
+```bash
+# Open the modal
+tmux send-keys -t yash:tui -l "/activity" && sleep 0.2 && tmux send-keys -t yash:tui Enter
+sleep 0.5
+tmux capture-pane -t yash:tui -p -S -60 2>&1 | grep -E "Activity|\[kick\]|\[youtube\]|\[twitch\]"
+
+# Scroll through entries
+tmux send-keys -t yash:tui Down
+sleep 0.3
+tmux send-keys -t yash:tui Down
+sleep 0.3
+
+# Close
+tmux send-keys -t yash:tui Escape
+sleep 0.3
+```
+
 ## Key Sequences Reference
 
 | Key | tmux send-keys value |
@@ -185,7 +223,7 @@ tmux send-keys -t yash:tui Escape 2>/dev/null || tmux send-keys -t yash:tui C-c 
 
 - `capture-pane -p` without `-S` returns only the cursor-viewport tail (usually just the shell command line). Always use `-S -60` or more to capture TUI content.
 - **Never verify the app is running by counting box-drawing chars** — the pane has thousands of lines of history from old sessions that will produce false positives. Always grep for `YASH server running` in recent scrollback to confirm a live current run.
-- Modals (stream, YouTube setup, Kick setup) must block arrow key sequences `\x1b[A` (Up) and `\x1b[B` (Down) explicitly. The `modalKeyHandler` in `src/index.tsx` returns `true` for those two sequences to prevent history cycling, but returns `false` for all other unhandled sequences so regular character input still reaches the input fields.
+- Modals (stream, YouTube setup, Kick setup) capture Up/Down so they do not bleed into the main message input history. Use the "exclusive input" pattern above to verify this.
 - The message input history cycles on bare Up/Down only when no modal is active.
 - **Clearing the main input:** `Ctrl+A` only moves the cursor to the beginning — it does NOT select all. Use `C-u` (`Ctrl+U`) to kill the line from the cursor back to the start, which reliably empties the field. `Ctrl+A` followed by `BSpace` is a no-op and a common mistake in VHS tapes.
 - The TUI captures `console.log` — do not use it for debugging; use the logger file transport instead.
