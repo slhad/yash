@@ -137,6 +137,63 @@ describe('validateTuiSettingsDraft', () => {
     expect(result.values).toBeNull();
     expect(result.errors).toContain('activity.timeout must be a positive integer.');
   });
+
+  test('accepts activityMode: permanent and activityVisible: false', () => {
+    const result = validateTuiSettingsDraft({
+      demo: false,
+      titleVisible: true,
+      viewersVisible: true,
+      viewersMode: 'both',
+      messagesPosition: 'top',
+      chatTimestampsVisible: false,
+      chatMaxHistorySize: '100',
+      eventsVisible: false,
+      eventsTail: '10',
+      eventsWidth: '30%',
+      logsVisible: false,
+      logsHeight: '10',
+      logsTail: '10',
+      youtubeShowViewers: false,
+      twitchShowViewers: false,
+      kickShowViewers: false,
+      activityVisible: false,
+      activityMode: 'permanent',
+      activityTimeout: '10',
+    });
+
+    expect(result.errors).toEqual([]);
+    expect(result.values).not.toBeNull();
+    expect(result.values?.activityMode).toBe('permanent');
+    expect(result.values?.activityVisible).toBe(false);
+  });
+
+  test('accepts activityTimeout: 1 (minimum valid value)', () => {
+    const result = validateTuiSettingsDraft({
+      demo: false,
+      titleVisible: true,
+      viewersVisible: true,
+      viewersMode: 'both',
+      messagesPosition: 'top',
+      chatTimestampsVisible: false,
+      chatMaxHistorySize: '100',
+      eventsVisible: false,
+      eventsTail: '10',
+      eventsWidth: '30%',
+      logsVisible: false,
+      logsHeight: '10',
+      logsTail: '10',
+      youtubeShowViewers: false,
+      twitchShowViewers: false,
+      kickShowViewers: false,
+      activityVisible: true,
+      activityMode: 'timed',
+      activityTimeout: '1',
+    });
+
+    expect(result.errors).toEqual([]);
+    expect(result.values).not.toBeNull();
+    expect(result.values?.activityTimeout).toBe(1);
+  });
 });
 
 describe('buildTuiSettingsEntries', () => {

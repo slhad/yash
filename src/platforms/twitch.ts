@@ -66,6 +66,8 @@ const REQUIRED_SCOPES = [
   'chat:edit',
   'channel:manage:broadcast', // update title / game / tags; create stream markers
   'channel:read:stream_key',
+  'channel:read:subscriptions', // channel.subscribe EventSub
+  'bits:read', // channel.cheer EventSub
   'moderator:read:followers',
   'user:read:broadcast', // read stream markers
   'user:read:email',
@@ -335,16 +337,21 @@ export class TwitchProvider implements PlatformProvider {
     // Try to restore from persisted tokens first
     const saved = await this.readTokenFile();
     if (saved) {
-      try {
-        await this._initFromToken(saved);
-        return {
-          success: true,
-          accessToken: saved.accessToken,
-          refreshToken: saved.refreshToken,
-          expiresIn: saved.expiresIn,
-        };
-      } catch (err) {
-        defaultLogger.warn('[Twitch] Failed to restore saved tokens, need re-auth:', err);
+      const missingScopes = REQUIRED_SCOPES.filter((s) => !saved.scopes.includes(s));
+      if (missingScopes.length > 0) {
+        defaultLogger.warn('[Twitch] Saved token missing scopes, need re-auth:', missingScopes);
+      } else {
+        try {
+          await this._initFromToken(saved);
+          return {
+            success: true,
+            accessToken: saved.accessToken,
+            refreshToken: saved.refreshToken,
+            expiresIn: saved.expiresIn,
+          };
+        } catch (err) {
+          defaultLogger.warn('[Twitch] Failed to restore saved tokens, need re-auth:', err);
+        }
       }
     }
 

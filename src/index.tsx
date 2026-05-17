@@ -3196,7 +3196,7 @@ function openSettingsModal(): void {
   const activityVisibleRow = new TextRenderable(renderer, { content: '', fg: 'white' });
   const activityModeRow = new TextRenderable(renderer, { content: '', fg: 'white' });
   const activityTimeoutLabel = makeLabel(
-    '  activity.timeout: seconds before the bar auto-hides in timed mode',
+    '  activity.timeout: seconds each event stays visible in timed mode',
   );
   const activityTimeoutInput = new InputRenderable(renderer, {
     placeholder: '10',
@@ -3479,7 +3479,7 @@ function openSettingsModal(): void {
           'activity.visible',
           draft.activityVisible,
           focused,
-        ).concat('  - show or hide the activity bar (follows, subs, etc.)');
+        ).concat('  - show or hide the activity bar row (follows, subs, cheers, raids)');
         activityVisibleRow.fg = focused ? 'cyan' : 'white';
       },
       toggle: () => {
@@ -3494,7 +3494,7 @@ function openSettingsModal(): void {
           'activity.mode',
           draft.activityMode,
           focused,
-        ).concat('  - permanent: always visible; timed: hides after timeout');
+        ).concat('  - permanent: events stay until cleared; timed: each event expires after timeout');
         activityModeRow.fg = focused ? 'cyan' : 'white';
       },
       cycle: (direction) => {
