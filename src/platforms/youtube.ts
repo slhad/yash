@@ -273,6 +273,20 @@ export class YouTubeProvider implements PlatformProvider {
   // ---- chat ------------------------------------------------------------------
   private messageCallbacks: ((msg: ChatMessage) => void)[] = [];
 
+  // ---- activity events -------------------------------------------------------
+  private activityCallbacks: ((event: { type: string; message: string }) => void)[] = [];
+
+  onActivityEvent(cb: (event: { type: string; message: string }) => void): () => void {
+    this.activityCallbacks.push(cb);
+    return () => {
+      this.activityCallbacks = this.activityCallbacks.filter((c) => c !== cb);
+    };
+  }
+
+  private _dispatchActivity(type: string, message: string): void {
+    for (const cb of this.activityCallbacks) cb({ type, message });
+  }
+
   // ---- markers (in-memory chapters) -----------------------------------------
   // YouTube chapters are encoded as timestamps in the video description.
   // The Data API v3 has no dedicated chapters endpoint; serialise via
@@ -509,6 +523,34 @@ export class YouTubeProvider implements PlatformProvider {
       const snippet = item.snippet;
       const messageType = snippet?.type;
       const displayMessage = snippet?.displayMessage ?? '';
+
+      // Activity events — non-text chat items
+      if (messageType === 'superChatEvent') {
+        const superChatDetails = (snippet as any)?.superChatDetails;
+        const amount = String(superChatDetails?.amountDisplayString ?? '');
+        const who = item.authorDetails?.displayName ?? 'someone';
+        this._dispatchActivity('superchat', `${who} sent a Super Chat${amount ? ` of ${amount}` : ''}`);
+        continue;
+      }
+      if (messageType === 'newSponsorEvent' || messageType === 'memberMilestoneChatEvent') {
+        const memberDetails = (snippet as any)?.memberDetails;
+        const who = item.authorDetails?.displayName ?? 'someone';
+        const level = String(memberDetails?.memberLevelName ?? '');
+        this._dispatchActivity('member', `${who} became a member${level ? ` (${level})` : ''}`);
+        continue;
+      }
+      if (messageType === 'membershipGiftingEvent') {
+        const who = item.authorDetails?.displayName ?? 'someone';
+        const giftingDetails = (snippet as any)?.membershipGiftingDetails;
+        const count = Number(giftingDetails?.giftMembershipsCount ?? 1);
+        this._dispatchActivity('gift', `${who} gifted ${count} membership${count !== 1 ? 's' : ''}`);
+        continue;
+      }
+      if (messageType === 'giftMembershipReceivedEvent') {
+        this._dispatchActivity('gift', displayMessage || 'Someone received a gifted membership');
+        continue;
+      }
+
       const isTextMessage =
         messageType === undefined || messageType === '' || messageType === 'textMessageEvent';
       if (!isTextMessage || displayMessage.length === 0) continue;

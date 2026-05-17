@@ -5114,6 +5114,12 @@ async function main() {
   twitch.onActivityEvent(({ type, message }) => {
     pushActivityEvent('twitch', type, message);
   });
+  kick.onActivityEvent(({ type, message }) => {
+    pushActivityEvent('kick', type, message);
+  });
+  youtube.onActivityEvent(({ type, message }) => {
+    pushActivityEvent('youtube', type, message);
+  });
 
   // Establish session identity — reuse the persisted ID if present (same session/restart),
   // otherwise generate a fresh one (first launch or explicit clear).

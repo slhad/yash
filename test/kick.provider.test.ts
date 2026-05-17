@@ -392,7 +392,7 @@ describe('KickProvider — setupWebhooks', () => {
     ).resolves.toBeUndefined();
   });
 
-  test('creates chat.message.sent subscription when missing', async () => {
+  test('creates all missing webhook subscriptions when none exist', async () => {
     const p = makeProvider() as any;
     p.client = { token: { accessToken: 'kick-token' } };
     p.broadcasterId = 123;
@@ -414,23 +414,26 @@ describe('KickProvider — setupWebhooks', () => {
       }
       return {
         ok: true,
-        json: async () => ({ data: [{ name: 'chat.message.sent', subscription_id: 'sub-1' }] }),
+        json: async () => ({ data: [] }),
       } as any;
     }) as any;
 
     try {
       await p.setupWebhooks({ url: 'http://localhost', topics: ['stream.online'] });
-      expect(calls).toHaveLength(2);
+      // 1 GET + 5 POSTs (one per required event)
+      expect(calls).toHaveLength(6);
       expect(calls[0]?.method).toBe('GET');
-      expect(calls[1]?.method).toBe('POST');
-      expect(calls[1]?.body).toContain('"name":"chat.message.sent"');
-      expect(calls[1]?.body).toContain('"method":"webhook"');
+      const postBodies = calls.slice(1).map((c) => c.body ?? '');
+      expect(postBodies.some((b) => b.includes('"name":"chat.message.sent"'))).toBe(true);
+      expect(postBodies.some((b) => b.includes('"name":"channel.followed"'))).toBe(true);
+      expect(postBodies.some((b) => b.includes('"name":"channel.subscription.new"'))).toBe(true);
+      expect(postBodies.every((b) => b.includes('"method":"webhook"'))).toBe(true);
     } finally {
       global.fetch = origFetch;
     }
   });
 
-  test('does not create subscription when chat.message.sent already exists', async () => {
+  test('does not create subscriptions when all events already exist', async () => {
     const p = makeProvider() as any;
     p.client = { token: { accessToken: 'kick-token' } };
     p.broadcasterId = 123;
@@ -445,7 +448,15 @@ describe('KickProvider — setupWebhooks', () => {
       }
       return {
         ok: true,
-        json: async () => ({ data: [{ event: 'chat.message.sent' }] }),
+        json: async () => ({
+          data: [
+            { event: 'chat.message.sent' },
+            { event: 'channel.followed' },
+            { event: 'channel.subscription.new' },
+            { event: 'channel.subscription.renewal' },
+            { event: 'channel.subscription.gifted' },
+          ],
+        }),
       } as any;
     }) as any;
 
@@ -516,6 +527,106 @@ describe('KickProvider — getAuthUrl', () => {
     await p.getAuthUrl();
     expect(p.pendingCodeVerifier).not.toBeNull();
     expect(typeof p.pendingCodeVerifier).toBe('string');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Activity events
+// ---------------------------------------------------------------------------
+describe('KickProvider — onActivityEvent', () => {
+  test('registers a callback and fires it via _dispatchActivity', () => {
+    const p = makeProvider() as any;
+    const received: { type: string; message: string }[] = [];
+    p.onActivityEvent((ev: { type: string; message: string }) => received.push(ev));
+    p._dispatchActivity('follow', 'TestUser followed');
+    expect(received).toHaveLength(1);
+    expect(received[0]).toEqual({ type: 'follow', message: 'TestUser followed' });
+  });
+
+  test('multiple callbacks all receive the event', () => {
+    const p = makeProvider() as any;
+    const a: string[] = [];
+    const b: string[] = [];
+    p.onActivityEvent((ev: { type: string }) => a.push(ev.type));
+    p.onActivityEvent((ev: { type: string }) => b.push(ev.type));
+    p._dispatchActivity('sub', 'Someone subscribed');
+    expect(a).toEqual(['sub']);
+    expect(b).toEqual(['sub']);
+  });
+
+  test('unsubscribe removes only that callback', () => {
+    const p = makeProvider() as any;
+    const a: string[] = [];
+    const b: string[] = [];
+    const unsub = p.onActivityEvent((ev: { type: string }) => a.push(ev.type));
+    p.onActivityEvent((ev: { type: string }) => b.push(ev.type));
+    unsub();
+    p._dispatchActivity('gift', 'Someone gifted');
+    expect(a).toHaveLength(0);
+    expect(b).toEqual(['gift']);
+  });
+
+  test('double-unsubscribe is safe', () => {
+    const p = makeProvider() as any;
+    const unsub = p.onActivityEvent(() => {});
+    expect(() => { unsub(); unsub(); }).not.toThrow();
+  });
+
+  test('_dispatchActivity with no callbacks is a no-op', () => {
+    const p = makeProvider() as any;
+    expect(() => p._dispatchActivity('follow', 'nobody')).not.toThrow();
+  });
+});
+
+describe('KickProvider — handleWebhookEvent activity dispatch', () => {
+  test('channel.followed dispatches follow activity', () => {
+    const p = makeProvider() as any;
+    const events: { type: string; message: string }[] = [];
+    p.onActivityEvent((ev: { type: string; message: string }) => events.push(ev));
+    p.handleWebhookEvent({ 'Kick-Event-Type': 'channel.followed', data: { user: { username: 'FollowerUser' } } });
+    expect(events).toHaveLength(1);
+    expect(events[0]?.type).toBe('follow');
+    expect(events[0]?.message).toContain('FollowerUser');
+  });
+
+  test('channel.subscription.new dispatches sub activity', () => {
+    const p = makeProvider() as any;
+    const events: { type: string; message: string }[] = [];
+    p.onActivityEvent((ev: { type: string; message: string }) => events.push(ev));
+    p.handleWebhookEvent({ 'Kick-Event-Type': 'channel.subscription.new', data: { user: { username: 'NewSubber' } } });
+    expect(events).toHaveLength(1);
+    expect(events[0]?.type).toBe('sub');
+    expect(events[0]?.message).toContain('NewSubber');
+  });
+
+  test('channel.subscription.renewal dispatches sub activity', () => {
+    const p = makeProvider() as any;
+    const events: { type: string; message: string }[] = [];
+    p.onActivityEvent((ev: { type: string; message: string }) => events.push(ev));
+    p.handleWebhookEvent({ 'Kick-Event-Type': 'channel.subscription.renewal', data: { user: { username: 'RenewerUser' } } });
+    expect(events).toHaveLength(1);
+    expect(events[0]?.type).toBe('sub');
+  });
+
+  test('channel.subscription.gifted dispatches gift activity', () => {
+    const p = makeProvider() as any;
+    const events: { type: string; message: string }[] = [];
+    p.onActivityEvent((ev: { type: string; message: string }) => events.push(ev));
+    p.handleWebhookEvent({
+      'Kick-Event-Type': 'channel.subscription.gifted',
+      data: { gifted_by: { username: 'GifterUser' }, user: { username: 'RecipientUser' } },
+    });
+    expect(events).toHaveLength(1);
+    expect(events[0]?.type).toBe('gift');
+    expect(events[0]?.message).toContain('GifterUser');
+  });
+
+  test('unknown event type is a no-op (does not throw)', () => {
+    const p = makeProvider() as any;
+    const events: unknown[] = [];
+    p.onActivityEvent((ev: unknown) => events.push(ev));
+    expect(() => p.handleWebhookEvent({ 'Kick-Event-Type': 'unknown.event.type' })).not.toThrow();
+    expect(events).toHaveLength(0);
   });
 });
 

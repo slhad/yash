@@ -794,7 +794,15 @@ Bun.serve({
       },
       POST: async (req) => {
         const payload = await req.json().catch(() => null);
-        if (payload) (kick as any).handleWebhookEvent(payload);
+        if (payload) {
+          const eventTypeHeader =
+            req.headers.get('Kick-Event-Type') ??
+            req.headers.get('kick-event-type') ??
+            req.headers.get('x-kick-event-type');
+          (kick as any).handleWebhookEvent(
+            eventTypeHeader ? { ...payload, 'Kick-Event-Type': eventTypeHeader } : payload,
+          );
+        }
         return new Response(JSON.stringify({ ok: true }), {
           headers: { 'Content-Type': 'application/json' },
         });
