@@ -69,3 +69,41 @@ describe('Stream Key Management', () => {
     expect(provider.getStreamKey()).toBe('yt_stream_key_123');
   });
 });
+
+describe('YouTubeProvider.searchPlaylists', () => {
+  test('returns empty array when not authenticated', async () => {
+    const provider = new YouTubeProvider();
+    const results = await provider.searchPlaylists('gaming');
+    expect(results).toEqual([]);
+  });
+
+  test('is defined as a function', () => {
+    const provider = new YouTubeProvider();
+    expect(typeof provider.searchPlaylists).toBe('function');
+  });
+
+  test('filters playlist titles case-insensitively', async () => {
+    const provider = new YouTubeProvider();
+    // Stub listPlaylists to return test data without needing auth
+    provider.listPlaylists = async () => [
+      { id: 'pl1', title: 'Gaming Sessions' },
+      { id: 'pl2', title: 'Coding Streams' },
+      { id: 'pl3', title: 'Just Chatting' },
+    ];
+
+    expect(await provider.searchPlaylists('gaming')).toEqual(['Gaming Sessions']);
+    expect(await provider.searchPlaylists('CODING')).toEqual(['Coding Streams']);
+    expect(await provider.searchPlaylists('session')).toEqual(['Gaming Sessions']);
+    expect(await provider.searchPlaylists('xyz')).toEqual([]);
+  });
+
+  test('returns all playlists when query matches all', async () => {
+    const provider = new YouTubeProvider();
+    provider.listPlaylists = async () => [
+      { id: 'pl1', title: 'Stream A' },
+      { id: 'pl2', title: 'Stream B' },
+    ];
+
+    expect(await provider.searchPlaylists('stream')).toEqual(['Stream A', 'Stream B']);
+  });
+});

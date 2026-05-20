@@ -1733,6 +1733,12 @@ export class YouTubeProvider implements PlatformProvider {
     }
   }
 
+  async searchPlaylists(query: string): Promise<string[]> {
+    const all = await this.listPlaylists();
+    const q = query.toLowerCase();
+    return all.map((p) => p.title).filter((t) => t.toLowerCase().includes(q));
+  }
+
   async createPlaylist(title: string): Promise<{ id: string; title: string } | null> {
     if (!this.isAuthenticated() || !this.tokenData) return null;
     try {

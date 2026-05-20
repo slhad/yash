@@ -2199,6 +2199,13 @@ function openStreamModal(preselected: string[]): void {
   const subjectInputRow = createIndentedInputRow(renderer, subjectInput);
   subjectInput.value = savedStream.game ?? '';
 
+  const subjectHint = new TextRenderable(renderer, { content: '', fg: 'gray' });
+  subjectHint.visible = false;
+  let subjectSuggestions: string[] = [];
+  let subjectSelectedIdx = -1;
+  let subjectFetchTimer: ReturnType<typeof setTimeout> | null = null;
+  let isNavigatingSubject = false;
+
   // ── Twitch category ──────────────────────────────────────────────
   const twitchGameLabel = makeLabel(' Category (Twitch):');
   const twitchGameInput = new InputRenderable(renderer, {
@@ -2288,6 +2295,7 @@ function openStreamModal(preselected: string[]): void {
   box.add(ytCatText);
   box.add(subjectLabel);
   box.add(subjectInputRow);
+  box.add(subjectHint);
   box.add(twitchGameLabel);
   box.add(twitchGameInputRow);
   box.add(twitchCatHint);
@@ -2353,6 +2361,7 @@ function openStreamModal(preselected: string[]): void {
     ytCatText.visible = hasYT;
     subjectLabel.visible = hasYT;
     subjectInputRow.visible = hasYT;
+    subjectHint.visible = hasYT && subjectSuggestions.length > 0;
     twitchGameLabel.visible = hasTwitch;
     twitchGameInputRow.visible = hasTwitch;
     twitchCatHint.visible = hasTwitch && catSuggestions.length > 0;
@@ -2584,6 +2593,18 @@ function openStreamModal(preselected: string[]): void {
     if (sequence === '\x1b[A' || sequence === '\x1b[B') {
       if (
         current?.kind === 'input' &&
+        current.node === subjectInput &&
+        subjectSuggestions.length > 0
+      ) {
+        subjectSelectedIdx =
+          sequence === '\x1b[B'
+            ? (subjectSelectedIdx + 1) % subjectSuggestions.length
+            : (subjectSelectedIdx - 1 + subjectSuggestions.length) % subjectSuggestions.length;
+        isNavigatingSubject = true;
+        subjectInput.value = subjectSuggestions[subjectSelectedIdx] ?? '';
+      }
+      if (
+        current?.kind === 'input' &&
         current.node === twitchGameInput &&
         catSuggestions.length > 0
       ) {
@@ -2627,6 +2648,31 @@ function openStreamModal(preselected: string[]): void {
   ]) {
     input.onKeyDown = escapeViaKeyDown as any;
   }
+
+  subjectInput.on(InputRenderableEvents.INPUT, () => {
+    if (isNavigatingSubject) { isNavigatingSubject = false; return; }
+    const q = subjectInput.value.trim();
+    subjectSuggestions = [];
+    subjectSelectedIdx = -1;
+    if (subjectFetchTimer) {
+      clearTimeout(subjectFetchTimer);
+      subjectFetchTimer = null;
+    }
+    if (q.length < 2) {
+      subjectHint.content = '';
+      subjectHint.visible = false;
+      return;
+    }
+    subjectFetchTimer = setTimeout(async () => {
+      const results = await youtube.searchPlaylists(q);
+      subjectSuggestions = results;
+      const exactMatch = results.some((r) => r.toLowerCase() === q.toLowerCase());
+      const items = exactMatch ? results : [...results, '(new)'];
+      subjectHint.content =
+        items.length > 0 ? `  ${items.join('  ·  ')}  [↑/↓ to select]` : '';
+      subjectHint.visible = selectedPlatforms.has('youtube') && items.length > 0;
+    }, 300);
+  });
 
   twitchGameInput.on(InputRenderableEvents.INPUT, () => {
     if (isNavigatingTwitch) { isNavigatingTwitch = false; return; }
