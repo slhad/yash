@@ -1717,6 +1717,8 @@ export class YouTubeProvider implements PlatformProvider {
   // ---------------------------------------------------------------------------
 
   async listPlaylists(): Promise<Array<{ id: string; title: string }>> {
+    const demo = process.env.YASH_DEMO_PLAYLISTS;
+    if (demo) return demo.split(',').map((t, i) => ({ id: `demo-${i}`, title: t.trim() }));
     if (!this.isAuthenticated() || !this.tokenData) return [];
     try {
       const resp = await this._request(
