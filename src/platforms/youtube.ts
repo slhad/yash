@@ -1717,6 +1717,8 @@ export class YouTubeProvider implements PlatformProvider {
   // ---------------------------------------------------------------------------
 
   async listPlaylists(): Promise<Array<{ id: string; title: string }>> {
+    const demo = process.env.YASH_DEMO_PLAYLISTS;
+    if (demo) return demo.split(',').map((t, i) => ({ id: `demo-${i}`, title: t.trim() }));
     if (!this.isAuthenticated() || !this.tokenData) return [];
     try {
       const resp = await this._request(
@@ -1731,6 +1733,12 @@ export class YouTubeProvider implements PlatformProvider {
       defaultLogger.error('[YouTube] listPlaylists error:', err);
       return [];
     }
+  }
+
+  async searchPlaylists(query: string): Promise<string[]> {
+    const all = await this.listPlaylists();
+    const q = query.toLowerCase();
+    return all.map((p) => p.title).filter((t) => t.toLowerCase().includes(q));
   }
 
   async createPlaylist(title: string): Promise<{ id: string; title: string } | null> {

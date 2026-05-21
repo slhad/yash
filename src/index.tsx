@@ -2199,6 +2199,13 @@ function openStreamModal(preselected: string[]): void {
   const subjectInputRow = createIndentedInputRow(renderer, subjectInput);
   subjectInput.value = savedStream.game ?? '';
 
+  const subjectHint = new TextRenderable(renderer, { content: '', fg: 'gray' });
+  subjectHint.visible = false;
+  let subjectSuggestions: string[] = [];
+  let subjectSelectedIdx = -1;
+  let subjectFetchTimer: ReturnType<typeof setTimeout> | null = null;
+  let isNavigatingSubject = false;
+
   // ── Twitch category ──────────────────────────────────────────────
   const twitchGameLabel = makeLabel(' Category (Twitch):');
   const twitchGameInput = new InputRenderable(renderer, {
@@ -2259,7 +2266,7 @@ function openStreamModal(preselected: string[]): void {
   notifInput.value = savedStream.notification ?? '';
 
   const hint = new TextRenderable(renderer, {
-    content: ' [Tab] next field  [◄/►] change YT category  [Enter] confirm  [Esc] cancel',
+    content: ' [Tab] next field  [Enter] confirm  [Esc] cancel',
     fg: 'gray',
   });
 
@@ -2288,6 +2295,7 @@ function openStreamModal(preselected: string[]): void {
   box.add(ytCatText);
   box.add(subjectLabel);
   box.add(subjectInputRow);
+  box.add(subjectHint);
   box.add(twitchGameLabel);
   box.add(twitchGameInputRow);
   box.add(twitchCatHint);
@@ -2342,6 +2350,24 @@ function openStreamModal(preselected: string[]): void {
     } else {
       item.node.focus();
     }
+    updateHint();
+  }
+
+  function updateHint(): void {
+    const item = visibleItems[focusIdx];
+    const parts = ['[Tab] next field'];
+    if (item?.kind === 'yt-category') parts.push('[◄/►] change YT category');
+    if (item?.kind === 'input' && item.node === subjectInput) {
+      const hasTwitch = selectedPlatforms.has('twitch');
+      const hasKick = selectedPlatforms.has('kick');
+      if (hasTwitch && hasKick) parts.push('[Ctrl+→] cascade to Twitch/Kick');
+      else if (hasTwitch) parts.push('[Ctrl+→] cascade to Twitch');
+      else if (hasKick) parts.push('[Ctrl+→] cascade to Kick');
+    }
+    if (item?.kind === 'input' && item.node === twitchGameInput && selectedPlatforms.has('kick'))
+      parts.push('[Ctrl+→] cascade to Kick');
+    parts.push('[Enter] confirm', '[Esc] cancel');
+    hint.content = ` ${parts.join('  ')}`;
   }
 
   function updateConditionalVisibility(): void {
@@ -2353,6 +2379,7 @@ function openStreamModal(preselected: string[]): void {
     ytCatText.visible = hasYT;
     subjectLabel.visible = hasYT;
     subjectInputRow.visible = hasYT;
+    subjectHint.visible = hasYT && subjectHint.content !== '';
     twitchGameLabel.visible = hasTwitch;
     twitchGameInputRow.visible = hasTwitch;
     twitchCatHint.visible = hasTwitch && catSuggestions.length > 0;
@@ -2375,6 +2402,7 @@ function openStreamModal(preselected: string[]): void {
     visibleItems = items;
     if (focusIdx >= visibleItems.length) focusIdx = 0;
     modal.focusIndex = focusIdx;
+    updateHint();
   }
 
   function togglePlatform(idx: number): void {
@@ -2395,6 +2423,10 @@ function openStreamModal(preselected: string[]): void {
     renderer.removeInputHandler(modalKeyHandler);
     renderer.root.remove(box.id);
     activeStreamModal = null;
+    if (subjectFetchTimer) {
+      clearTimeout(subjectFetchTimer);
+      subjectFetchTimer = null;
+    }
     if (catFetchTimer) {
       clearTimeout(catFetchTimer);
       catFetchTimer = null;
@@ -2584,6 +2616,18 @@ function openStreamModal(preselected: string[]): void {
     if (sequence === '\x1b[A' || sequence === '\x1b[B') {
       if (
         current?.kind === 'input' &&
+        current.node === subjectInput &&
+        subjectSuggestions.length > 0
+      ) {
+        subjectSelectedIdx =
+          sequence === '\x1b[B'
+            ? (subjectSelectedIdx + 1) % subjectSuggestions.length
+            : (subjectSelectedIdx - 1 + subjectSuggestions.length) % subjectSuggestions.length;
+        isNavigatingSubject = true;
+        subjectInput.value = subjectSuggestions[subjectSelectedIdx] ?? '';
+      }
+      if (
+        current?.kind === 'input' &&
         current.node === twitchGameInput &&
         catSuggestions.length > 0
       ) {
@@ -2608,6 +2652,30 @@ function openStreamModal(preselected: string[]): void {
       }
       return true;
     }
+    // Ctrl+→: cascade current field value down the platform chain
+    if (sequence === '\x1b[1;5C') {
+      if (current?.kind === 'input' && current.node === subjectInput) {
+        const val = subjectInput.value.trim();
+        if (val && selectedPlatforms.has('twitch')) {
+          twitchGameInput.value = val;
+          scheduleTwitchSearch(val, 0);
+        }
+        if (val && selectedPlatforms.has('kick')) {
+          kickCatInput.value = val;
+          scheduleKickSearch(val, 0);
+        }
+        return true;
+      }
+      if (current?.kind === 'input' && current.node === twitchGameInput) {
+        const val = twitchGameInput.value.trim();
+        if (val && selectedPlatforms.has('kick')) {
+          kickCatInput.value = val;
+          scheduleKickSearch(val, 0);
+        }
+        return true;
+      }
+      return false;
+    }
     return false;
   };
 
@@ -2628,43 +2696,40 @@ function openStreamModal(preselected: string[]): void {
     input.onKeyDown = escapeViaKeyDown as any;
   }
 
-  twitchGameInput.on(InputRenderableEvents.INPUT, () => {
-    if (isNavigatingTwitch) { isNavigatingTwitch = false; return; }
-    const q = twitchGameInput.value.trim();
+  function scheduleSubjectSearch(q: string, delayMs = 300): void {
+    subjectSuggestions = [];
+    subjectSelectedIdx = -1;
+    if (subjectFetchTimer) { clearTimeout(subjectFetchTimer); subjectFetchTimer = null; }
+    if (q.length < 2) { subjectHint.content = ''; subjectHint.visible = false; return; }
+    subjectFetchTimer = setTimeout(async () => {
+      const results = await youtube.searchPlaylists(q);
+      subjectSuggestions = results;
+      const exactMatch = results.some((r) => r.toLowerCase() === q.toLowerCase());
+      const items = exactMatch ? results : [...results, '(new)'];
+      subjectHint.content = items.length > 0 ? `  ${items.join('  ·  ')}  [↑/↓ to select]` : '';
+      subjectHint.visible = selectedPlatforms.has('youtube') && items.length > 0;
+    }, delayMs);
+  }
+
+  function scheduleTwitchSearch(q: string, delayMs = 300): void {
     catSuggestions = [];
     catSelectedIdx = -1;
-    if (catFetchTimer) {
-      clearTimeout(catFetchTimer);
-      catFetchTimer = null;
-    }
-    if (q.length < 2) {
-      twitchCatHint.content = '';
-      twitchCatHint.visible = false;
-      return;
-    }
+    if (catFetchTimer) { clearTimeout(catFetchTimer); catFetchTimer = null; }
+    if (q.length < 2) { twitchCatHint.content = ''; twitchCatHint.visible = false; return; }
     catFetchTimer = setTimeout(async () => {
       const results = await twitch.searchCategories(q);
       catSuggestions = results;
       twitchCatHint.content =
         catSuggestions.length > 0 ? `  ${catSuggestions.join('  ·  ')}  [↑/↓ to select]` : '';
       twitchCatHint.visible = catSuggestions.length > 0 && selectedPlatforms.has('twitch');
-    }, 300);
-  });
+    }, delayMs);
+  }
 
-  kickCatInput.on(InputRenderableEvents.INPUT, () => {
-    if (isNavigatingKick) { isNavigatingKick = false; return; }
-    const q = kickCatInput.value.trim();
+  function scheduleKickSearch(q: string, delayMs = 300): void {
     kickCatSuggestions = [];
     kickCatSelectedIdx = -1;
-    if (kickCatFetchTimer) {
-      clearTimeout(kickCatFetchTimer);
-      kickCatFetchTimer = null;
-    }
-    if (q.length < 2) {
-      kickCatHint.content = '';
-      kickCatHint.visible = false;
-      return;
-    }
+    if (kickCatFetchTimer) { clearTimeout(kickCatFetchTimer); kickCatFetchTimer = null; }
+    if (q.length < 2) { kickCatHint.content = ''; kickCatHint.visible = false; return; }
     kickCatFetchTimer = setTimeout(async () => {
       const results = await kick.searchCategories(q);
       kickCatSuggestions = results;
@@ -2673,7 +2738,22 @@ function openStreamModal(preselected: string[]): void {
           ? `  ${kickCatSuggestions.join('  ·  ')}  [↑/↓ to select]`
           : '';
       kickCatHint.visible = kickCatSuggestions.length > 0 && selectedPlatforms.has('kick');
-    }, 300);
+    }, delayMs);
+  }
+
+  subjectInput.on(InputRenderableEvents.INPUT, () => {
+    if (isNavigatingSubject) { isNavigatingSubject = false; return; }
+    scheduleSubjectSearch(subjectInput.value.trim());
+  });
+
+  twitchGameInput.on(InputRenderableEvents.INPUT, () => {
+    if (isNavigatingTwitch) { isNavigatingTwitch = false; return; }
+    scheduleTwitchSearch(twitchGameInput.value.trim());
+  });
+
+  kickCatInput.on(InputRenderableEvents.INPUT, () => {
+    if (isNavigatingKick) { isNavigatingKick = false; return; }
+    scheduleKickSearch(kickCatInput.value.trim());
   });
 }
 

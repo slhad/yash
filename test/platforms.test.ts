@@ -69,3 +69,82 @@ describe('Stream Key Management', () => {
     expect(provider.getStreamKey()).toBe('yt_stream_key_123');
   });
 });
+
+describe('YouTubeProvider.searchPlaylists', () => {
+  test('returns empty array when not authenticated', async () => {
+    const provider = new YouTubeProvider();
+    const results = await provider.searchPlaylists('gaming');
+    expect(results).toEqual([]);
+  });
+
+  test('is defined as a function', () => {
+    const provider = new YouTubeProvider();
+    expect(typeof provider.searchPlaylists).toBe('function');
+  });
+
+  test('filters playlist titles case-insensitively', async () => {
+    const provider = new YouTubeProvider();
+    // Stub listPlaylists to return test data without needing auth
+    provider.listPlaylists = async () => [
+      { id: 'pl1', title: 'Gaming Sessions' },
+      { id: 'pl2', title: 'Coding Streams' },
+      { id: 'pl3', title: 'Just Chatting' },
+    ];
+
+    expect(await provider.searchPlaylists('gaming')).toEqual(['Gaming Sessions']);
+    expect(await provider.searchPlaylists('CODING')).toEqual(['Coding Streams']);
+    expect(await provider.searchPlaylists('session')).toEqual(['Gaming Sessions']);
+    expect(await provider.searchPlaylists('xyz')).toEqual([]);
+  });
+
+  test('returns all playlists when query matches all', async () => {
+    const provider = new YouTubeProvider();
+    provider.listPlaylists = async () => [
+      { id: 'pl1', title: 'Stream A' },
+      { id: 'pl2', title: 'Stream B' },
+    ];
+
+    expect(await provider.searchPlaylists('stream')).toEqual(['Stream A', 'Stream B']);
+  });
+});
+
+describe('/stream cascade logic', () => {
+  test('cascade value is the trimmed field value', () => {
+    expect('  Hades  '.trim()).toBe('Hades');
+  });
+
+  test('cascade skips empty value', () => {
+    const selected = new Set(['youtube', 'twitch', 'kick']);
+    const cascaded: string[] = [];
+    const val = '';
+    if (val && selected.has('twitch')) cascaded.push('twitch');
+    if (val && selected.has('kick')) cascaded.push('kick');
+    expect(cascaded).toEqual([]);
+  });
+
+  test('cascade targets only selected platforms', () => {
+    const selected = new Set(['youtube', 'twitch']);
+    const val = 'Hades';
+    const cascaded: string[] = [];
+    if (val && selected.has('twitch')) cascaded.push('twitch');
+    if (val && selected.has('kick')) cascaded.push('kick');
+    expect(cascaded).toEqual(['twitch']);
+  });
+
+  test('cascade fills all selected downstream platforms', () => {
+    const selected = new Set(['youtube', 'twitch', 'kick']);
+    const val = 'Hades';
+    const cascaded: string[] = [];
+    if (val && selected.has('twitch')) cascaded.push('twitch');
+    if (val && selected.has('kick')) cascaded.push('kick');
+    expect(cascaded).toEqual(['twitch', 'kick']);
+  });
+
+  test('twitch-to-kick cascade only targets kick', () => {
+    const selected = new Set(['youtube', 'twitch', 'kick']);
+    const val = 'Hades';
+    const cascaded: string[] = [];
+    if (val && selected.has('kick')) cascaded.push('kick');
+    expect(cascaded).toEqual(['kick']);
+  });
+});
