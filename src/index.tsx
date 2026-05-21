@@ -2379,7 +2379,7 @@ function openStreamModal(preselected: string[]): void {
     ytCatText.visible = hasYT;
     subjectLabel.visible = hasYT;
     subjectInputRow.visible = hasYT;
-    subjectHint.visible = hasYT && subjectSuggestions.length > 0;
+    subjectHint.visible = hasYT && subjectHint.content !== '';
     twitchGameLabel.visible = hasTwitch;
     twitchGameInputRow.visible = hasTwitch;
     twitchCatHint.visible = hasTwitch && catSuggestions.length > 0;
@@ -2423,6 +2423,10 @@ function openStreamModal(preselected: string[]): void {
     renderer.removeInputHandler(modalKeyHandler);
     renderer.root.remove(box.id);
     activeStreamModal = null;
+    if (subjectFetchTimer) {
+      clearTimeout(subjectFetchTimer);
+      subjectFetchTimer = null;
+    }
     if (catFetchTimer) {
       clearTimeout(catFetchTimer);
       catFetchTimer = null;
