@@ -2266,7 +2266,7 @@ function openStreamModal(preselected: string[]): void {
   notifInput.value = savedStream.notification ?? '';
 
   const hint = new TextRenderable(renderer, {
-    content: ' [Tab] next field  [◄/►] change YT category  [Ctrl+→] cascade to Twitch/Kick  [Enter] confirm  [Esc] cancel',
+    content: ' [Tab] next field  [Enter] confirm  [Esc] cancel',
     fg: 'gray',
   });
 
@@ -2350,6 +2350,24 @@ function openStreamModal(preselected: string[]): void {
     } else {
       item.node.focus();
     }
+    updateHint();
+  }
+
+  function updateHint(): void {
+    const item = visibleItems[focusIdx];
+    const parts = ['[Tab] next field'];
+    if (item?.kind === 'yt-category') parts.push('[◄/►] change YT category');
+    if (item?.kind === 'input' && item.node === subjectInput) {
+      const hasTwitch = selectedPlatforms.has('twitch');
+      const hasKick = selectedPlatforms.has('kick');
+      if (hasTwitch && hasKick) parts.push('[Ctrl+→] cascade to Twitch/Kick');
+      else if (hasTwitch) parts.push('[Ctrl+→] cascade to Twitch');
+      else if (hasKick) parts.push('[Ctrl+→] cascade to Kick');
+    }
+    if (item?.kind === 'input' && item.node === twitchGameInput && selectedPlatforms.has('kick'))
+      parts.push('[Ctrl+→] cascade to Kick');
+    parts.push('[Enter] confirm', '[Esc] cancel');
+    hint.content = ` ${parts.join('  ')}`;
   }
 
   function updateConditionalVisibility(): void {
@@ -2384,6 +2402,7 @@ function openStreamModal(preselected: string[]): void {
     visibleItems = items;
     if (focusIdx >= visibleItems.length) focusIdx = 0;
     modal.focusIndex = focusIdx;
+    updateHint();
   }
 
   function togglePlatform(idx: number): void {
