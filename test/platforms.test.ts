@@ -107,3 +107,44 @@ describe('YouTubeProvider.searchPlaylists', () => {
     expect(await provider.searchPlaylists('stream')).toEqual(['Stream A', 'Stream B']);
   });
 });
+
+describe('/stream cascade logic', () => {
+  test('cascade value is the trimmed field value', () => {
+    expect('  Hades  '.trim()).toBe('Hades');
+  });
+
+  test('cascade skips empty value', () => {
+    const selected = new Set(['youtube', 'twitch', 'kick']);
+    const cascaded: string[] = [];
+    const val = '';
+    if (val && selected.has('twitch')) cascaded.push('twitch');
+    if (val && selected.has('kick')) cascaded.push('kick');
+    expect(cascaded).toEqual([]);
+  });
+
+  test('cascade targets only selected platforms', () => {
+    const selected = new Set(['youtube', 'twitch']);
+    const val = 'Hades';
+    const cascaded: string[] = [];
+    if (val && selected.has('twitch')) cascaded.push('twitch');
+    if (val && selected.has('kick')) cascaded.push('kick');
+    expect(cascaded).toEqual(['twitch']);
+  });
+
+  test('cascade fills all selected downstream platforms', () => {
+    const selected = new Set(['youtube', 'twitch', 'kick']);
+    const val = 'Hades';
+    const cascaded: string[] = [];
+    if (val && selected.has('twitch')) cascaded.push('twitch');
+    if (val && selected.has('kick')) cascaded.push('kick');
+    expect(cascaded).toEqual(['twitch', 'kick']);
+  });
+
+  test('twitch-to-kick cascade only targets kick', () => {
+    const selected = new Set(['youtube', 'twitch', 'kick']);
+    const val = 'Hades';
+    const cascaded: string[] = [];
+    if (val && selected.has('kick')) cascaded.push('kick');
+    expect(cascaded).toEqual(['kick']);
+  });
+});

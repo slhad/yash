@@ -2266,7 +2266,7 @@ function openStreamModal(preselected: string[]): void {
   notifInput.value = savedStream.notification ?? '';
 
   const hint = new TextRenderable(renderer, {
-    content: ' [Tab] next field  [◄/►] change YT category  [Enter] confirm  [Esc] cancel',
+    content: ' [Tab] next field  [◄/►] change YT category  [Ctrl+→] cascade to Twitch/Kick  [Enter] confirm  [Esc] cancel',
     fg: 'gray',
   });
 
@@ -2629,6 +2629,30 @@ function openStreamModal(preselected: string[]): void {
       }
       return true;
     }
+    // Ctrl+→: cascade current field value down the platform chain
+    if (sequence === '\x1b[1;5C') {
+      if (current?.kind === 'input' && current.node === subjectInput) {
+        const val = subjectInput.value.trim();
+        if (val && selectedPlatforms.has('twitch')) {
+          twitchGameInput.value = val;
+          scheduleTwitchSearch(val, 0);
+        }
+        if (val && selectedPlatforms.has('kick')) {
+          kickCatInput.value = val;
+          scheduleKickSearch(val, 0);
+        }
+        return true;
+      }
+      if (current?.kind === 'input' && current.node === twitchGameInput) {
+        const val = twitchGameInput.value.trim();
+        if (val && selectedPlatforms.has('kick')) {
+          kickCatInput.value = val;
+          scheduleKickSearch(val, 0);
+        }
+        return true;
+      }
+      return false;
+    }
     return false;
   };
 
@@ -2649,68 +2673,40 @@ function openStreamModal(preselected: string[]): void {
     input.onKeyDown = escapeViaKeyDown as any;
   }
 
-  subjectInput.on(InputRenderableEvents.INPUT, () => {
-    if (isNavigatingSubject) { isNavigatingSubject = false; return; }
-    const q = subjectInput.value.trim();
+  function scheduleSubjectSearch(q: string, delayMs = 300): void {
     subjectSuggestions = [];
     subjectSelectedIdx = -1;
-    if (subjectFetchTimer) {
-      clearTimeout(subjectFetchTimer);
-      subjectFetchTimer = null;
-    }
-    if (q.length < 2) {
-      subjectHint.content = '';
-      subjectHint.visible = false;
-      return;
-    }
+    if (subjectFetchTimer) { clearTimeout(subjectFetchTimer); subjectFetchTimer = null; }
+    if (q.length < 2) { subjectHint.content = ''; subjectHint.visible = false; return; }
     subjectFetchTimer = setTimeout(async () => {
       const results = await youtube.searchPlaylists(q);
       subjectSuggestions = results;
       const exactMatch = results.some((r) => r.toLowerCase() === q.toLowerCase());
       const items = exactMatch ? results : [...results, '(new)'];
-      subjectHint.content =
-        items.length > 0 ? `  ${items.join('  ·  ')}  [↑/↓ to select]` : '';
+      subjectHint.content = items.length > 0 ? `  ${items.join('  ·  ')}  [↑/↓ to select]` : '';
       subjectHint.visible = selectedPlatforms.has('youtube') && items.length > 0;
-    }, 300);
-  });
+    }, delayMs);
+  }
 
-  twitchGameInput.on(InputRenderableEvents.INPUT, () => {
-    if (isNavigatingTwitch) { isNavigatingTwitch = false; return; }
-    const q = twitchGameInput.value.trim();
+  function scheduleTwitchSearch(q: string, delayMs = 300): void {
     catSuggestions = [];
     catSelectedIdx = -1;
-    if (catFetchTimer) {
-      clearTimeout(catFetchTimer);
-      catFetchTimer = null;
-    }
-    if (q.length < 2) {
-      twitchCatHint.content = '';
-      twitchCatHint.visible = false;
-      return;
-    }
+    if (catFetchTimer) { clearTimeout(catFetchTimer); catFetchTimer = null; }
+    if (q.length < 2) { twitchCatHint.content = ''; twitchCatHint.visible = false; return; }
     catFetchTimer = setTimeout(async () => {
       const results = await twitch.searchCategories(q);
       catSuggestions = results;
       twitchCatHint.content =
         catSuggestions.length > 0 ? `  ${catSuggestions.join('  ·  ')}  [↑/↓ to select]` : '';
       twitchCatHint.visible = catSuggestions.length > 0 && selectedPlatforms.has('twitch');
-    }, 300);
-  });
+    }, delayMs);
+  }
 
-  kickCatInput.on(InputRenderableEvents.INPUT, () => {
-    if (isNavigatingKick) { isNavigatingKick = false; return; }
-    const q = kickCatInput.value.trim();
+  function scheduleKickSearch(q: string, delayMs = 300): void {
     kickCatSuggestions = [];
     kickCatSelectedIdx = -1;
-    if (kickCatFetchTimer) {
-      clearTimeout(kickCatFetchTimer);
-      kickCatFetchTimer = null;
-    }
-    if (q.length < 2) {
-      kickCatHint.content = '';
-      kickCatHint.visible = false;
-      return;
-    }
+    if (kickCatFetchTimer) { clearTimeout(kickCatFetchTimer); kickCatFetchTimer = null; }
+    if (q.length < 2) { kickCatHint.content = ''; kickCatHint.visible = false; return; }
     kickCatFetchTimer = setTimeout(async () => {
       const results = await kick.searchCategories(q);
       kickCatSuggestions = results;
@@ -2719,7 +2715,22 @@ function openStreamModal(preselected: string[]): void {
           ? `  ${kickCatSuggestions.join('  ·  ')}  [↑/↓ to select]`
           : '';
       kickCatHint.visible = kickCatSuggestions.length > 0 && selectedPlatforms.has('kick');
-    }, 300);
+    }, delayMs);
+  }
+
+  subjectInput.on(InputRenderableEvents.INPUT, () => {
+    if (isNavigatingSubject) { isNavigatingSubject = false; return; }
+    scheduleSubjectSearch(subjectInput.value.trim());
+  });
+
+  twitchGameInput.on(InputRenderableEvents.INPUT, () => {
+    if (isNavigatingTwitch) { isNavigatingTwitch = false; return; }
+    scheduleTwitchSearch(twitchGameInput.value.trim());
+  });
+
+  kickCatInput.on(InputRenderableEvents.INPUT, () => {
+    if (isNavigatingKick) { isNavigatingKick = false; return; }
+    scheduleKickSearch(kickCatInput.value.trim());
   });
 }
 
