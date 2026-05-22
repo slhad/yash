@@ -33,7 +33,10 @@ export const markerCreateAction: YashActionDefinition = {
   },
   examples: [
     { args: { text: 'Intro' }, description: 'Create a marker labelled "Intro" on all platforms' },
-    { args: { text: 'Boss fight', platform: 'twitch' }, description: 'Create a marker on Twitch only' },
+    {
+      args: { text: 'Boss fight', platform: 'twitch' },
+      description: 'Create a marker on Twitch only',
+    },
   ],
   async invoke(args, ctx): Promise<ActionResult> {
     const text = args.text as string | undefined;
@@ -67,7 +70,9 @@ export const markerCreateAction: YashActionDefinition = {
           output.push(`[marker] ${name}: ${title} @ ${ts}`);
           created.push({ platform: name, title, timestamp: ts });
         } else {
-          warnings.push(`${name}: marker not created (stream may not be live or platform unsupported)`);
+          warnings.push(
+            `${name}: marker not created (stream may not be live or platform unsupported)`,
+          );
         }
       } else {
         warnings.push(`${platformName}: ${String(result.reason)}`);

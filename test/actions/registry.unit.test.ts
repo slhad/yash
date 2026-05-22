@@ -1,6 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import { ActionRegistry, IpcActionError, registry } from '../../src/actions/registry';
-import { IPC_ERROR_CODES, type ActionContext, type YashActionDefinition } from '../../src/actions/types';
+import {
+  type ActionContext,
+  IPC_ERROR_CODES,
+  type YashActionDefinition,
+} from '../../src/actions/types';
 
 // Side-effect imports: auto-register actions on the singleton for tests 6–7
 import '../../src/actions/markers';
@@ -73,7 +77,15 @@ describe('getAction', () => {
 describe('listActions', () => {
   const CONDENSED_KEYS = ['id', 'title', 'domain', 'readOnly', 'safety', 'args'];
   const FULL_KEYS = [
-    'id', 'title', 'description', 'domain', 'ipcEnabled', 'readOnly', 'safety', 'visibility', 'args',
+    'id',
+    'title',
+    'description',
+    'domain',
+    'ipcEnabled',
+    'readOnly',
+    'safety',
+    'visibility',
+    'args',
   ];
 
   test('returns condensed fields when details is absent', () => {
@@ -131,13 +143,19 @@ describe('listActions', () => {
 describe('validateArgs', () => {
   test('passes when all required args provided with valid values', () => {
     const reg = new ActionRegistry();
-    const def = baseDef({ id: 'validate.ok', args: { name: { type: 'string', required: true, maxLength: 50 } } });
+    const def = baseDef({
+      id: 'validate.ok',
+      args: { name: { type: 'string', required: true, maxLength: 50 } },
+    });
     expect(reg.validateArgs(def, { name: 'hello' })).toEqual({ valid: true, errors: [] });
   });
 
   test('fails with errors when required arg is missing', () => {
     const reg = new ActionRegistry();
-    const def = baseDef({ id: 'validate.missing', args: { name: { type: 'string', required: true, maxLength: 50 } } });
+    const def = baseDef({
+      id: 'validate.missing',
+      args: { name: { type: 'string', required: true, maxLength: 50 } },
+    });
     const result = reg.validateArgs(def, {});
     expect(result.valid).toBe(false);
     expect(result.errors.length).toBeGreaterThan(0);
@@ -146,55 +164,82 @@ describe('validateArgs', () => {
 
   test('fails when string exceeds maxLength', () => {
     const reg = new ActionRegistry();
-    const def = baseDef({ id: 'validate.maxlen', args: { msg: { type: 'string', required: false, maxLength: 5 } } });
+    const def = baseDef({
+      id: 'validate.maxlen',
+      args: { msg: { type: 'string', required: false, maxLength: 5 } },
+    });
     expect(reg.validateArgs(def, { msg: 'toolong' }).valid).toBe(false);
   });
 
   test('fails when string is below minLength', () => {
     const reg = new ActionRegistry();
-    const def = baseDef({ id: 'validate.minlen', args: { msg: { type: 'string', required: false, minLength: 5, maxLength: 100 } } });
+    const def = baseDef({
+      id: 'validate.minlen',
+      args: { msg: { type: 'string', required: false, minLength: 5, maxLength: 100 } },
+    });
     expect(reg.validateArgs(def, { msg: 'hi' }).valid).toBe(false);
   });
 
   test('fails when number is below min', () => {
     const reg = new ActionRegistry();
-    const def = baseDef({ id: 'validate.nummin', args: { count: { type: 'number', required: false, min: 1, max: 10 } } });
+    const def = baseDef({
+      id: 'validate.nummin',
+      args: { count: { type: 'number', required: false, min: 1, max: 10 } },
+    });
     expect(reg.validateArgs(def, { count: 0 }).valid).toBe(false);
   });
 
   test('fails when number is above max', () => {
     const reg = new ActionRegistry();
-    const def = baseDef({ id: 'validate.nummax', args: { count: { type: 'number', required: false, min: 1, max: 10 } } });
+    const def = baseDef({
+      id: 'validate.nummax',
+      args: { count: { type: 'number', required: false, min: 1, max: 10 } },
+    });
     expect(reg.validateArgs(def, { count: 99 }).valid).toBe(false);
   });
 
   test('fails when enum value is not in allowed list', () => {
     const reg = new ActionRegistry();
-    const def = baseDef({ id: 'validate.enum', args: { color: { type: 'enum', required: false, values: ['red', 'green', 'blue'] } } });
+    const def = baseDef({
+      id: 'validate.enum',
+      args: { color: { type: 'enum', required: false, values: ['red', 'green', 'blue'] } },
+    });
     expect(reg.validateArgs(def, { color: 'purple' }).valid).toBe(false);
   });
 
   test('passes when optional arg is absent', () => {
     const reg = new ActionRegistry();
-    const def = baseDef({ id: 'validate.optional', args: { tag: { type: 'string', required: false, maxLength: 20 } } });
+    const def = baseDef({
+      id: 'validate.optional',
+      args: { tag: { type: 'string', required: false, maxLength: 20 } },
+    });
     expect(reg.validateArgs(def, {})).toEqual({ valid: true, errors: [] });
   });
 
   test('fails with type error when wrong JS type provided for string arg', () => {
     const reg = new ActionRegistry();
-    const def = baseDef({ id: 'validate.type-string', args: { label: { type: 'string', required: false, maxLength: 50 } } });
+    const def = baseDef({
+      id: 'validate.type-string',
+      args: { label: { type: 'string', required: false, maxLength: 50 } },
+    });
     expect(reg.validateArgs(def, { label: 42 }).valid).toBe(false);
   });
 
   test('fails with type error when wrong JS type provided for boolean arg', () => {
     const reg = new ActionRegistry();
-    const def = baseDef({ id: 'validate.type-bool', args: { active: { type: 'boolean', required: false } } });
+    const def = baseDef({
+      id: 'validate.type-bool',
+      args: { active: { type: 'boolean', required: false } },
+    });
     expect(reg.validateArgs(def, { active: 'yes' }).valid).toBe(false);
   });
 
   test('fails with type error when wrong JS type provided for number arg', () => {
     const reg = new ActionRegistry();
-    const def = baseDef({ id: 'validate.type-num', args: { count: { type: 'number', required: false, min: 0, max: 100 } } });
+    const def = baseDef({
+      id: 'validate.type-num',
+      args: { count: { type: 'number', required: false, min: 0, max: 100 } },
+    });
     expect(reg.validateArgs(def, { count: '5' }).valid).toBe(false);
   });
 });
@@ -208,10 +253,16 @@ describe('invokeAction', () => {
     const reg = new ActionRegistry();
     let capturedArgs: Record<string, unknown> | undefined;
     let capturedCtx: ActionContext | undefined;
-    reg.registerAction(baseDef({
-      id: 'invoke.success',
-      invoke: async (a, c) => { capturedArgs = a; capturedCtx = c; return { output: ['done'] }; },
-    }));
+    reg.registerAction(
+      baseDef({
+        id: 'invoke.success',
+        invoke: async (a, c) => {
+          capturedArgs = a;
+          capturedCtx = c;
+          return { output: ['done'] };
+        },
+      }),
+    );
     const result = await reg.invokeAction('invoke.success', { extra: 1 }, minimalCtx);
     expect(result.output).toEqual(['done']);
     expect(capturedArgs).toEqual({ extra: 1 });
@@ -251,7 +302,12 @@ describe('invokeAction', () => {
 
   test('throws IpcActionError with invalid_args when arg validation fails', async () => {
     const reg = new ActionRegistry();
-    reg.registerAction(baseDef({ id: 'invoke.bad-args', args: { name: { type: 'string', required: true, maxLength: 50 } } }));
+    reg.registerAction(
+      baseDef({
+        id: 'invoke.bad-args',
+        args: { name: { type: 'string', required: true, maxLength: 50 } },
+      }),
+    );
     const err = await reg.invokeAction('invoke.bad-args', {}, minimalCtx).catch((e) => e);
     expect(err).toBeInstanceOf(IpcActionError);
     expect(err.code).toBe(IPC_ERROR_CODES.INVALID_ARGS);

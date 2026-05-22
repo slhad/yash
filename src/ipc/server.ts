@@ -2,8 +2,8 @@ import * as fs from 'node:fs';
 import * as net from 'node:net';
 import { IpcActionError, registry } from '../actions/registry';
 import type { ActionContext } from '../actions/types';
-import type { ChatService } from '../services/chat.service';
 import type { PlatformProvider } from '../platforms/base';
+import type { ChatService } from '../services/chat.service';
 import { resolveSocketPath } from './socket-path';
 
 export function startIpcServer(

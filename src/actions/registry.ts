@@ -1,7 +1,7 @@
 import {
-  IPC_ERROR_CODES,
   type ActionContext,
   type ActionResult,
+  IPC_ERROR_CODES,
   type YashActionDefinition,
 } from './types';
 
@@ -37,7 +37,10 @@ export class ActionRegistry {
     return this.actions.get(id);
   }
 
-  listActions(options?: { ipcOnly?: boolean; details?: boolean }): ActionListEntry[] | ActionListCondensed[] {
+  listActions(options?: {
+    ipcOnly?: boolean;
+    details?: boolean;
+  }): ActionListEntry[] | ActionListCondensed[] {
     let entries = Array.from(this.actions.values());
 
     if (options?.ipcOnly) {
@@ -130,10 +133,7 @@ export class ActionRegistry {
     }
 
     if (def.safety === 'blocked') {
-      throw new IpcActionError(
-        IPC_ERROR_CODES.ACTION_BLOCKED,
-        `Action "${id}" is blocked`,
-      );
+      throw new IpcActionError(IPC_ERROR_CODES.ACTION_BLOCKED, `Action "${id}" is blocked`);
     }
 
     if (def.safety === 'confirm') {

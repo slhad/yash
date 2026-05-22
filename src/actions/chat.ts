@@ -37,13 +37,11 @@ export const chatSendAction: YashActionDefinition = {
       await ctx.chatService.sendMessage(text, targetPlatforms);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      const isNotConnected =
-        /not authenticated|not connected|credentials not configured/i.test(msg);
+      const isNotConnected = /not authenticated|not connected|credentials not configured/i.test(
+        msg,
+      );
       if (isNotConnected) {
-        throw new IpcActionError(
-          IPC_ERROR_CODES.PROVIDER_NOT_CONNECTED,
-          msg,
-        );
+        throw new IpcActionError(IPC_ERROR_CODES.PROVIDER_NOT_CONNECTED, msg);
       }
       throw err;
     }

@@ -1,5 +1,5 @@
-import type { ChatService } from '../services/chat.service';
 import type { PlatformProvider } from '../platforms/base';
+import type { ChatService } from '../services/chat.service';
 
 export type ActionArgSchema =
   | { type: 'string'; required?: boolean; minLength?: number; maxLength: number }
@@ -70,4 +70,7 @@ export type IpcResponse =
         warnings?: string[];
       };
     }
-  | { ok: false; error: { code: IpcErrorCode; message: string; details?: Record<string, unknown> } };
+  | {
+      ok: false;
+      error: { code: IpcErrorCode; message: string; details?: Record<string, unknown> };
+    };

@@ -50,8 +50,8 @@ import {
 } from './utils/tuiSettings';
 import { parseMarkerArgs, parseSettingsValue } from './utils/webCommands';
 import './index.ts'; // start Bun.serve web server in the same process
-import { startIpcServer } from './ipc/server';
 import { IpcActionError, registry } from './actions/registry';
+import { startIpcServer } from './ipc/server';
 import './actions/markers';
 import './actions/chat';
 
