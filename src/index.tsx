@@ -2883,11 +2883,13 @@ const commandHandlers: Record<
 
   '/marker': async (parts, emit) => {
     const rawParts = parts.slice(1);
-    const { description: text } = parseMarkerArgs(rawParts);
+    const { description: text, timestamp } = parseMarkerArgs(rawParts);
 
     try {
       const ctx = { chatService, providers: { youtube, twitch, kick } };
-      const result = await registry.invokeAction('marker.create', { text, platform: 'all' }, ctx);
+      const markerArgs: Record<string, unknown> = { text, platform: 'all' };
+      if (timestamp !== undefined) markerArgs.timestamp = timestamp;
+      const result = await registry.invokeAction('marker.create', markerArgs, ctx);
       for (const line of result.output ?? []) emit(line);
       for (const warn of result.warnings ?? []) emit(`[system] ${warn}`);
     } catch (err) {

@@ -30,6 +30,7 @@ export const markerCreateAction: YashActionDefinition = {
   args: {
     text: { type: 'string', required: false, maxLength: 200 },
     platform: { type: 'enum', required: false, values: [...PLATFORM_VALUES] },
+    timestamp: { type: 'number', required: false, min: 0, max: 86400 },
   },
   examples: [
     { args: { text: 'Intro' }, description: 'Create a marker labelled "Intro" on all platforms' },
@@ -41,6 +42,7 @@ export const markerCreateAction: YashActionDefinition = {
   async invoke(args, ctx): Promise<ActionResult> {
     const text = args.text as string | undefined;
     const platform = (args.platform as PlatformArg | undefined) ?? 'all';
+    const timestamp = args.timestamp as number | undefined;
 
     const matching = Object.entries(ctx.providers).filter(([name]) =>
       matchesPlatform(name, platform),
@@ -51,7 +53,7 @@ export const markerCreateAction: YashActionDefinition = {
         if (typeof provider.createMarker !== 'function') {
           return { name, marker: null as StreamMarker | null };
         }
-        const marker = await provider.createMarker(text);
+        const marker = await provider.createMarker(text, timestamp);
         return { name, marker };
       }),
     );
