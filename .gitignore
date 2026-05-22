@@ -37,3 +37,9 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .DS_Store
 
 config.json
+
+# Claude Code
+.claude/worktrees/
+
+# Playwright CLI
+.playwright-cli/
