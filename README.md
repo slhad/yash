@@ -208,7 +208,7 @@ flowchart TD
 
 ## OBS reconnection & backoff
 
-You can tune the OBS websocket reconnection and backoff behaviour via environment variables or the runtime config file at `YASH_DATA_DIR/config.json` (default `~/.yash/config.json`, under `obs.websocket`). Environment variables take precedence and are useful for CI/runtime overrides.
+YASH keeps retrying OBS websocket connections both after an established connection drops and when OBS was unavailable during app startup. You can tune that reconnection and backoff behaviour via environment variables or the runtime config file at `YASH_DATA_DIR/config.json` (default `~/.yash/config.json`, under `obs.websocket`). Environment variables take precedence and are useful for CI/runtime overrides.
 
 **Environment variables:**
 

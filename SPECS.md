@@ -148,6 +148,7 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
 - Event-driven architecture for real-time communication
 - Token storage for authentication credentials (file-backed). Encryption/keyring-based storage is considered out of scope for this build.
 - OBS-studio integration via obs-websocket library
+    * OBS websocket connection retries apply both after disconnects and when OBS is still closed during YASH startup
 - Runtime bootstrap config is stored in `YASH_DATA_DIR/config.json` (default `~/.yash/config.json`); mutable runtime settings are stored in `YASH_DATA_DIR/settings.json`; if the runtime config file does not exist yet and a legacy `[root]/config.json` is present, YASH migrates it once on startup and then moves mutable runtime state into `settings.json`
 - TUI and web server run as a single process (`bun run src/index.tsx`); `index.tsx` imports `index.ts` as a side-effect to start `Bun.serve` in the same process. Running them as separate processes causes port 3000 conflicts.
 - `Bun.serve` must use `development: false`. In development mode, Bun writes HTML bundle timing lines (e.g. `Bundled page in 31ms: index.html`) directly to fd 1 via native I/O, bypassing both `process.stdout` and the JS `console.*` API. Since `@opentui` renders the TUI on that same fd, these writes bleed into the TUI display and cannot be intercepted at the JS level. `development: false` suppresses this output; HMR is intentionally disabled as a result.
