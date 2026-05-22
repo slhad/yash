@@ -2946,6 +2946,7 @@ const commandHandlers: Record<
         emit(`[markers] Error: ${String(err)}`);
       }
     }
+    updateUI(lastMessages);
   },
 
   '/settings': async (parts, emit) => {
@@ -3184,7 +3185,13 @@ async function handleCommand(trimmed: string): Promise<void> {
 }
 
 async function handleCommandForCli(trimmed: string): Promise<string> {
-  return runIpcCommand(trimmed, commandHandlers, pushEvent);
+  let mirrored = false;
+  const output = await runIpcCommand(trimmed, commandHandlers, pushEvent, (line) => {
+    mirrored = true;
+    lastMessages.push(line);
+  });
+  if (mirrored) updateUI(lastMessages);
+  return output;
 }
 
 function openSettingsModal(): void {
@@ -5241,7 +5248,10 @@ async function main() {
   });
 
   await initializeServices();
-  startIpcServer(handleCommandForCli, chatService, { youtube, twitch, kick });
+  startIpcServer(handleCommandForCli, chatService, { youtube, twitch, kick }, (line) => {
+    lastMessages.push(line);
+    updateUI(lastMessages);
+  });
 
   // Establish session identity — reuse the persisted ID if present (same session/restart),
   // otherwise generate a fresh one (first launch or explicit clear).
