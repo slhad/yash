@@ -1282,6 +1282,9 @@ export class YouTubeProvider implements PlatformProvider {
     const broadcast = await this._findActiveBroadcast();
     if (broadcast) {
       this.broadcastId = broadcast.id;
+      void this.persistBroadcastId(broadcast.id).catch((err) =>
+        defaultLogger.error('[YouTube] persistBroadcastId error:', err),
+      );
       this.liveChatId = broadcast.liveChatId;
       this.streamStatus = StreamStatus.ONLINE;
       if (this.liveChatId) this._startChatPoll();
