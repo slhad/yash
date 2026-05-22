@@ -1,5 +1,5 @@
 import { Database } from 'bun:sqlite';
-import path from 'path';
+import path from 'node:path';
 import type { ChatMessage } from '../platforms/base';
 import { getDataDir } from '../utils/config';
 

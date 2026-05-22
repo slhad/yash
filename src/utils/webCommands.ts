@@ -514,7 +514,7 @@ export async function handleWebCommand(text: string, ctx: WebCommandContext): Pr
     if (sub === 'marker-delay') {
       const rawVal = parts[2];
       const offset = rawVal !== undefined ? parseInt(rawVal, 10) : NaN;
-      if (isNaN(offset)) {
+      if (Number.isNaN(offset)) {
         fb('youtube-setup', 'Usage: /setup-youtube marker-delay <seconds>');
         return true;
       }

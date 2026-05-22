@@ -84,15 +84,15 @@ beforeAll(() => {
 describe('list_actions', () => {
   test('returns ok with action list and matching count', async () => {
     const res = await handleRequest({ type: 'list_actions' }, mockHandleCommand, ctx);
-    expect(res['ok']).toBe(true);
-    const data = (res['result'] as { data: { actions: unknown[]; count: number } }).data;
+    expect(res.ok).toBe(true);
+    const data = (res.result as { data: { actions: unknown[]; count: number } }).data;
     expect(data.count).toBe(data.actions.length);
     expect(data.count).toBeGreaterThan(0);
   });
 
   test('no entry has an invoke property', async () => {
     const res = await handleRequest({ type: 'list_actions' }, mockHandleCommand, ctx);
-    const data = (res['result'] as { data: { actions: Record<string, unknown>[] } }).data;
+    const data = (res.result as { data: { actions: Record<string, unknown>[] } }).data;
     for (const action of data.actions) {
       expect(action).not.toHaveProperty('invoke');
     }
@@ -104,10 +104,10 @@ describe('list_actions', () => {
       mockHandleCommand,
       ctx,
     );
-    const data = (res['result'] as { data: { actions: Record<string, unknown>[] } }).data;
-    const safe = data.actions.find((a) => a['id'] === T_SAFE);
+    const data = (res.result as { data: { actions: Record<string, unknown>[] } }).data;
+    const safe = data.actions.find((a) => a.id === T_SAFE);
     expect(safe).toBeDefined();
-    expect(safe?.['args']).toBeDefined();
+    expect(safe?.args).toBeDefined();
     expect(safe).not.toHaveProperty('invoke');
   });
 
@@ -117,7 +117,7 @@ describe('list_actions', () => {
       mockHandleCommand,
       ctx,
     );
-    const data = (res['result'] as { data: { actions: unknown[]; count: number } }).data;
+    const data = (res.result as { data: { actions: unknown[]; count: number } }).data;
     expect(data.count).toBe(data.actions.length);
   });
 });
@@ -129,10 +129,10 @@ describe('describe_action', () => {
       mockHandleCommand,
       ctx,
     );
-    expect(res['ok']).toBe(true);
-    const data = (res['result'] as { data: Record<string, unknown> }).data;
-    expect(data['id']).toBe(T_SAFE);
-    expect(data['safety']).toBe('safe');
+    expect(res.ok).toBe(true);
+    const data = (res.result as { data: Record<string, unknown> }).data;
+    expect(data.id).toBe(T_SAFE);
+    expect(data.safety).toBe('safe');
   });
 
   test('invoke fn is NOT present in returned data', async () => {
@@ -141,7 +141,7 @@ describe('describe_action', () => {
       mockHandleCommand,
       ctx,
     );
-    const data = (res['result'] as { data: Record<string, unknown> }).data;
+    const data = (res.result as { data: Record<string, unknown> }).data;
     expect(data).not.toHaveProperty('invoke');
   });
 
@@ -151,14 +151,14 @@ describe('describe_action', () => {
       mockHandleCommand,
       ctx,
     );
-    expect(res['ok']).toBe(false);
-    expect((res['error'] as { code: string })?.code).toBe(IPC_ERROR_CODES.UNKNOWN_ACTION);
+    expect(res.ok).toBe(false);
+    expect((res.error as { code: string })?.code).toBe(IPC_ERROR_CODES.UNKNOWN_ACTION);
   });
 
   test('returns invalid_args when action field is missing', async () => {
     const res = await handleRequest({ type: 'describe_action' }, mockHandleCommand, ctx);
-    expect(res['ok']).toBe(false);
-    expect((res['error'] as { code: string })?.code).toBe(IPC_ERROR_CODES.INVALID_ARGS);
+    expect(res.ok).toBe(false);
+    expect((res.error as { code: string })?.code).toBe(IPC_ERROR_CODES.INVALID_ARGS);
   });
 });
 
@@ -169,8 +169,8 @@ describe('invoke_action', () => {
       mockHandleCommand,
       ctx,
     );
-    expect(res['ok']).toBe(true);
-    const result = res['result'] as { action: string; output: string[]; data: unknown };
+    expect(res.ok).toBe(true);
+    const result = res.result as { action: string; output: string[]; data: unknown };
     expect(result.action).toBe(T_SAFE);
     expect(result.output).toEqual(['safe:hello']);
     expect(result.data).toBeDefined();
@@ -182,8 +182,8 @@ describe('invoke_action', () => {
       mockHandleCommand,
       ctx,
     );
-    expect(res['ok']).toBe(false);
-    expect((res['error'] as { code: string })?.code).toBe(IPC_ERROR_CODES.INVALID_ARGS);
+    expect(res.ok).toBe(false);
+    expect((res.error as { code: string })?.code).toBe(IPC_ERROR_CODES.INVALID_ARGS);
   });
 
   test('returns unknown_action for unregistered action id', async () => {
@@ -192,8 +192,8 @@ describe('invoke_action', () => {
       mockHandleCommand,
       ctx,
     );
-    expect(res['ok']).toBe(false);
-    expect((res['error'] as { code: string })?.code).toBe(IPC_ERROR_CODES.UNKNOWN_ACTION);
+    expect(res.ok).toBe(false);
+    expect((res.error as { code: string })?.code).toBe(IPC_ERROR_CODES.UNKNOWN_ACTION);
   });
 
   test('returns action_blocked for blocked action', async () => {
@@ -202,8 +202,8 @@ describe('invoke_action', () => {
       mockHandleCommand,
       ctx,
     );
-    expect(res['ok']).toBe(false);
-    expect((res['error'] as { code: string })?.code).toBe(IPC_ERROR_CODES.ACTION_BLOCKED);
+    expect(res.ok).toBe(false);
+    expect((res.error as { code: string })?.code).toBe(IPC_ERROR_CODES.ACTION_BLOCKED);
   });
 
   test('returns requires_confirmation for confirm-safety action', async () => {
@@ -212,8 +212,8 @@ describe('invoke_action', () => {
       mockHandleCommand,
       ctx,
     );
-    expect(res['ok']).toBe(false);
-    expect((res['error'] as { code: string })?.code).toBe(IPC_ERROR_CODES.REQUIRES_CONFIRMATION);
+    expect(res.ok).toBe(false);
+    expect((res.error as { code: string })?.code).toBe(IPC_ERROR_CODES.REQUIRES_CONFIRMATION);
   });
 
   test('internal error returns internal_error code without leaking message', async () => {
@@ -222,11 +222,11 @@ describe('invoke_action', () => {
       mockHandleCommand,
       ctx,
     );
-    expect(res['ok']).toBe(false);
-    expect((res['error'] as { code: string; message: string })?.code).toBe(
+    expect(res.ok).toBe(false);
+    expect((res.error as { code: string; message: string })?.code).toBe(
       IPC_ERROR_CODES.INTERNAL_ERROR,
     );
-    expect((res['error'] as { message: string })?.message).toBe('Internal error');
+    expect((res.error as { message: string })?.message).toBe('Internal error');
     expect(JSON.stringify(res)).not.toContain('secret internal details');
   });
 
@@ -236,14 +236,14 @@ describe('invoke_action', () => {
       mockHandleCommand,
       ctx,
     );
-    expect(res['ok']).toBe(false);
-    expect((res['error'] as { code: string })?.code).toBe('custom_code');
+    expect(res.ok).toBe(false);
+    expect((res.error as { code: string })?.code).toBe('custom_code');
   });
 
   test('returns invalid_args when action field is missing', async () => {
     const res = await handleRequest({ type: 'invoke_action' }, mockHandleCommand, ctx);
-    expect(res['ok']).toBe(false);
-    expect((res['error'] as { code: string })?.code).toBe(IPC_ERROR_CODES.INVALID_ARGS);
+    expect(res.ok).toBe(false);
+    expect((res.error as { code: string })?.code).toBe(IPC_ERROR_CODES.INVALID_ARGS);
   });
 
   test('mirrors opt-in action output and warnings to the live TUI', async () => {
@@ -255,7 +255,7 @@ describe('invoke_action', () => {
       (line) => mirrored.push(line),
     );
 
-    expect(res['ok']).toBe(true);
+    expect(res.ok).toBe(true);
     expect(mirrored).toEqual(['mirrored:line', '[system] mirrored warning']);
   });
 });
@@ -267,8 +267,8 @@ describe('command compat — type:command', () => {
       mockHandleCommand,
       ctx,
     );
-    expect(res['ok']).toBe(true);
-    const result = res['result'] as { action: string; output: string };
+    expect(res.ok).toBe(true);
+    const result = res.result as { action: string; output: string };
     expect(result.action).toBe('command');
     expect(result.output).toBe('output:/marker test');
   });
@@ -277,8 +277,8 @@ describe('command compat — type:command', () => {
 describe('legacy compat — no type field', () => {
   test('routes command field to handleCommandForCli when type is absent', async () => {
     const res = await handleRequest({ command: '/help' }, mockHandleCommand, ctx);
-    expect(res['ok']).toBe(true);
-    const result = res['result'] as { action: string; output: string };
+    expect(res.ok).toBe(true);
+    const result = res.result as { action: string; output: string };
     expect(result.action).toBe('command');
     expect(result.output).toBe('output:/help');
   });
@@ -287,7 +287,7 @@ describe('legacy compat — no type field', () => {
 describe('unknown type', () => {
   test('returns unknown_request_type for unrecognised type', async () => {
     const res = await handleRequest({ type: 'totally_unknown' }, mockHandleCommand, ctx);
-    expect(res['ok']).toBe(false);
-    expect((res['error'] as { code: string })?.code).toBe(IPC_ERROR_CODES.UNKNOWN_REQUEST_TYPE);
+    expect(res.ok).toBe(false);
+    expect((res.error as { code: string })?.code).toBe(IPC_ERROR_CODES.UNKNOWN_REQUEST_TYPE);
   });
 });

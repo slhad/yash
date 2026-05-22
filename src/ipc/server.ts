@@ -71,10 +71,10 @@ export async function handleRequest(
   ctx: ActionContext,
   mirrorToTui?: (line: string) => void,
 ): Promise<Record<string, unknown>> {
-  const type = req['type'] as string | undefined;
+  const type = req.type as string | undefined;
 
   if (type === 'list_actions') {
-    const details = Boolean(req['details']);
+    const details = Boolean(req.details);
     const actions = registry.listActions({ ipcOnly: true, details });
     return {
       ok: true,
@@ -86,7 +86,7 @@ export async function handleRequest(
   }
 
   if (type === 'describe_action') {
-    const id = req['action'] as string | undefined;
+    const id = req.action as string | undefined;
     if (!id) {
       return {
         ok: false,
@@ -105,14 +105,14 @@ export async function handleRequest(
   }
 
   if (type === 'invoke_action') {
-    const id = req['action'] as string | undefined;
+    const id = req.action as string | undefined;
     if (!id) {
       return {
         ok: false,
         error: { code: 'invalid_args', message: 'Missing required field: action' },
       };
     }
-    const args = (req['args'] ?? {}) as Record<string, unknown>;
+    const args = (req.args ?? {}) as Record<string, unknown>;
     try {
       const def = registry.getAction(id);
       const result = await registry.invokeAction(id, args, ctx);
@@ -144,7 +144,7 @@ export async function handleRequest(
   }
 
   // Legacy compat: { type: 'command', command: string } or { command: string }
-  const command = req['command'] as string | undefined;
+  const command = req.command as string | undefined;
   if (type === 'command' || (!type && command !== undefined)) {
     if (!command) {
       return {

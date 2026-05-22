@@ -35,7 +35,6 @@ import { getDataDir, isDemoMode, saveConfig } from './utils/config';
 import { runIpcCommand } from './utils/ipcCommandRunner';
 import logCollector from './utils/logCollector';
 import { defaultLogger } from './utils/logger';
-import { formatMarkerCreationSummary } from './utils/markerSummary';
 import { buildTargetedStreamMetadataUpdate } from './utils/streamMetadata';
 import { getAutocomplete, initTuiCommands } from './utils/tuiCommands';
 import { installTuiErrorCapture } from './utils/tuiErrorCapture';

@@ -224,7 +224,7 @@ describe('SettingsStore', () => {
 
     // Write directly to the file, bypassing the store
     const settingsPath = path.join(storeDir, 'settings.json');
-    fs.writeFileSync(settingsPath, JSON.stringify({ external: 'change' }, null, 2) + '\n', 'utf8');
+    fs.writeFileSync(settingsPath, `${JSON.stringify({ external: 'change' }, null, 2)}\n`, 'utf8');
 
     // Before reload the store is unaware of the change
     expect(store.get('external')).toBeNull();
