@@ -50,7 +50,10 @@ import {
 } from './utils/tuiSettings';
 import { parseMarkerArgs, parseSettingsValue } from './utils/webCommands';
 import './index.ts'; // start Bun.serve web server in the same process
+import { IpcActionError, registry } from './actions/registry';
 import { startIpcServer } from './ipc/server';
+import './actions/markers';
+import './actions/chat';
 
 const settings = settingsStore;
 
@@ -2861,12 +2864,17 @@ const commandHandlers: Record<
     const text = parts.slice(2).join(' ');
     const validTargets = ['all', 'youtube', 'twitch', 'kick'];
     if (target && validTargets.includes(target) && text) {
-      const targetPlatforms = target === 'all' ? [] : [target];
       try {
-        await chatService.sendMessage(text, targetPlatforms);
-        emit(`[you → ${target}] ${text}`);
+        const ctx = { chatService, providers: { youtube, twitch, kick } };
+        const result = await registry.invokeAction('chat.send', { platform: target, text }, ctx);
+        for (const line of result.output ?? []) emit(line);
+        for (const warn of result.warnings ?? []) emit(`[system] ${warn}`);
       } catch (err) {
-        emit(`[system] Failed to send message: ${String(err)}`);
+        if (err instanceof IpcActionError) {
+          emit(`[system] ${err.message}`);
+        } else {
+          emit(`[system] Failed to send message: ${String(err)}`);
+        }
       }
     } else {
       emit('[system] Usage: /msg <all|youtube|twitch|kick> <text>');
@@ -2875,35 +2883,21 @@ const commandHandlers: Record<
 
   '/marker': async (parts, emit) => {
     const rawParts = parts.slice(1);
-    const rawArgs = rawParts.join(' ');
-    const pipeIdx = rawArgs.indexOf('|');
-    if (pipeIdx !== -1) {
-      const tsRaw = rawArgs.slice(pipeIdx + 1).trim();
-      if (tsRaw && Number.isNaN(Number.parseFloat(tsRaw))) {
-        emit(`[marker] Invalid timestamp "${tsRaw}" — must be a non-negative number`);
-        updateUI(lastMessages);
-        return;
-      }
-    }
-    const { description, timestamp } = parseMarkerArgs(rawParts);
+    const { description: text, timestamp } = parseMarkerArgs(rawParts);
 
     try {
-      const results = await Promise.allSettled([
-        youtube.createMarker(description, timestamp),
-        twitch.createMarker(description, timestamp),
-        kick.createMarker(description, timestamp),
-      ]);
-      const labels = ['youtube', 'twitch', 'kick'];
-      const summary = formatMarkerCreationSummary(
-        results.map((result, index) => ({
-          platform: labels[index] ?? `provider-${index + 1}`,
-          marker: result.status === 'fulfilled' ? result.value : null,
-          error: result.status === 'rejected' ? `error: ${String(result.reason)}` : undefined,
-        })),
-      );
-      emit(`[marker] ${summary}`);
+      const ctx = { chatService, providers: { youtube, twitch, kick } };
+      const markerArgs: Record<string, unknown> = { text, platform: 'all' };
+      if (timestamp !== undefined) markerArgs.timestamp = timestamp;
+      const result = await registry.invokeAction('marker.create', markerArgs, ctx);
+      for (const line of result.output ?? []) emit(line);
+      for (const warn of result.warnings ?? []) emit(`[system] ${warn}`);
     } catch (err) {
-      emit(`[marker] Error: ${String(err)}`);
+      if (err instanceof IpcActionError) {
+        emit(`[marker] ${err.message}`);
+      } else {
+        emit(`[marker] Error: ${String(err)}`);
+      }
     }
     updateUI(lastMessages);
   },
@@ -2930,31 +2924,26 @@ const commandHandlers: Record<
     const hasExplicitPlatform = ['all', 'youtube', 'twitch', 'kick'].includes(firstArg);
     const platformArg = hasExplicitPlatform ? firstArg : 'all';
     const limitToken = hasExplicitPlatform ? parts[2] : parts[1];
-    const limit = limitToken ? Number.parseInt(limitToken, 10) : 20;
+    const limit = limitToken ? Number.parseInt(limitToken, 10) : undefined;
 
-    if (limitToken && (Number.isNaN(limit) || limit <= 0)) {
+    if (limitToken && (limit === undefined || Number.isNaN(limit) || limit <= 0)) {
       emit('[markers] Usage: /markers clear | [all|youtube|twitch|kick] [limit]');
       updateUI(lastMessages);
       return;
     }
 
-    const targets = platformArg === 'all' ? ['youtube', 'twitch', 'kick'] : [platformArg];
-    for (const target of targets) {
-      try {
-        const provider = target === 'youtube' ? youtube : target === 'twitch' ? twitch : kick;
-        const markers = await provider.getMarkers({ limit });
-        if (markers.length === 0) {
-          emit(`[markers] ${target}: none`);
-          continue;
-        }
-        emit(`[markers] ${target}:`);
-        for (const marker of markers) {
-          emit(
-            `[markers]   ${formatMarkerPosition(marker.positionInSeconds)}  ${marker.description || '(untitled)'}  [${marker.id}]`,
-          );
-        }
-      } catch (err) {
-        emit(`[markers] ${target}: error: ${String(err)}`);
+    try {
+      const ctx = { chatService, providers: { youtube, twitch, kick } };
+      const actionArgs: Record<string, unknown> = { platform: platformArg };
+      if (limit !== undefined) actionArgs.limit = limit;
+      const result = await registry.invokeAction('markers.list', actionArgs, ctx);
+      for (const line of result.output ?? []) emit(line);
+      for (const warn of result.warnings ?? []) emit(`[system] ${warn}`);
+    } catch (err) {
+      if (err instanceof IpcActionError) {
+        emit(`[markers] ${err.message}`);
+      } else {
+        emit(`[markers] Error: ${String(err)}`);
       }
     }
   },
@@ -5252,7 +5241,7 @@ async function main() {
   });
 
   await initializeServices();
-  startIpcServer(handleCommandForCli);
+  startIpcServer(handleCommandForCli, chatService, { youtube, twitch, kick });
 
   // Establish session identity — reuse the persisted ID if present (same session/restart),
   // otherwise generate a fresh one (first launch or explicit clear).

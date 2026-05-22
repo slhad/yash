@@ -4,7 +4,9 @@
 
 - **Check specifications**: `cat SPECS.md`
 - **Read project info**: `cat README.md`
-- **Read on going work**: `cat tmp/ONGOING.md 2>/dev/null||echo "No on going work, analyse codebase to find work to do"`
+- **Check status / ongoing work**: read both sources and merge:
+  1. `cat tmp/ONGOING.md 2>/dev/null || echo "No ongoing work"`
+  2. `gh issue list --label "ai-ready,idea" --state open --json number,title,body,url`
 - **Send a command to a running yash instance**: `bun run cmd <command>` (e.g. `bun run cmd /marker Intro`)
   - Requires yash to be running; exits 1 with "yash is not running" if the socket is absent
   - The slash prefix is optional: `bun run cmd marker Intro` is equivalent to `bun run cmd /marker Intro`
