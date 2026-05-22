@@ -309,6 +309,7 @@ export class YouTubeProvider implements PlatformProvider {
   constructor() {
     this.loadCfg();
     this.loadPersistedChapters();
+    this.loadPersistedBroadcastId();
   }
 
   // ---------------------------------------------------------------------------
@@ -354,6 +355,15 @@ export class YouTubeProvider implements PlatformProvider {
           ...(typeof item.url === 'string' ? { url: item.url } : {}),
         } satisfies StreamMarker;
       });
+  }
+
+  private loadPersistedBroadcastId(): void {
+    const id = settingsStore.get('stream.broadcastId', null);
+    if (typeof id === 'string') this.broadcastId = id;
+  }
+
+  private async persistBroadcastId(id: string | null): Promise<void> {
+    await settingsStore.set('stream.broadcastId', id);
   }
 
   private async persistChapters(): Promise<void> {
@@ -1043,6 +1053,9 @@ export class YouTubeProvider implements PlatformProvider {
     this.tokenData = null;
     this.isAuthenticatedFlag = false;
     this.broadcastId = null;
+    void this.persistBroadcastId(null).catch((err) =>
+      defaultLogger.error('[YouTube] persistBroadcastId error:', err),
+    );
     this.liveChatId = null;
     this.streamStatus = StreamStatus.OFFLINE;
     this.connectionStatus = 'disconnected';
@@ -1269,6 +1282,9 @@ export class YouTubeProvider implements PlatformProvider {
     const broadcast = await this._findActiveBroadcast();
     if (broadcast) {
       this.broadcastId = broadcast.id;
+      void this.persistBroadcastId(broadcast.id).catch((err) =>
+        defaultLogger.error('[YouTube] persistBroadcastId error:', err),
+      );
       this.liveChatId = broadcast.liveChatId;
       this.streamStatus = StreamStatus.ONLINE;
       if (this.liveChatId) this._startChatPoll();
@@ -1291,6 +1307,10 @@ export class YouTubeProvider implements PlatformProvider {
         const previousLiveChatId = this.liveChatId;
         const broadcastChanged = previousBroadcastId !== broadcast.id;
         this.broadcastId = broadcast.id;
+        if (broadcastChanged)
+          void this.persistBroadcastId(broadcast.id).catch((err) =>
+            defaultLogger.error('[YouTube] persistBroadcastId error:', err),
+          );
         this.liveChatId = broadcast.liveChatId;
         this.streamStatus = StreamStatus.ONLINE;
 
@@ -1301,14 +1321,14 @@ export class YouTubeProvider implements PlatformProvider {
             this.chatStream === null);
         if (shouldStartChatPoll) this._startChatPoll();
 
-        if (broadcastChanged && previousBroadcastId !== null) {
+        if (broadcastChanged) {
           const setup = this.getSetup();
           if (setup.clearMarkersOnNewStream.enabled) {
             await this.clearPersistedMarkers().catch((err) =>
               defaultLogger.error('[YouTube] auto-clear markers error:', err),
             );
             defaultLogger.info(
-              '[YouTube] broadcast changed — chapter markers cleared automatically',
+              '[YouTube] broadcast changed or startup — chapter markers cleared automatically',
             );
           }
         }
@@ -1345,6 +1365,9 @@ export class YouTubeProvider implements PlatformProvider {
       } else if (this.streamStatus === StreamStatus.ONLINE) {
         this.streamStatus = StreamStatus.OFFLINE;
         this.broadcastId = null;
+        void this.persistBroadcastId(null).catch((err) =>
+          defaultLogger.error('[YouTube] persistBroadcastId error:', err),
+        );
         this.liveChatId = null;
         this.viewerCount = 0;
         this.streamStartTime = null;

@@ -36,6 +36,8 @@ function makeProvider() {
   const provider = new YouTubeProvider() as any;
   provider.chapterMarkers = [];
   provider.persistChapters = async () => {};
+  provider.persistBroadcastId = async () => {};
+  provider.loadPersistedBroadcastId = () => {};
   return provider as YouTubeProvider;
 }
 
@@ -461,7 +463,7 @@ describe('YouTubeProvider — chat', () => {
     expect(cleared).toBe(false);
   });
 
-  test('_pollStatus does not clear markers on initial broadcast detection (null → id)', async () => {
+  test('_pollStatus clears markers on startup when no prior broadcastId persisted and clearMarkersOnNewStream is enabled', async () => {
     const p = makeProvider() as any;
     p.isAuthenticatedFlag = true;
     p.tokenData = {
@@ -504,8 +506,221 @@ describe('YouTubeProvider — chat', () => {
     });
     await p._pollStatus();
 
+    expect(cleared).toBe(true);
+    expect(p.broadcastId).toBe('broadcast-1');
+  });
+
+  test('_pollStatus does not clear markers on restart when persisted broadcastId matches current broadcast', async () => {
+    const p = makeProvider() as any;
+    p.isAuthenticatedFlag = true;
+    p.tokenData = {
+      accessToken: 'token',
+      refreshToken: 'refresh',
+      expiresIn: 3600,
+      obtainmentTimestamp: Date.now(),
+      channelId: 'chan',
+      channelTitle: 'title',
+    };
+    p.broadcastId = 'broadcast-1'; // simulates loadPersistedBroadcastId() loading same broadcast
+    p.liveChatId = null;
+    p.chatStream = null;
+    p.chapterMarkers = [
+      {
+        id: 'yt_marker_1',
+        createdAt: new Date(),
+        description: 'Intro',
+        positionInSeconds: 0,
+        platform: 'youtube',
+      },
+    ];
+    let cleared = false;
+    p.clearPersistedMarkers = async () => {
+      cleared = true;
+    };
+    p._findActiveBroadcast = async () => ({ id: 'broadcast-1', liveChatId: null });
+    p._startChatPoll = () => {};
+    p._request = async () =>
+      new Response(
+        JSON.stringify({ items: [{ liveStreamingDetails: { concurrentViewers: '0' } }] }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      );
+
+    await settingsStore.set('platforms.youtube.setup', {
+      clearMarkersOnNewStream: { enabled: true },
+    });
+    await p._pollStatus();
+
     expect(cleared).toBe(false);
     expect(p.broadcastId).toBe('broadcast-1');
+  });
+
+  test('_pollStatus does not clear markers on startup when clearMarkersOnNewStream is disabled', async () => {
+    const p = makeProvider() as any;
+    p.isAuthenticatedFlag = true;
+    p.tokenData = {
+      accessToken: 'token',
+      refreshToken: 'refresh',
+      expiresIn: 3600,
+      obtainmentTimestamp: Date.now(),
+      channelId: 'chan',
+      channelTitle: 'title',
+    };
+    p.broadcastId = null;
+    p.liveChatId = null;
+    p.chatStream = null;
+    p.chapterMarkers = [
+      {
+        id: 'yt_marker_1',
+        createdAt: new Date(),
+        description: 'Intro',
+        positionInSeconds: 0,
+        platform: 'youtube',
+      },
+    ];
+    let cleared = false;
+    p.clearPersistedMarkers = async () => {
+      cleared = true;
+    };
+    p._findActiveBroadcast = async () => ({ id: 'broadcast-1', liveChatId: null });
+    p._startChatPoll = () => {};
+    p._request = async () =>
+      new Response(
+        JSON.stringify({ items: [{ liveStreamingDetails: { concurrentViewers: '0' } }] }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      );
+
+    await settingsStore.set('platforms.youtube.setup', {
+      clearMarkersOnNewStream: { enabled: false },
+    });
+    await p._pollStatus();
+
+    expect(cleared).toBe(false);
+    expect(p.broadcastId).toBe('broadcast-1');
+  });
+
+  test('_pollStatus error in clearPersistedMarkers is caught and does not throw', async () => {
+    const p = makeProvider() as any;
+    p.isAuthenticatedFlag = true;
+    p.tokenData = {
+      accessToken: 'token',
+      refreshToken: 'refresh',
+      expiresIn: 3600,
+      obtainmentTimestamp: Date.now(),
+      channelId: 'chan',
+      channelTitle: 'title',
+    };
+    p.broadcastId = 'broadcast-1';
+    p.liveChatId = null;
+    p.chatStream = null;
+    p.chapterMarkers = [];
+    p.clearPersistedMarkers = async () => {
+      throw new Error('disk full');
+    };
+    p._findActiveBroadcast = async () => ({ id: 'broadcast-2', liveChatId: null });
+    p._startChatPoll = () => {};
+    p._request = async () =>
+      new Response(
+        JSON.stringify({ items: [{ liveStreamingDetails: { concurrentViewers: '0' } }] }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      );
+
+    await settingsStore.set('platforms.youtube.setup', {
+      clearMarkersOnNewStream: { enabled: true },
+    });
+    await expect(p._pollStatus()).resolves.toBeUndefined();
+    expect(p.broadcastId).toBe('broadcast-2');
+  });
+
+  test('_pollStatus creates defaultMarkerAtStart on broadcast change', async () => {
+    const p = makeProvider() as any;
+    p.isAuthenticatedFlag = true;
+    p.tokenData = {
+      accessToken: 'token',
+      refreshToken: 'refresh',
+      expiresIn: 3600,
+      obtainmentTimestamp: Date.now(),
+      channelId: 'chan',
+      channelTitle: 'title',
+    };
+    p.broadcastId = 'broadcast-1';
+    p.liveChatId = null;
+    p.chatStream = null;
+    p.chapterMarkers = [];
+    p.streamStartTime = new Date(Date.now() - 10_000);
+    p._findActiveBroadcast = async () => ({ id: 'broadcast-2', liveChatId: null });
+    p._startChatPoll = () => {};
+    p._request = async () =>
+      new Response(
+        JSON.stringify({ items: [{ liveStreamingDetails: { concurrentViewers: '0' } }] }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      );
+
+    await settingsStore.set('platforms.youtube.setup', {
+      clearMarkersOnNewStream: { enabled: false },
+      defaultMarkerAtStart: { enabled: true, message: 'Start' },
+    });
+    await p._pollStatus();
+
+    const markers = await p.getMarkers();
+    expect(markers.some((m: any) => m.positionInSeconds === 0 && m.description === 'Start')).toBe(
+      true,
+    );
+  });
+
+  test('_pollStatus does not create duplicate defaultMarkerAtStart when one exists at position 0', async () => {
+    const p = makeProvider() as any;
+    p.isAuthenticatedFlag = true;
+    p.tokenData = {
+      accessToken: 'token',
+      refreshToken: 'refresh',
+      expiresIn: 3600,
+      obtainmentTimestamp: Date.now(),
+      channelId: 'chan',
+      channelTitle: 'title',
+    };
+    p.broadcastId = 'broadcast-1';
+    p.liveChatId = null;
+    p.chatStream = null;
+    p.chapterMarkers = [
+      {
+        id: 'yt_marker_existing',
+        createdAt: new Date(),
+        description: 'Existing',
+        positionInSeconds: 0,
+        platform: 'youtube',
+      },
+    ];
+    p._findActiveBroadcast = async () => ({ id: 'broadcast-2', liveChatId: null });
+    p._startChatPoll = () => {};
+    p._request = async () =>
+      new Response(
+        JSON.stringify({ items: [{ liveStreamingDetails: { concurrentViewers: '0' } }] }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      );
+
+    await settingsStore.set('platforms.youtube.setup', {
+      clearMarkersOnNewStream: { enabled: false },
+      defaultMarkerAtStart: { enabled: true, message: 'Start' },
+    });
+    await p._pollStatus();
+
+    const markers = await p.getMarkers({ limit: 100 });
+    expect(markers.filter((m: any) => m.positionInSeconds === 0)).toHaveLength(1);
   });
 
   test('status poll starts chat when the same broadcast later gains a liveChatId', async () => {
@@ -929,6 +1144,300 @@ describe('YouTubeProvider — markers', () => {
 
       const savedSettings = JSON.parse(await fs.readFile(getSettingsPath(), 'utf8'));
       expect(savedSettings.stream.chapters).toEqual([]);
+    } finally {
+      if (originalYashDataDir === undefined) delete process.env.YASH_DATA_DIR;
+      else process.env.YASH_DATA_DIR = originalYashDataDir;
+      await removeRepoTempDir(tempDir);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// broadcastId persistence
+// ---------------------------------------------------------------------------
+
+describe('YouTubeProvider — broadcastId persistence', () => {
+  test('loadPersistedBroadcastId sets broadcastId from settingsStore', async () => {
+    const tempDir = await makeRepoTempDir('yash-broadcastid-load');
+    const originalYashDataDir = process.env.YASH_DATA_DIR;
+    try {
+      process.env.YASH_DATA_DIR = tempDir;
+      await fs.writeFile(
+        getSettingsPath(),
+        `${JSON.stringify({ stream: { broadcastId: 'persisted-bc-1', chapters: [] } }, null, 2)}\n`,
+        'utf8',
+      );
+      await reloadConfig();
+      await settingsStore.reload();
+      const p = new YouTubeProvider() as any;
+      expect(p.broadcastId).toBe('persisted-bc-1');
+    } finally {
+      if (originalYashDataDir === undefined) delete process.env.YASH_DATA_DIR;
+      else process.env.YASH_DATA_DIR = originalYashDataDir;
+      await removeRepoTempDir(tempDir);
+    }
+  });
+
+  test('loadPersistedBroadcastId ignores non-string values', async () => {
+    const tempDir = await makeRepoTempDir('yash-broadcastid-badval');
+    const originalYashDataDir = process.env.YASH_DATA_DIR;
+    try {
+      process.env.YASH_DATA_DIR = tempDir;
+      await fs.writeFile(
+        getSettingsPath(),
+        `${JSON.stringify({ stream: { broadcastId: 42, chapters: [] } }, null, 2)}\n`,
+        'utf8',
+      );
+      await reloadConfig();
+      await settingsStore.reload();
+      const p = new YouTubeProvider() as any;
+      expect(p.broadcastId).toBeNull();
+    } finally {
+      if (originalYashDataDir === undefined) delete process.env.YASH_DATA_DIR;
+      else process.env.YASH_DATA_DIR = originalYashDataDir;
+      await removeRepoTempDir(tempDir);
+    }
+  });
+
+  test('persistBroadcastId writes broadcastId to settingsStore', async () => {
+    const tempDir = await makeRepoTempDir('yash-broadcastid-persist');
+    const originalYashDataDir = process.env.YASH_DATA_DIR;
+    try {
+      process.env.YASH_DATA_DIR = tempDir;
+      await fs.writeFile(
+        getSettingsPath(),
+        `${JSON.stringify({ stream: { chapters: [] } }, null, 2)}\n`,
+        'utf8',
+      );
+      await reloadConfig();
+      await settingsStore.reload();
+      const p = new YouTubeProvider() as any;
+      await p.persistBroadcastId('new-broadcast-id');
+      const saved = JSON.parse(await fs.readFile(getSettingsPath(), 'utf8'));
+      expect(saved.stream.broadcastId).toBe('new-broadcast-id');
+    } finally {
+      if (originalYashDataDir === undefined) delete process.env.YASH_DATA_DIR;
+      else process.env.YASH_DATA_DIR = originalYashDataDir;
+      await removeRepoTempDir(tempDir);
+    }
+  });
+
+  test('persistBroadcastId null clears stored broadcastId', async () => {
+    const tempDir = await makeRepoTempDir('yash-broadcastid-clear');
+    const originalYashDataDir = process.env.YASH_DATA_DIR;
+    try {
+      process.env.YASH_DATA_DIR = tempDir;
+      await fs.writeFile(
+        getSettingsPath(),
+        `${JSON.stringify({ stream: { broadcastId: 'old-id', chapters: [] } }, null, 2)}\n`,
+        'utf8',
+      );
+      await reloadConfig();
+      await settingsStore.reload();
+      const p = new YouTubeProvider() as any;
+      await p.persistBroadcastId(null);
+      const saved = JSON.parse(await fs.readFile(getSettingsPath(), 'utf8'));
+      expect(saved.stream.broadcastId).toBeNull();
+    } finally {
+      if (originalYashDataDir === undefined) delete process.env.YASH_DATA_DIR;
+      else process.env.YASH_DATA_DIR = originalYashDataDir;
+      await removeRepoTempDir(tempDir);
+    }
+  });
+
+  test('_pollStatus calls persistBroadcastId with new id when broadcast changes', async () => {
+    const p = makeProvider() as any;
+    p.isAuthenticatedFlag = true;
+    p.tokenData = {
+      accessToken: 'token',
+      refreshToken: 'refresh',
+      expiresIn: 3600,
+      obtainmentTimestamp: Date.now(),
+      channelId: 'chan',
+      channelTitle: 'title',
+    };
+    p.broadcastId = 'broadcast-1';
+    p.liveChatId = null;
+    p.chatStream = null;
+    const persisted: (string | null)[] = [];
+    p.persistBroadcastId = async (id: string | null) => {
+      persisted.push(id);
+    };
+    p._findActiveBroadcast = async () => ({ id: 'broadcast-2', liveChatId: null });
+    p._startChatPoll = () => {};
+    p._request = async () =>
+      new Response(
+        JSON.stringify({ items: [{ liveStreamingDetails: { concurrentViewers: '0' } }] }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      );
+
+    await settingsStore.set('platforms.youtube.setup', {
+      clearMarkersOnNewStream: { enabled: false },
+    });
+    await p._pollStatus();
+    await new Promise((r) => setTimeout(r, 10)); // let void promise settle
+
+    expect(persisted).toContain('broadcast-2');
+  });
+
+  test('_pollStatus calls persistBroadcastId with null when stream goes offline', async () => {
+    const p = makeProvider() as any;
+    p.isAuthenticatedFlag = true;
+    p.tokenData = {
+      accessToken: 'token',
+      refreshToken: 'refresh',
+      expiresIn: 3600,
+      obtainmentTimestamp: Date.now(),
+      channelId: 'chan',
+      channelTitle: 'title',
+    };
+    p.broadcastId = 'broadcast-1';
+    p.liveChatId = null;
+    p.chatStream = null;
+    p.streamStatus = StreamStatus.ONLINE;
+    const persisted: (string | null)[] = [];
+    p.persistBroadcastId = async (id: string | null) => {
+      persisted.push(id);
+    };
+    p._findActiveBroadcast = async () => null;
+    p._stopChatPoll = () => {};
+
+    await p._pollStatus();
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(persisted).toContain(null);
+    expect(p.broadcastId).toBeNull();
+  });
+
+  test('full restart with same broadcast: markers survive', async () => {
+    const tempDir = await makeRepoTempDir('yash-broadcastid-restart-same');
+    const originalYashDataDir = process.env.YASH_DATA_DIR;
+    try {
+      process.env.YASH_DATA_DIR = tempDir;
+      await fs.writeFile(
+        getSettingsPath(),
+        `${JSON.stringify(
+          {
+            stream: {
+              broadcastId: 'live-broadcast',
+              chapters: [
+                {
+                  id: 'yt_marker_1',
+                  createdAt: new Date().toISOString(),
+                  description: 'Intro',
+                  positionInSeconds: 0,
+                  platform: 'youtube',
+                },
+              ],
+            },
+            'platforms.youtube.setup': { clearMarkersOnNewStream: { enabled: true } },
+          },
+          null,
+          2,
+        )}\n`,
+        'utf8',
+      );
+      await reloadConfig();
+      await settingsStore.reload();
+
+      const p = new YouTubeProvider() as any;
+      p.isAuthenticatedFlag = true;
+      p.tokenData = {
+        accessToken: 'token',
+        refreshToken: 'refresh',
+        expiresIn: 3600,
+        obtainmentTimestamp: Date.now(),
+        channelId: 'chan',
+        channelTitle: 'title',
+      };
+      p.liveChatId = null;
+      p.chatStream = null;
+      p.persistBroadcastId = async () => {};
+      p._findActiveBroadcast = async () => ({ id: 'live-broadcast', liveChatId: null });
+      p._startChatPoll = () => {};
+      p._request = async () =>
+        new Response(
+          JSON.stringify({ items: [{ liveStreamingDetails: { concurrentViewers: '5' } }] }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        );
+
+      await p._pollStatus();
+
+      const markers = await p.getMarkers({ limit: 10 });
+      expect(markers).toHaveLength(1);
+      expect(markers[0]?.description).toBe('Intro');
+    } finally {
+      if (originalYashDataDir === undefined) delete process.env.YASH_DATA_DIR;
+      else process.env.YASH_DATA_DIR = originalYashDataDir;
+      await removeRepoTempDir(tempDir);
+    }
+  });
+
+  test('full restart with different broadcast: markers cleared', async () => {
+    const tempDir = await makeRepoTempDir('yash-broadcastid-restart-new');
+    const originalYashDataDir = process.env.YASH_DATA_DIR;
+    try {
+      process.env.YASH_DATA_DIR = tempDir;
+      await fs.writeFile(
+        getSettingsPath(),
+        `${JSON.stringify(
+          {
+            stream: {
+              broadcastId: 'old-broadcast',
+              chapters: [
+                {
+                  id: 'yt_marker_1',
+                  createdAt: new Date().toISOString(),
+                  description: 'Intro',
+                  positionInSeconds: 0,
+                  platform: 'youtube',
+                },
+              ],
+            },
+            'platforms.youtube.setup': { clearMarkersOnNewStream: { enabled: true } },
+          },
+          null,
+          2,
+        )}\n`,
+        'utf8',
+      );
+      await reloadConfig();
+      await settingsStore.reload();
+
+      const p = new YouTubeProvider() as any;
+      p.isAuthenticatedFlag = true;
+      p.tokenData = {
+        accessToken: 'token',
+        refreshToken: 'refresh',
+        expiresIn: 3600,
+        obtainmentTimestamp: Date.now(),
+        channelId: 'chan',
+        channelTitle: 'title',
+      };
+      p.liveChatId = null;
+      p.chatStream = null;
+      p.persistBroadcastId = async () => {};
+      p._findActiveBroadcast = async () => ({ id: 'new-broadcast', liveChatId: null });
+      p._startChatPoll = () => {};
+      p._request = async () =>
+        new Response(
+          JSON.stringify({ items: [{ liveStreamingDetails: { concurrentViewers: '5' } }] }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        );
+
+      await p._pollStatus();
+
+      const markers = await p.getMarkers({ limit: 10 });
+      expect(markers).toHaveLength(0);
     } finally {
       if (originalYashDataDir === undefined) delete process.env.YASH_DATA_DIR;
       else process.env.YASH_DATA_DIR = originalYashDataDir;
