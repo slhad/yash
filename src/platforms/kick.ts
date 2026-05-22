@@ -74,11 +74,11 @@ const REQUIRED_SCOPES = [
 
 const KICK_EVENTS_SUBSCRIPTIONS_URL = 'https://api.kick.com/public/v1/events/subscriptions';
 const REQUIRED_WEBHOOK_EVENTS = [
-  { name: 'chat.message.sent',            version: 1 },
-  { name: 'channel.followed',             version: 1 },
-  { name: 'channel.subscription.new',     version: 1 },
+  { name: 'chat.message.sent', version: 1 },
+  { name: 'channel.followed', version: 1 },
+  { name: 'channel.subscription.new', version: 1 },
   { name: 'channel.subscription.renewal', version: 1 },
-  { name: 'channel.subscription.gifted',  version: 1 },
+  { name: 'channel.subscription.gifted', version: 1 },
 ] as const;
 
 export class KickProvider implements PlatformProvider {
@@ -693,7 +693,7 @@ export class KickProvider implements PlatformProvider {
   }
 
   private async _ensureEventSubscriptions(): Promise<void> {
-    let missing: typeof REQUIRED_WEBHOOK_EVENTS[number][];
+    let missing: (typeof REQUIRED_WEBHOOK_EVENTS)[number][];
     try {
       const existing = new Set(await this._fetchEventSubscriptions());
       missing = REQUIRED_WEBHOOK_EVENTS.filter((event) => !existing.has(event.name));
@@ -870,7 +870,7 @@ export class KickProvider implements PlatformProvider {
       const data = body?.data as Record<string, unknown> | undefined;
       const userData = data?.gifted_by as Record<string, unknown> | undefined;
       const username = String(userData?.username ?? 'someone');
-      const giftee = (data?.user as Record<string, unknown> | undefined);
+      const giftee = data?.user as Record<string, unknown> | undefined;
       const gifteeName = String(giftee?.username ?? 'someone');
       this._dispatchActivity('gift', `${username} gifted a sub to ${gifteeName}`);
       return;

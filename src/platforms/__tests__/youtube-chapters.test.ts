@@ -1,4 +1,4 @@
-import { describe, test, expect } from 'bun:test';
+import { describe, expect, test } from 'bun:test';
 
 function formatChapterTimestamp(positionInSeconds: number): string {
   const h = Math.floor(positionInSeconds / 3600);

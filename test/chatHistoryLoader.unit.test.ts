@@ -96,14 +96,16 @@ describe('buildChatHistoryMessages', () => {
       badges: { moderator: '1' },
       streamId: 'stream-abc',
     });
-    const result = buildChatHistoryMessages(['stream-abc'], fakeStore({ 'stream-abc': [msg] }), 100);
+    const result = buildChatHistoryMessages(
+      ['stream-abc'],
+      fakeStore({ 'stream-abc': [msg] }),
+      100,
+    );
     expect(result[0]).toEqual(msg);
   });
 
   test('single stream with exactly maxHistory messages returns all of them', () => {
-    const msgs = Array.from({ length: 5 }, (_, i) =>
-      makeMsg({ id: `m${i}`, timestamp: i * 1000 }),
-    );
+    const msgs = Array.from({ length: 5 }, (_, i) => makeMsg({ id: `m${i}`, timestamp: i * 1000 }));
     const result = buildChatHistoryMessages(['s1'], fakeStore({ s1: msgs }), 5);
     expect(result).toHaveLength(5);
   });

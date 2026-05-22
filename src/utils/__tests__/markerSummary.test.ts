@@ -1,4 +1,4 @@
-import { describe, test, expect } from 'bun:test';
+import { describe, expect, test } from 'bun:test';
 import { formatMarkerCreationSummary } from '../markerSummary';
 
 describe('formatMarkerCreationSummary', () => {
@@ -31,9 +31,7 @@ describe('formatMarkerCreationSummary', () => {
   });
 
   test('failure with no error shows cross symbol', () => {
-    const result = formatMarkerCreationSummary([
-      { platform: 'youtube', marker: null },
-    ]);
+    const result = formatMarkerCreationSummary([{ platform: 'youtube', marker: null }]);
     expect(result).toBe('youtube: ✗');
   });
 

@@ -560,9 +560,10 @@ export class YouTubeProvider implements PlatformProvider {
       if (messageType === 'membershipGiftingEvent') {
         const who = item.authorDetails?.displayName ?? 'someone';
         const count = Number((snippet as any)?.membershipGiftingDetails?.giftMembershipsCount ?? 0);
-        const msg = count > 0
-          ? `${who} gifted ${count} membership${count !== 1 ? 's' : ''}`
-          : displayMessage || `${who} gifted memberships`;
+        const msg =
+          count > 0
+            ? `${who} gifted ${count} membership${count !== 1 ? 's' : ''}`
+            : displayMessage || `${who} gifted memberships`;
         this._dispatchActivity('gift', msg);
         continue;
       }
@@ -574,7 +575,12 @@ export class YouTubeProvider implements PlatformProvider {
       const isTextMessage =
         messageType === undefined || messageType === '' || messageType === 'textMessageEvent';
       if (!isTextMessage || displayMessage.length === 0) continue;
-      if (cutoffMs !== null && Number.isFinite(publishedAt) && publishedAt < cutoffMs && !this.chatInitialized) {
+      if (
+        cutoffMs !== null &&
+        Number.isFinite(publishedAt) &&
+        publishedAt < cutoffMs &&
+        !this.chatInitialized
+      ) {
         continue;
       }
 
@@ -1459,7 +1465,10 @@ export class YouTubeProvider implements PlatformProvider {
     if (timestamp !== undefined) {
       resolvedSeconds = timestamp;
     } else if (this.streamStartTime) {
-      resolvedSeconds = Math.max(0, Math.floor((Date.now() - this.streamStartTime.getTime()) / 1000));
+      resolvedSeconds = Math.max(
+        0,
+        Math.floor((Date.now() - this.streamStartTime.getTime()) / 1000),
+      );
     } else {
       const activeBroadcast = await this._findActiveBroadcast();
       if (!activeBroadcast) return 0;
@@ -1479,7 +1488,10 @@ export class YouTubeProvider implements PlatformProvider {
       if (!actualStartTime) return 0;
 
       this.streamStartTime = new Date(actualStartTime);
-      resolvedSeconds = Math.max(0, Math.floor((Date.now() - this.streamStartTime.getTime()) / 1000));
+      resolvedSeconds = Math.max(
+        0,
+        Math.floor((Date.now() - this.streamStartTime.getTime()) / 1000),
+      );
     }
 
     if (timestamp === undefined) {
@@ -1681,7 +1693,10 @@ export class YouTubeProvider implements PlatformProvider {
       tags: { ...DEFAULT_SETUP.tags, ...(cfg.tags ?? {}) },
       description: { ...DEFAULT_SETUP.description, ...(cfg.description ?? {}) },
       subjectTitle: { ...DEFAULT_SETUP.subjectTitle, ...(cfg.subjectTitle ?? {}) },
-      defaultMarkerAtStart: { ...DEFAULT_SETUP.defaultMarkerAtStart, ...(cfg.defaultMarkerAtStart ?? {}) },
+      defaultMarkerAtStart: {
+        ...DEFAULT_SETUP.defaultMarkerAtStart,
+        ...(cfg.defaultMarkerAtStart ?? {}),
+      },
       markerSyncDelay: { ...DEFAULT_SETUP.markerSyncDelay, ...(cfg.markerSyncDelay ?? {}) },
     };
   }

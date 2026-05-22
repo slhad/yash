@@ -767,7 +767,9 @@ describe('YouTubeProvider — markers', () => {
     expect(broadcastPutBodies).toHaveLength(2);
     expect(videoPutBodies).toHaveLength(2);
     expect(videoPutBodies[0].snippet.description).toContain('Timestamps :\n00:00:00 - Intro');
-    expect(videoPutBodies[1].snippet.description).toContain('Timestamps :\n00:00:00 - Intro\n00:01:00 - Topic');
+    expect(videoPutBodies[1].snippet.description).toContain(
+      'Timestamps :\n00:00:00 - Intro\n00:01:00 - Topic',
+    );
   });
 
   test('createMarker rolls back the marker when description sync fails', async () => {
@@ -1535,7 +1537,11 @@ describe('YouTubeProvider — playlists', () => {
 
 function makeItem(
   messageType: string,
-  overrides: { displayMessage?: unknown; displayName?: unknown; snippet?: Record<string, unknown> } = {},
+  overrides: {
+    displayMessage?: unknown;
+    displayName?: unknown;
+    snippet?: Record<string, unknown>;
+  } = {},
 ) {
   return {
     id: `item_${messageType}`,
@@ -1559,7 +1565,10 @@ describe('YouTubeProvider — onActivityEvent', () => {
     p.onActivityEvent((ev: { type: string; message: string }) => received.push(ev));
     p._dispatchActivity('superchat', 'TestUser sent a Super Chat of $5.00');
     expect(received).toHaveLength(1);
-    expect(received[0]).toEqual({ type: 'superchat', message: 'TestUser sent a Super Chat of $5.00' });
+    expect(received[0]).toEqual({
+      type: 'superchat',
+      message: 'TestUser sent a Super Chat of $5.00',
+    });
   });
 
   test('multiple callbacks all receive the event', () => {
@@ -1588,7 +1597,10 @@ describe('YouTubeProvider — onActivityEvent', () => {
   test('double-unsubscribe is safe', () => {
     const p = makeProvider() as any;
     const unsub = p.onActivityEvent(() => {});
-    expect(() => { unsub(); unsub(); }).not.toThrow();
+    expect(() => {
+      unsub();
+      unsub();
+    }).not.toThrow();
   });
 });
 
@@ -1733,7 +1745,10 @@ describe('YouTubeProvider — _dispatchStreamItems gRPC-path fallback', () => {
     const p = makeProvider() as any;
     const events: { type: string; message: string }[] = [];
     p.onActivityEvent((ev: { type: string; message: string }) => events.push(ev));
-    p._dispatchStreamItems([makeGrpcItem('newSponsorEvent', 'NewFan joined as a member', 'NewFan')], true);
+    p._dispatchStreamItems(
+      [makeGrpcItem('newSponsorEvent', 'NewFan joined as a member', 'NewFan')],
+      true,
+    );
     expect(events).toHaveLength(1);
     expect(events[0]?.type).toBe('member');
     expect(events[0]?.message).toBe('NewFan joined as a member');
@@ -1743,7 +1758,10 @@ describe('YouTubeProvider — _dispatchStreamItems gRPC-path fallback', () => {
     const p = makeProvider() as any;
     const events: { type: string; message: string }[] = [];
     p.onActivityEvent((ev: { type: string; message: string }) => events.push(ev));
-    p._dispatchStreamItems([makeGrpcItem('memberMilestoneChatEvent', 'Member for 12 months!', 'LongTimer')], true);
+    p._dispatchStreamItems(
+      [makeGrpcItem('memberMilestoneChatEvent', 'Member for 12 months!', 'LongTimer')],
+      true,
+    );
     expect(events).toHaveLength(1);
     expect(events[0]?.type).toBe('member');
     expect(events[0]?.message).toBe('Member for 12 months!');
@@ -1753,7 +1771,10 @@ describe('YouTubeProvider — _dispatchStreamItems gRPC-path fallback', () => {
     const p = makeProvider() as any;
     const events: { type: string; message: string }[] = [];
     p.onActivityEvent((ev: { type: string; message: string }) => events.push(ev));
-    p._dispatchStreamItems([makeGrpcItem('membershipGiftingEvent', 'Gifter gave 3 memberships', 'Gifter')], true);
+    p._dispatchStreamItems(
+      [makeGrpcItem('membershipGiftingEvent', 'Gifter gave 3 memberships', 'Gifter')],
+      true,
+    );
     expect(events).toHaveLength(1);
     expect(events[0]?.type).toBe('gift');
     expect(events[0]?.message).toBe('Gifter gave 3 memberships');

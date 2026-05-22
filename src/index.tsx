@@ -30,12 +30,13 @@ import {
 import { ChatterCache } from './services/chatter-cache';
 import { messageLog, type StreamSummary } from './services/message-log';
 import { type ChatClearLineKind, runChatClearCommand } from './utils/chatClear';
+import { buildChatHistoryMessages } from './utils/chatHistoryLoader';
 import { getDataDir, isDemoMode, saveConfig } from './utils/config';
+import { runIpcCommand } from './utils/ipcCommandRunner';
 import logCollector from './utils/logCollector';
 import { defaultLogger } from './utils/logger';
 import { formatMarkerCreationSummary } from './utils/markerSummary';
 import { buildTargetedStreamMetadataUpdate } from './utils/streamMetadata';
-import { buildChatHistoryMessages } from './utils/chatHistoryLoader';
 import { getAutocomplete, initTuiCommands } from './utils/tuiCommands';
 import { installTuiErrorCapture } from './utils/tuiErrorCapture';
 import { type MessageTarget } from './utils/tuiMessageInput';
@@ -47,7 +48,6 @@ import {
   SETTINGS_WIDTH_OPTIONS,
   validateTuiSettingsDraft,
 } from './utils/tuiSettings';
-import { runIpcCommand } from './utils/ipcCommandRunner';
 import { parseMarkerArgs, parseSettingsValue } from './utils/webCommands';
 import './index.ts'; // start Bun.serve web server in the same process
 import { startIpcServer } from './ipc/server';
@@ -97,11 +97,7 @@ function _loadActivityEvents(): ActivityEvent[] {
 
 function _saveActivityEvents(): void {
   try {
-    require('node:fs').writeFileSync(
-      _getActivityLogPath(),
-      JSON.stringify(activityEvents),
-      'utf8',
-    );
+    require('node:fs').writeFileSync(_getActivityLogPath(), JSON.stringify(activityEvents), 'utf8');
   } catch {
     /* ignore */
   }
@@ -135,10 +131,13 @@ function _scheduleActivityBarRefresh(): void {
     .filter((t) => t > now)
     .sort((a, b) => a - b)[0];
   if (nextExpiry === undefined) return;
-  activityRefreshTimer = setTimeout(() => {
-    if (uiNodes) updateUI(lastMessages);
-    _scheduleActivityBarRefresh();
-  }, nextExpiry - now + 50);
+  activityRefreshTimer = setTimeout(
+    () => {
+      if (uiNodes) updateUI(lastMessages);
+      _scheduleActivityBarRefresh();
+    },
+    nextExpiry - now + 50,
+  );
 }
 
 function _rotateActivitySession(): void {
@@ -151,7 +150,13 @@ function _rotateActivitySession(): void {
 }
 
 function pushActivityEvent(platform: string, type: string, message: string): void {
-  const ev: ActivityEvent = { ts: Date.now(), platform, type, message, sessionId: currentActivitySessionId };
+  const ev: ActivityEvent = {
+    ts: Date.now(),
+    platform,
+    type,
+    message,
+    sessionId: currentActivitySessionId,
+  };
   activityEvents.push(ev);
   _saveActivityEvents();
   _scheduleActivityBarRefresh();
@@ -530,7 +535,10 @@ function initUI(renderer: CliRenderer, messages: ChatLine[]): UINodes {
   activityBar.onMouseDown = () => openActivityModal();
   activityBar.onMouseOver = () => {
     activityBarHovered = true;
-    if (activityRefreshTimer) { clearTimeout(activityRefreshTimer); activityRefreshTimer = null; }
+    if (activityRefreshTimer) {
+      clearTimeout(activityRefreshTimer);
+      activityRefreshTimer = null;
+    }
     updateUI(lastMessages);
   };
   activityBar.onMouseOut = () => {
@@ -1942,9 +1950,7 @@ function openYouTubeSetupModal(): void {
     width: '100%',
   });
   markerDelayInput.value =
-    saved.markerSyncDelay.offsetSeconds !== 0
-      ? String(saved.markerSyncDelay.offsetSeconds)
-      : '';
+    saved.markerSyncDelay.offsetSeconds !== 0 ? String(saved.markerSyncDelay.offsetSeconds) : '';
   const markerSyncDelayHint = new TextRenderable(renderer, {
     content: '  ↳ adds this offset (seconds, may be negative) to every marker timestamp',
     fg: 'gray',
@@ -2699,8 +2705,15 @@ function openStreamModal(preselected: string[]): void {
   function scheduleSubjectSearch(q: string, delayMs = 300): void {
     subjectSuggestions = [];
     subjectSelectedIdx = -1;
-    if (subjectFetchTimer) { clearTimeout(subjectFetchTimer); subjectFetchTimer = null; }
-    if (q.length < 2) { subjectHint.content = ''; subjectHint.visible = false; return; }
+    if (subjectFetchTimer) {
+      clearTimeout(subjectFetchTimer);
+      subjectFetchTimer = null;
+    }
+    if (q.length < 2) {
+      subjectHint.content = '';
+      subjectHint.visible = false;
+      return;
+    }
     subjectFetchTimer = setTimeout(async () => {
       const results = await youtube.searchPlaylists(q);
       subjectSuggestions = results;
@@ -2714,8 +2727,15 @@ function openStreamModal(preselected: string[]): void {
   function scheduleTwitchSearch(q: string, delayMs = 300): void {
     catSuggestions = [];
     catSelectedIdx = -1;
-    if (catFetchTimer) { clearTimeout(catFetchTimer); catFetchTimer = null; }
-    if (q.length < 2) { twitchCatHint.content = ''; twitchCatHint.visible = false; return; }
+    if (catFetchTimer) {
+      clearTimeout(catFetchTimer);
+      catFetchTimer = null;
+    }
+    if (q.length < 2) {
+      twitchCatHint.content = '';
+      twitchCatHint.visible = false;
+      return;
+    }
     catFetchTimer = setTimeout(async () => {
       const results = await twitch.searchCategories(q);
       catSuggestions = results;
@@ -2728,8 +2748,15 @@ function openStreamModal(preselected: string[]): void {
   function scheduleKickSearch(q: string, delayMs = 300): void {
     kickCatSuggestions = [];
     kickCatSelectedIdx = -1;
-    if (kickCatFetchTimer) { clearTimeout(kickCatFetchTimer); kickCatFetchTimer = null; }
-    if (q.length < 2) { kickCatHint.content = ''; kickCatHint.visible = false; return; }
+    if (kickCatFetchTimer) {
+      clearTimeout(kickCatFetchTimer);
+      kickCatFetchTimer = null;
+    }
+    if (q.length < 2) {
+      kickCatHint.content = '';
+      kickCatHint.visible = false;
+      return;
+    }
     kickCatFetchTimer = setTimeout(async () => {
       const results = await kick.searchCategories(q);
       kickCatSuggestions = results;
@@ -2742,17 +2769,26 @@ function openStreamModal(preselected: string[]): void {
   }
 
   subjectInput.on(InputRenderableEvents.INPUT, () => {
-    if (isNavigatingSubject) { isNavigatingSubject = false; return; }
+    if (isNavigatingSubject) {
+      isNavigatingSubject = false;
+      return;
+    }
     scheduleSubjectSearch(subjectInput.value.trim());
   });
 
   twitchGameInput.on(InputRenderableEvents.INPUT, () => {
-    if (isNavigatingTwitch) { isNavigatingTwitch = false; return; }
+    if (isNavigatingTwitch) {
+      isNavigatingTwitch = false;
+      return;
+    }
     scheduleTwitchSearch(twitchGameInput.value.trim());
   });
 
   kickCatInput.on(InputRenderableEvents.INPUT, () => {
-    if (isNavigatingKick) { isNavigatingKick = false; return; }
+    if (isNavigatingKick) {
+      isNavigatingKick = false;
+      return;
+    }
     scheduleKickSearch(kickCatInput.value.trim());
   });
 }
@@ -3382,13 +3418,25 @@ function openSettingsModal(): void {
   //         eventsVis, eventsTail, eventsW, logsVis, logsH, logsT,
   //         ytV, twitchV, kickV, actVis, actMode, actTimeout]
   const FOCUS_SCROLL_TARGETS = [
-    2, 4, 6, 8, 10, 12,   // Display section (displayHeading=0, then items at 2..12)
-    16,                    // historySizeInput (historySizeLabel at 14)
-    20,                    // eventsVisible (sidebarHeading at 18)
-    24, 26, 28,            // eventsTailInput, eventsWidth, logsVisible (eventsTailLabel at 22)
-    32, 36,                // logsHeightInput, logsTailInput (labels at 30, 34)
-    40, 42, 44,            // per-platform viewers (providerHeading at 38)
-    48, 50, 54,            // activity section (activityHeading at 46, label at 52)
+    2,
+    4,
+    6,
+    8,
+    10,
+    12, // Display section (displayHeading=0, then items at 2..12)
+    16, // historySizeInput (historySizeLabel at 14)
+    20, // eventsVisible (sidebarHeading at 18)
+    24,
+    26,
+    28, // eventsTailInput, eventsWidth, logsVisible (eventsTailLabel at 22)
+    32,
+    36, // logsHeightInput, logsTailInput (labels at 30, 34)
+    40,
+    42,
+    44, // per-platform viewers (providerHeading at 38)
+    48,
+    50,
+    54, // activity section (activityHeading at 46, label at 52)
   ] as const;
 
   let settingsScrollLine = 0;
@@ -3602,11 +3650,9 @@ function openSettingsModal(): void {
       kind: 'enum',
       node: activityModeRow,
       render: (focused) => {
-        activityModeRow.content = makeEnumRow(
-          'activity.mode',
-          draft.activityMode,
-          focused,
-        ).concat('  - permanent: events stay until cleared; timed: each event expires after timeout');
+        activityModeRow.content = makeEnumRow('activity.mode', draft.activityMode, focused).concat(
+          '  - permanent: events stay until cleared; timed: each event expires after timeout',
+        );
         activityModeRow.fg = focused ? 'cyan' : 'white';
       },
       cycle: (direction) => {

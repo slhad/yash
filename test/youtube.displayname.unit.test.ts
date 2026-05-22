@@ -23,10 +23,7 @@ function makeProvider() {
   return provider as YouTubeProvider;
 }
 
-function dispatchOne(
-  p: YouTubeProvider,
-  displayName: string,
-): Promise<string> {
+function dispatchOne(p: YouTubeProvider, displayName: string): Promise<string> {
   return new Promise((resolve) => {
     p.onMessage((msg: ChatMessage) => resolve(msg.username));
     (p as any)._dispatchStreamItems(
@@ -61,7 +58,9 @@ describe('YouTubeProvider — displayName @ stripping', () => {
   test('empty fallback "UnknownUser" is stored as-is', async () => {
     const p = makeProvider() as any;
     let captured = '';
-    p.onMessage((msg: ChatMessage) => { captured = msg.username; });
+    p.onMessage((msg: ChatMessage) => {
+      captured = msg.username;
+    });
     p._dispatchStreamItems(
       [
         {

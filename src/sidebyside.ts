@@ -62,7 +62,7 @@ let historyIdx = -1;
 let currentPosition = (
   qsPosition && POSITIONS.includes(qsPosition as (typeof POSITIONS)[number])
     ? qsPosition
-    : (localStorage.getItem(STORAGE_KEY_POS) || 'bottom')
+    : localStorage.getItem(STORAGE_KEY_POS) || 'bottom'
 ) as (typeof POSITIONS)[number] | string;
 
 function loadEnabled(platform: Platform): boolean {
