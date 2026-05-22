@@ -75,4 +75,15 @@ describe('runIpcCommand — IPC event logging', () => {
 
     expect(result).toBe('[help] this is help');
   });
+
+  test('mirrors emitted output to the live TUI when requested', async () => {
+    const mirrored: string[] = [];
+
+    const result = await runIpcCommand('/help', fakeHandlers, () => {}, (line) => {
+      mirrored.push(line);
+    });
+
+    expect(result).toBe('[help] this is help');
+    expect(mirrored).toEqual(['[help] this is help']);
+  });
 });

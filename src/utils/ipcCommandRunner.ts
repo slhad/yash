@@ -9,6 +9,7 @@ export async function runIpcCommand(
   trimmed: string,
   commandHandlers: CommandHandlersRecord,
   onEvent: (platform: string, type: string, message: string) => void,
+  mirrorToTui?: (line: string) => void,
 ): Promise<string> {
   const parts = trimmed.split(/\s+/);
   const cmd = (parts[0] ?? '').toLowerCase();
@@ -18,7 +19,10 @@ export async function runIpcCommand(
   if (cmd === '/settings' && !parts[1]) return 'This command requires the TUI';
 
   const lines: string[] = [];
-  const emit = (line: string) => lines.push(line);
+  const emit = (line: string) => {
+    lines.push(line);
+    mirrorToTui?.(line);
+  };
 
   const handler = commandHandlers[cmd];
   if (handler) {

@@ -9,6 +9,7 @@ export type ActionArgSchema =
 
 export type ActionSafety = 'safe' | 'confirm' | 'dangerous' | 'blocked';
 export type ActionVisibility = 'public' | 'internal';
+export type ActionIpcOutputMode = 'response_only' | 'response_and_tui';
 
 export type ActionContext = {
   chatService: ChatService;
@@ -28,6 +29,7 @@ export type YashActionDefinition = {
   description: string;
   domain: string;
   ipcEnabled: boolean;
+  ipcOutputMode?: ActionIpcOutputMode;
   readOnly: boolean;
   safety: ActionSafety;
   visibility: ActionVisibility;

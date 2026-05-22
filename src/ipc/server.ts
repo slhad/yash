@@ -10,6 +10,7 @@ export function startIpcServer(
   handleCommandForCli: (cmd: string) => Promise<string>,
   chatService: ChatService,
   providers: Record<string, PlatformProvider>,
+  mirrorToTui?: (line: string) => void,
 ): void {
   const socketPath = resolveSocketPath();
 
@@ -31,7 +32,7 @@ export function startIpcServer(
       buffer = '';
       try {
         const req = JSON.parse(line) as Record<string, unknown>;
-        const response = await handleRequest(req, handleCommandForCli, ctx);
+        const response = await handleRequest(req, handleCommandForCli, ctx, mirrorToTui);
         socket.write(`${JSON.stringify(response)}\n`);
       } catch {
         socket.write(
@@ -68,6 +69,7 @@ export async function handleRequest(
   req: Record<string, unknown>,
   handleCommandForCli: (cmd: string) => Promise<string>,
   ctx: ActionContext,
+  mirrorToTui?: (line: string) => void,
 ): Promise<Record<string, unknown>> {
   const type = req['type'] as string | undefined;
 
@@ -112,7 +114,12 @@ export async function handleRequest(
     }
     const args = (req['args'] ?? {}) as Record<string, unknown>;
     try {
+      const def = registry.getAction(id);
       const result = await registry.invokeAction(id, args, ctx);
+      if (def?.ipcOutputMode === 'response_and_tui' && mirrorToTui) {
+        for (const line of result.output ?? []) mirrorToTui(line);
+        for (const warning of result.warnings ?? []) mirrorToTui(`[system] ${warning}`);
+      }
       return {
         ok: true,
         result: {

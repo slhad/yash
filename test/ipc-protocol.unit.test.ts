@@ -12,6 +12,7 @@ const T_CONFIRM = 'proto-test:confirm';
 const T_VALIDATE = 'proto-test:validate';
 const T_THROWS = 'proto-test:throws';
 const T_IPC_ERROR = 'proto-test:ipc-error';
+const T_TUI_MIRROR = 'proto-test:tui-mirror';
 
 beforeAll(() => {
   const base = {
@@ -65,6 +66,16 @@ beforeAll(() => {
     invoke: async () => {
       throw new IpcActionError('custom_code', 'custom message');
     },
+  });
+  registry.registerAction({
+    ...base,
+    id: T_TUI_MIRROR,
+    safety: 'safe',
+    ipcOutputMode: 'response_and_tui',
+    invoke: async () => ({
+      output: ['mirrored:line'],
+      warnings: ['mirrored warning'],
+    }),
   });
 });
 
@@ -233,6 +244,19 @@ describe('invoke_action', () => {
     const res = await handleRequest({ type: 'invoke_action' }, mockHandleCommand, ctx);
     expect(res['ok']).toBe(false);
     expect((res['error'] as { code: string })?.code).toBe(IPC_ERROR_CODES.INVALID_ARGS);
+  });
+
+  test('mirrors opt-in action output and warnings to the live TUI', async () => {
+    const mirrored: string[] = [];
+    const res = await handleRequest(
+      { type: 'invoke_action', action: T_TUI_MIRROR },
+      mockHandleCommand,
+      ctx,
+      (line) => mirrored.push(line),
+    );
+
+    expect(res['ok']).toBe(true);
+    expect(mirrored).toEqual(['mirrored:line', '[system] mirrored warning']);
   });
 });
 

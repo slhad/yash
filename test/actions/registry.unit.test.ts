@@ -328,6 +328,7 @@ describe('markerCreateAction and markersListAction', () => {
     const def = registry.getAction('marker.create')!;
     expect(def.domain).toBe('marker');
     expect(def.ipcEnabled).toBe(true);
+    expect(def.voiceHint).toBe(true);
     expect(def.readOnly).toBe(false);
     expect(def.safety).toBe('safe');
   });
@@ -340,6 +341,8 @@ describe('markerCreateAction and markersListAction', () => {
     const def = registry.getAction('markers.list')!;
     expect(def.domain).toBe('markers');
     expect(def.ipcEnabled).toBe(true);
+    expect(def.ipcOutputMode).toBe('response_and_tui');
+    expect(def.voiceHint).toBe(true);
     expect(def.readOnly).toBe(true);
     expect(def.safety).toBe('safe');
   });

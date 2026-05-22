@@ -98,6 +98,7 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
     * Both `/cmd` and `cmd` argument forms are accepted (the leading `/` is inserted automatically if omitted)
     * Prints `yash is not running` to stderr and exits with code 1 when yash is not active (socket absent or connection refused)
     * Commands available over IPC: `/marker`, `/markers`, `/settings get <key>`, `/settings set <key> <val>`, `/connect`, `/msg`, `/help`, and most non-modal commands
+    * IPC command output is also mirrored into the live TUI chat pane, so `bun run cmd /markers` surfaces the same visible lines as typing `/markers` in-app
     * Commands blocked over IPC (require the live TUI): `/exit`, `/stream`, `/setup-youtube`, `/history`, bare `/settings`, `/chatter`
 
 ## Out of scope (do not touch)
@@ -154,6 +155,7 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
 - IPC protocol: one-round-trip newline-delimited JSON — request `{"command":"<cmd>"}`, response `{"ok":true,"output":"<text>"}` or `{"ok":false,"error":"<msg>"}`.
 - Socket path is resolved by `src/ipc/socket-path.ts` as `path.join(getDataDir(), 'yash.sock')`.
 - `commandHandlers` in `src/index.tsx` accept an `emit: (line: string) => void` callback so the same handler logic serves both TUI rendering and IPC output collection. TUI path: `(line) => lastMessages.push(line)`; IPC path (`handleCommandForCli()`): `(line) => lines.push(line)`, joined and returned as the response `output`.
+- IPC actions can opt into live-chat mirroring with `ipcOutputMode: 'response_and_tui'` on their `YashActionDefinition`; when enabled, `invoke_action` still returns normal `output`/`warnings` to the caller and also appends those lines to the running TUI chat pane.
 
 ### Platform Support
 - YouTube: Real OAuth2 integration via Google Data API v3
