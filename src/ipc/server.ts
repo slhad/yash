@@ -1,8 +1,16 @@
 import * as fs from 'node:fs';
 import * as net from 'node:net';
+import { IpcActionError, registry } from '../actions/registry';
+import type { ActionContext } from '../actions/types';
+import type { ChatService } from '../services/chat.service';
+import type { PlatformProvider } from '../platforms/base';
 import { resolveSocketPath } from './socket-path';
 
-export function startIpcServer(handleCommandForCli: (cmd: string) => Promise<string>): void {
+export function startIpcServer(
+  handleCommandForCli: (cmd: string) => Promise<string>,
+  chatService: ChatService,
+  providers: Record<string, PlatformProvider>,
+): void {
   const socketPath = resolveSocketPath();
 
   try {
@@ -10,6 +18,8 @@ export function startIpcServer(handleCommandForCli: (cmd: string) => Promise<str
   } catch {
     // no stale socket
   }
+
+  const ctx: ActionContext = { chatService, providers };
 
   const server = net.createServer((socket) => {
     let buffer = '';
@@ -20,11 +30,13 @@ export function startIpcServer(handleCommandForCli: (cmd: string) => Promise<str
       const line = buffer.slice(0, newlineIdx);
       buffer = '';
       try {
-        const req = JSON.parse(line) as { command: string };
-        const output = await handleCommandForCli(req.command);
-        socket.write(`${JSON.stringify({ ok: true, output })}\n`);
-      } catch (err) {
-        socket.write(`${JSON.stringify({ ok: false, error: String(err) })}\n`);
+        const req = JSON.parse(line) as Record<string, unknown>;
+        const response = await handleRequest(req, handleCommandForCli, ctx);
+        socket.write(`${JSON.stringify(response)}\n`);
+      } catch {
+        socket.write(
+          `${JSON.stringify({ ok: false, error: { code: 'internal_error', message: 'Internal error' } })}\n`,
+        );
       }
       socket.end();
     });
@@ -33,7 +45,9 @@ export function startIpcServer(handleCommandForCli: (cmd: string) => Promise<str
     });
   });
 
-  server.listen(socketPath);
+  server.listen(socketPath, () => {
+    fs.chmodSync(socketPath, 0o600);
+  });
   server.on('error', (err) => {
     console.error('[ipc] server error', err);
   });
@@ -48,4 +62,98 @@ export function startIpcServer(handleCommandForCli: (cmd: string) => Promise<str
   };
 
   process.on('exit', cleanup);
+}
+
+export async function handleRequest(
+  req: Record<string, unknown>,
+  handleCommandForCli: (cmd: string) => Promise<string>,
+  ctx: ActionContext,
+): Promise<Record<string, unknown>> {
+  const type = req['type'] as string | undefined;
+
+  if (type === 'list_actions') {
+    const details = Boolean(req['details']);
+    const actions = registry.listActions({ ipcOnly: true, details });
+    return {
+      ok: true,
+      result: {
+        action: 'list_actions',
+        data: { actions, count: actions.length },
+      },
+    };
+  }
+
+  if (type === 'describe_action') {
+    const id = req['action'] as string | undefined;
+    if (!id) {
+      return {
+        ok: false,
+        error: { code: 'invalid_args', message: 'Missing required field: action' },
+      };
+    }
+    const meta = registry.getAction(id);
+    if (!meta) {
+      return {
+        ok: false,
+        error: { code: 'unknown_action', message: `Unknown action: ${id}` },
+      };
+    }
+    const { invoke: _invoke, ...rest } = meta;
+    return { ok: true, result: { action: 'describe_action', data: rest } };
+  }
+
+  if (type === 'invoke_action') {
+    const id = req['action'] as string | undefined;
+    if (!id) {
+      return {
+        ok: false,
+        error: { code: 'invalid_args', message: 'Missing required field: action' },
+      };
+    }
+    const args = (req['args'] ?? {}) as Record<string, unknown>;
+    try {
+      const result = await registry.invokeAction(id, args, ctx);
+      return {
+        ok: true,
+        result: {
+          action: id,
+          output: result.output,
+          data: result.data,
+          warnings: result.warnings,
+        },
+      };
+    } catch (err) {
+      if (err instanceof IpcActionError) {
+        return {
+          ok: false,
+          error: { code: err.code, message: err.message, details: err.details },
+        };
+      }
+      return {
+        ok: false,
+        error: { code: 'internal_error', message: 'Internal error' },
+      };
+    }
+  }
+
+  // Legacy compat: { type: 'command', command: string } or { command: string }
+  const command = req['command'] as string | undefined;
+  if (type === 'command' || (!type && command !== undefined)) {
+    if (!command) {
+      return {
+        ok: false,
+        error: { code: 'invalid_args', message: 'Missing required field: command' },
+      };
+    }
+    const output = await handleCommandForCli(command);
+    return {
+      ok: true,
+      result: { action: 'command', output },
+    };
+  }
+
+  return {
+    ok: false,
+    error: { code: 'unknown_request_type', message: `Unknown request type: ${type ?? '(none)'}` },
+  };
 }

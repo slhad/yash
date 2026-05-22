@@ -12,8 +12,8 @@ export type ActionVisibility = 'public' | 'internal';
 
 export type ActionContext = {
   chatService: ChatService;
-  providers: Map<string, PlatformProvider>;
-  emit: (line: string) => void;
+  providers: Record<string, PlatformProvider>;
+  emit?: (line: string) => void;
 };
 
 export type ActionResult = {

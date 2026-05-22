@@ -23,7 +23,7 @@ export class IpcActionError extends Error {
   }
 }
 
-class ActionRegistry {
+export class ActionRegistry {
   private readonly actions = new Map<string, YashActionDefinition>();
 
   registerAction(def: YashActionDefinition): void {
