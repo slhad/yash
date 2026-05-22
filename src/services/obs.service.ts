@@ -200,10 +200,14 @@ export class ObsService {
 
           ws.onclose = () => {
             this.connected = false;
+            this.ws = null;
+            this.connectionPromise = null;
             this.notifyStatusChange(false);
             defaultLogger.info('Disconnected from OBS');
             if (!identified) {
-              this.connectionPromise = null;
+              if (!isDemoMode()) {
+                this.scheduleReconnectAttempt();
+              }
               reject(new Error(`Failed to connect to OBS at ws://${this.host}:${this.port}`));
             } else {
               this.scheduleReconnectAttempt();
@@ -217,8 +221,12 @@ export class ObsService {
         } catch (error) {
           defaultLogger.error('Failed to create WebSocket to OBS:', error);
           this.connected = false;
+          this.ws = null;
           this.connectionPromise = null;
           this.notifyStatusChange(false);
+          if (!isDemoMode()) {
+            this.scheduleReconnectAttempt();
+          }
           reject(error);
         }
       });
