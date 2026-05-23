@@ -43,3 +43,6 @@ config.json
 
 # Playwright CLI
 .playwright-cli/
+
+# Legacy tracked demo files remain, but new demo artifacts must stay in tmp/
+demo/

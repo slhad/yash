@@ -374,8 +374,11 @@ export class ObsService {
       case 'GetVersion':
         return { obsVersion: '29.1.0', obsPlatform: 'windows', obsStudioVersion: '29.1.0' };
       case 'GetSceneList':
-        return { scenes: [{ name: 'Scene 1' }, { name: 'Scene 2' }], currentScene: 'Scene 1' };
-      case 'SetCurrentScene':
+        return {
+          scenes: [{ sceneName: 'Scene 1' }, { sceneName: 'Scene 2' }],
+          currentProgramSceneName: 'Scene 1',
+        };
+      case 'SetCurrentProgramScene':
         return {};
       case 'StartStream':
         return {};
@@ -571,7 +574,28 @@ export class ObsService {
   }
 
   async setCurrentScene(sceneName: string): Promise<void> {
-    return this.sendRequest('SetCurrentScene', { 'scene-name': sceneName });
+    return this.sendRequest('SetCurrentProgramScene', { sceneName });
+  }
+
+  async setInputSettings(inputName: string, inputSettings: Record<string, unknown>): Promise<void> {
+    return this.sendRequest('SetInputSettings', { inputName, inputSettings });
+  }
+
+  async setInputMute(inputName: string, inputMuted: boolean): Promise<void> {
+    return this.sendRequest('SetInputMute', { inputName, inputMuted });
+  }
+
+  async getSceneItemId(sceneName: string, sourceName: string): Promise<number> {
+    const res = await this.sendRequest('GetSceneItemId', { sceneName, sourceName });
+    return res.sceneItemId as number;
+  }
+
+  async setSceneItemEnabled(
+    sceneName: string,
+    sceneItemId: number,
+    sceneItemEnabled: boolean,
+  ): Promise<void> {
+    return this.sendRequest('SetSceneItemEnabled', { sceneName, sceneItemId, sceneItemEnabled });
   }
 
   async getVersion(): Promise<any> {

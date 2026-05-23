@@ -1,3 +1,4 @@
+import type { ActionRegistry } from '../actions/registry';
 import { CHAT_CLEAR_TARGETS } from './chatClear';
 
 /**
@@ -31,6 +32,14 @@ export type TuiCommand = (typeof TUI_COMMANDS)[number];
 // Runtime command list — overwritten at startup by initTuiCommands() so that
 // the handler map in index.tsx is the single source of truth for autocomplete.
 let _registered: readonly string[] = TUI_COMMANDS;
+
+// Optional ActionRegistry injected at startup for /action autocomplete.
+let _actionRegistry: ActionRegistry | null = null;
+
+/** Inject the ActionRegistry so /action can complete action IDs and args. */
+export function setActionRegistry(reg: ActionRegistry): void {
+  _actionRegistry = reg;
+}
 
 /** Called once at startup with Object.keys(commandHandlers).sort(). */
 export function initTuiCommands(cmds: string[]): void {
@@ -238,6 +247,97 @@ export function getAutocomplete(input: string): {
       };
     }
     return { completion: null, hints: [], completions: [] };
+  }
+
+  if (cmd === '/action') {
+    if (!_actionRegistry) return { completion: null, hints: [], completions: [] };
+
+    // Collect all visible, non-blocked action IDs.
+    // Use details:true so visibility is included in the returned entries.
+    const allActions = (
+      _actionRegistry.listActions({ details: true }) as Array<{
+        id: string;
+        visibility: string;
+        safety: string;
+        args: Record<string, { type: string; values?: string[] }>;
+      }>
+    ).filter((a) => a.visibility === 'public' && a.safety !== 'blocked');
+    const allIds = allActions.map((a) => a.id);
+
+    // Sub-case A: completing the action id (rest has no space).
+    if (!rest.includes(' ')) {
+      const partial = rest; // preserve original case
+      const matches = allIds.filter((id) => id.startsWith(partial));
+      if (matches.length === 0) return { completion: null, hints: [], completions: [] };
+      const prefix = longestCommonPrefix(matches);
+      const fullCompletion = `${cmd} ${prefix}`;
+      return {
+        completion: prefix.length > partial.length ? fullCompletion : null,
+        hints: matches,
+        completions: matches.map((id) => `${cmd} ${id}`),
+      };
+    }
+
+    // Sub-case B: action id is determined, completing arg names/values.
+    const actionSpaceIdx = rest.indexOf(' ');
+    const actionId = rest.slice(0, actionSpaceIdx);
+    const argsPart = rest.slice(actionSpaceIdx + 1); // everything after the action id
+
+    const actionDef = allActions.find((a) => a.id === actionId);
+    if (!actionDef) return { completion: null, hints: [], completions: [] };
+
+    const argsDef = actionDef.args;
+    const argNames = Object.keys(argsDef);
+
+    // Parse already-provided args (key=value tokens before the last one).
+    const tokens = argsPart.split(' ');
+    const lastToken = tokens[tokens.length - 1] ?? '';
+    const previousTokens = tokens.slice(0, -1);
+    const usedArgNames = previousTokens
+      .map((t) => t.split('=')[0] ?? '')
+      .filter((n) => argNames.includes(n));
+
+    // Check if we are completing a value for an enum arg (lastToken contains '=').
+    const eqIdx = lastToken.indexOf('=');
+    if (eqIdx !== -1) {
+      const argName = lastToken.slice(0, eqIdx);
+      const valuePartial = lastToken.slice(eqIdx + 1);
+      const schema = argsDef[argName];
+      if (!schema) return { completion: null, hints: [], completions: [] };
+
+      if (schema.type === 'enum' && schema.values) {
+        const matches = schema.values.filter((v: string) => v.startsWith(valuePartial));
+        if (matches.length === 0) return { completion: null, hints: [], completions: [] };
+        const prefix = longestCommonPrefix(matches);
+        const builtPrefix = `${cmd} ${actionId} ${previousTokens.join(' ')}${previousTokens.length > 0 ? ' ' : ''}${argName}=${prefix}`;
+        return {
+          completion: prefix.length > valuePartial.length ? builtPrefix : null,
+          hints: matches,
+          completions: matches.map(
+            (v: string) =>
+              `${cmd} ${actionId} ${previousTokens.join(' ')}${previousTokens.length > 0 ? ' ' : ''}${argName}=${v}`,
+          ),
+        };
+      }
+
+      // Non-enum: show type hint, no tab-completion.
+      const typeHint = `<${schema.type}>`;
+      return { completion: null, hints: [typeHint], completions: [] };
+    }
+
+    // Completing an arg name.
+    const remainingArgs = argNames.filter((n) => !usedArgNames.includes(n));
+    const partial = lastToken;
+    const matches = remainingArgs.filter((n) => n.startsWith(partial)).map((n) => `${n}=`);
+
+    if (matches.length === 0) return { completion: null, hints: [], completions: [] };
+    const prefix = longestCommonPrefix(matches);
+    const base = `${cmd} ${actionId} ${previousTokens.join(' ')}${previousTokens.length > 0 ? ' ' : ''}`;
+    return {
+      completion: prefix.length > partial.length ? `${base}${prefix}` : null,
+      hints: matches,
+      completions: matches.map((m) => `${base}${m}`),
+    };
   }
 
   return { completion: null, hints: [], completions: [] };

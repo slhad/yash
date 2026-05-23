@@ -44,7 +44,7 @@ describe('ObsService', () => {
 
     const sceneList = await obsService.getSceneList();
     expect(sceneList.scenes).toBeDefined();
-    expect(sceneList.currentScene).toBeDefined();
+    expect(sceneList.currentProgramSceneName).toBeDefined();
   });
 
   test('should throw when sending requests while disconnected', async () => {

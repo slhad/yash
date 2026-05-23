@@ -48,6 +48,14 @@ export type ScriptApi = {
   obs: {
     isConnected: () => boolean;
     setCurrentScene: (name: string) => Promise<void>;
+    setInputSettings: (inputName: string, inputSettings: Record<string, unknown>) => Promise<void>;
+    setInputMute: (inputName: string, muted: boolean) => Promise<void>;
+    getSceneItemId: (sceneName: string, sourceName: string) => Promise<number>;
+    setSceneItemEnabled: (
+      sceneName: string,
+      sceneItemId: number,
+      enabled: boolean,
+    ) => Promise<void>;
     stopStream: () => Promise<void>;
     startStream: () => Promise<void>;
     /** Returns an unsubscribe function. Also tracked by the loader for cleanup. */

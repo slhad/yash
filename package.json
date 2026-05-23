@@ -11,14 +11,15 @@
     "start:tui": "YASH_TUI_ONLY=1 bun run src/index.tsx",
     "prestart:webui": "bun run build:web",
     "start:webui": "bun run src/index.ts",
-    "pretest": "bun lint && bun typecheck",
+    "validate:repo": "bun run scripts/validate-repo-artifacts.ts",
+    "pretest": "bun run validate:repo && bun lint && bun typecheck",
     "test": "bun test",
     "test:e2e": "bun run src/index.ts &",
     "test:e2e:run": "playwright test",
     "build": "bun build --target=bun src/index.ts --outdir dist && mv dist/index.js dist/main.js",
     "build:web": "bun build --target=browser --format=esm --outfile src/utils/webCommands.bundle.js src/utils/webCommands.ts",
     "cmd": "bun run src/cli.ts",
-    "lint": "biome check --write",
+    "lint": "biome check --write src test package.json biome.json",
     "typecheck": "bun --bun tsc --noEmit"
   },
   "devDependencies": {

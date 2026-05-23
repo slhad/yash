@@ -1,18 +1,24 @@
 import { IpcActionError, registry } from '../actions/registry';
 import { type ActionContext, type ActionResult, IPC_ERROR_CODES } from '../actions/types';
-import { obsService, settingsStore } from '../services';
+import { obsService } from '../services';
+import { getDataDir } from '../utils/config';
+import { makeScriptCfg } from '../utils/scriptConfig';
 
 const SCRIPT_ID = 'obs-shutdown';
-
-function cfg<T>(key: string, defaultVal: T): T {
-  return settingsStore.get(`scripts.${SCRIPT_ID}.${key}`, defaultVal) as T;
-}
+const cfg = makeScriptCfg(SCRIPT_ID, getDataDir());
 
 // ─── Shared shutdown state ────────────────────────────────────────────────────
 
 type ActiveShutdown = {
   active: true;
   remaining: number;
+  stopStreamAtEnd: boolean;
+  countdownSource: string;
+  sourceTemplate: string;
+  hideSources: string[];
+  muteSources: string[];
+  finalCountdownAt: number;
+  inFinalCountdown: boolean;
   tickTimer: ReturnType<typeof setTimeout>;
   chatTimer: ReturnType<typeof setTimeout>;
   unsubObs: () => void;
@@ -22,25 +28,88 @@ type ShutdownState = { active: false } | ActiveShutdown;
 
 let state: ShutdownState = { active: false };
 
-function cancelCountdown(): void {
+async function updateSource(
+  sourceName: string,
+  template: string,
+  remaining: number,
+): Promise<void> {
+  if (!sourceName || !obsService.isConnected()) return;
+  const text = template.replace(/\{remaining\}/g, String(remaining));
+  try {
+    await obsService.setInputSettings(sourceName, { text });
+  } catch {
+    // best-effort
+  }
+}
+
+async function clearSource(sourceName: string): Promise<void> {
+  if (!sourceName || !obsService.isConnected()) return;
+  try {
+    await obsService.setInputSettings(sourceName, { text: '' });
+  } catch {
+    // best-effort
+  }
+}
+
+async function setSourcesVisible(sources: string[], visible: boolean): Promise<void> {
+  let allScenes: string[];
+  try {
+    const list = await obsService.getSceneList();
+    allScenes = list.scenes.map((s: { sceneName: string }) => s.sceneName);
+  } catch {
+    return;
+  }
+  for (const sourceName of sources) {
+    for (const sceneName of allScenes) {
+      try {
+        const id = await obsService.getSceneItemId(sceneName, sourceName);
+        await obsService.setSceneItemEnabled(sceneName, id, visible);
+      } catch {
+        // source not in this scene — try next
+      }
+    }
+  }
+}
+
+async function setInputsMuted(inputs: string[], muted: boolean): Promise<void> {
+  for (const inputName of inputs) {
+    try {
+      await obsService.setInputMute(inputName, muted);
+    } catch {
+      // best-effort
+    }
+  }
+}
+
+function cancelCountdown(restore = false): void {
   if (!state.active) return;
   const s = state as ActiveShutdown;
   clearTimeout(s.tickTimer);
   clearTimeout(s.chatTimer);
   s.unsubObs();
+  void clearSource(s.countdownSource);
+  if (restore && obsService.isConnected()) {
+    if (s.hideSources.length > 0) void setSourcesVisible(s.hideSources, true);
+    if (s.muteSources.length > 0) void setInputsMuted(s.muteSources, false);
+  }
   state = { active: false };
 }
 
 // ─── Timer factory: chained 1-second tick ─────────────────────────────────────
 
-function createTickTimer(): ReturnType<typeof setTimeout> {
+function createTickTimer(
+  ctx: ActionContext,
+  chatInterval: number,
+  chatTemplate: string,
+): ReturnType<typeof setTimeout> {
   return setTimeout(async () => {
     if (!state.active) return;
     const s = state as ActiveShutdown;
     s.remaining -= 1;
     if (s.remaining <= 0) {
+      const shouldStopStream = s.stopStreamAtEnd;
       cancelCountdown();
-      if (obsService.isConnected()) {
+      if (shouldStopStream && obsService.isConnected()) {
         try {
           await obsService.stopStream();
         } catch {
@@ -49,7 +118,21 @@ function createTickTimer(): ReturnType<typeof setTimeout> {
       }
       return;
     }
-    s.tickTimer = createTickTimer();
+    void updateSource(s.countdownSource, s.sourceTemplate, s.remaining);
+
+    if (s.finalCountdownAt > 0 && s.remaining <= s.finalCountdownAt && !s.inFinalCountdown) {
+      s.inFinalCountdown = true;
+      clearTimeout(s.chatTimer);
+      const msg = chatTemplate.replace(/\{remaining\}/g, String(s.remaining));
+      try {
+        await ctx.chatService.sendMessage(msg);
+      } catch {
+        // best-effort
+      }
+      s.chatTimer = createChatTimer(ctx, 1, chatTemplate);
+    }
+
+    s.tickTimer = createTickTimer(ctx, chatInterval, chatTemplate);
   }, 1000);
 }
 
@@ -91,11 +174,17 @@ registry.registerAction({
     delay: { type: 'number', required: false, min: 10, max: 3600 },
     scene: { type: 'string', required: false, maxLength: 200 },
     message: { type: 'string', required: false, maxLength: 500 },
+    source: { type: 'string', required: false, maxLength: 200 },
+    sourceText: { type: 'string', required: false, maxLength: 200 },
   },
   examples: [
     { args: {}, description: 'Start countdown with config defaults' },
     { args: { delay: 60 }, description: 'Shutdown in 60 seconds' },
     { args: { delay: 30, scene: 'BRB' }, description: 'Switch to BRB scene, count down 30s' },
+    {
+      args: { source: 'CountdownText', sourceText: '{remaining}s' },
+      description: 'Update a text source with remaining seconds',
+    },
   ],
   async invoke(args, ctx): Promise<ActionResult> {
     if (state.active) {
@@ -106,10 +195,24 @@ registry.registerAction({
     }
 
     const delay = (args.delay as number | undefined) ?? cfg('delay', 30);
-    const scene = (args.scene as string | undefined) ?? cfg('scene', 'Ending');
+    const scene = (args.scene as string | undefined) ?? cfg<string>('scene', '');
     const template =
       (args.message as string | undefined) ?? cfg('message', 'Stream ending in {remaining}s!');
     const chatInterval: number = cfg('chatInterval', 10);
+    const stopStreamAtEnd = cfg('stopStream', true);
+    const countdownSource = (args.source as string | undefined) ?? cfg<string>('source', '');
+    const sourceTemplate =
+      (args.sourceText as string | undefined) ?? cfg('sourceText', '{remaining}');
+    const hideSources: string[] = cfg('hideSources', []);
+    const muteSources: string[] = cfg('muteSources', []);
+    const finalCountdownAt: number = cfg('finalCountdownAt', 0);
+
+    if (!scene) {
+      throw new IpcActionError(
+        IPC_ERROR_CODES.INVALID_ARGS,
+        'No ending scene configured — set "scene" in ~/.config/yash/scripts/obs-shutdown/config.jsonc, or pass scene= as an argument',
+      );
+    }
 
     if (!obsService.isConnected()) {
       throw new IpcActionError(IPC_ERROR_CODES.OBS_NOT_CONNECTED, 'OBS is not connected');
@@ -124,13 +227,17 @@ registry.registerAction({
       );
     }
 
-    // Initial countdown message
+    // Initial countdown message and source update
     const firstMsg = template.replace(/\{remaining\}/g, String(delay));
     try {
       await ctx.chatService.sendMessage(firstMsg);
     } catch {
       // best-effort
     }
+    await updateSource(countdownSource, sourceTemplate, delay);
+
+    if (hideSources.length > 0) void setSourcesVisible(hideSources, false);
+    if (muteSources.length > 0) void setInputsMuted(muteSources, true);
 
     const unsubObs = obsService.subscribeToStatusChanges((connected) => {
       if (!connected) cancelCountdown();
@@ -139,18 +246,44 @@ registry.registerAction({
     state = {
       active: true,
       remaining: delay,
-      tickTimer: createTickTimer(),
+      stopStreamAtEnd,
+      countdownSource,
+      sourceTemplate,
+      hideSources,
+      muteSources,
+      finalCountdownAt,
+      inFinalCountdown: false,
+      tickTimer: createTickTimer(ctx, chatInterval, template),
       chatTimer: createChatTimer(ctx, chatInterval, template),
       unsubObs,
     };
 
+    const outputLines = [
+      `[obs-shutdown] countdown started: ${delay}s`,
+      `[obs-shutdown] scene → ${scene}`,
+      `[obs-shutdown] chat update every ${chatInterval}s`,
+      `[obs-shutdown] stop stream at end → ${stopStreamAtEnd ? 'yes' : 'no'}`,
+    ];
+    if (finalCountdownAt > 0)
+      outputLines.push(`[obs-shutdown] final countdown every 1s from ${finalCountdownAt}s`);
+    if (countdownSource) outputLines.push(`[obs-shutdown] source → ${countdownSource}`);
+    if (hideSources.length > 0)
+      outputLines.push(`[obs-shutdown] hide sources → ${hideSources.join(', ')}`);
+    if (muteSources.length > 0)
+      outputLines.push(`[obs-shutdown] mute sources → ${muteSources.join(', ')}`);
+
     return {
-      output: [
-        `[obs-shutdown] countdown started: ${delay}s`,
-        `[obs-shutdown] scene → ${scene}`,
-        `[obs-shutdown] chat update every ${chatInterval}s`,
-      ],
-      data: { delay, scene, chatInterval },
+      output: outputLines,
+      data: {
+        delay,
+        scene,
+        chatInterval,
+        stopStreamAtEnd,
+        countdownSource: countdownSource || null,
+        hideSources,
+        muteSources,
+        finalCountdownAt: finalCountdownAt || null,
+      },
     };
   },
 });
@@ -175,7 +308,7 @@ registry.registerAction({
       return { output: ['[obs-shutdown] no active countdown to cancel'] };
     }
     const remaining = (state as ActiveShutdown).remaining;
-    cancelCountdown();
+    cancelCountdown(true);
     return {
       output: [`[obs-shutdown] countdown cancelled (${remaining}s remaining)`],
       data: { cancelledAt: remaining },
