@@ -110,6 +110,7 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
 - OS keyring integration (keytar) and related token migration scripts
 - Encrypted token storage and encryption-based admin key export/import (hybrid RSA+AES packages)
 - Repository pre-commit hook installer and .githooks management (pre-commit hook installer scripts)
+- Git-managed pre-commit installation flows; repo policy enforcement for Codex-driven commits should use the repo-local Codex hook instead
 - Any feature that depends on native keyring binaries or OS-specific keyring modules
 - Automatic migration/backup tooling for encrypted secrets
 - manifest/checksum generation, signing and verification, ownership remediation
@@ -464,6 +465,7 @@ interface PlatformProvider {
 - `bun run src/index.ts` - Launch the web server only
 - `bun run start` - Launch both TUI and web server concurrently
 - `bun run validate:repo` - Fail if the current branch introduces tracked demo artifacts outside `tmp/` or tracked binary changes outside `tmp/`
+- Repo-local Codex hook: `.codex/hooks.json` runs `scripts/validate-repo-artifacts.ts --codex-pre-tool-use` before Codex-driven `git commit` / `rtk git commit` Bash tool calls and blocks the commit when `bun run validate:repo` fails
 - `bun test` - Run unit tests only (fast, skips lint/typecheck)
 - `bun run test` - Full check: repo policy validation → lint → typecheck → tests
 - `bun typecheck` - Type-check only (`bun --bun tsc --noEmit`)

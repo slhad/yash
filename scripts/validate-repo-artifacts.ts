@@ -11,6 +11,16 @@ type ChangeRecord = {
   path: string;
 };
 
+type HookPayload = {
+  tool_input?: {
+    command?: string;
+    cmd?: string;
+  };
+  toolArgs?: string;
+};
+
+const COMMIT_PATTERN = /(^|[\n;&(|]\s*)(?:rtk\s+)?git\s+commit(?:\s|$)/m;
+
 async function runGitText(args: string[]): Promise<RunResult> {
   const proc = Bun.spawn({
     cmd: ["git", ...args],
@@ -136,6 +146,32 @@ async function gatherWorkingTreeChanges(): Promise<{
 }
 
 async function main() {
+  if (process.argv.includes("--codex-pre-tool-use")) {
+    const rawInput = await new Response(Bun.stdin.stream()).text();
+    if (!rawInput.trim()) return;
+
+    let payload: HookPayload | null = null;
+    try {
+      payload = JSON.parse(rawInput) as HookPayload;
+    } catch {
+      return;
+    }
+
+    let command = payload.tool_input?.command ?? payload.tool_input?.cmd ?? "";
+    if (!command && payload.toolArgs) {
+      try {
+        const toolArgs = JSON.parse(payload.toolArgs) as HookPayload["tool_input"];
+        command = toolArgs?.command ?? toolArgs?.cmd ?? "";
+      } catch {
+        command = "";
+      }
+    }
+
+    if (!command || !COMMIT_PATTERN.test(command)) {
+      return;
+    }
+  }
+
   const gitDir = existsSync(".git");
   if (!gitDir) {
     console.error("validate:repo must run from the repository root.");
