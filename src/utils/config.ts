@@ -12,7 +12,10 @@ let cachedConfig: any;
 const CONFIG_FILENAME = 'config.json';
 
 export function getDataDir(): string {
-  return process.env.YASH_DATA_DIR || path.join(process.env.HOME || '.', '.yash');
+  return (
+    process.env.YASH_DATA_DIR ||
+    path.join(process.env.XDG_CONFIG_HOME || path.join(process.env.HOME || '.', '.config'), 'yash')
+  );
 }
 
 export function resolvePort(): number {

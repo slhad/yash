@@ -27,7 +27,7 @@ Small toolkit to manage streaming across YouTube, Twitch, and Kick with a unifie
 
 ## CLI IPC
 
-When a TUI process is running, it listens on a Unix Domain Socket at `YASH_DATA_DIR/yash.sock` (default `~/.yash/yash.sock`). The `bun run cmd` script connects to that socket, sends a command, prints the response, and exits.
+When a TUI process is running, it listens on a Unix Domain Socket at `YASH_DATA_DIR/yash.sock` (default `~/.config/yash/yash.sock`). The `bun run cmd` script connects to that socket, sends a command, prints the response, and exits.
 
 ```sh
 bun run cmd /marker          # drop a stream marker
@@ -110,17 +110,17 @@ flowchart TD
 
 ## Configuration
 
-This project splits runtime state across two files under `YASH_DATA_DIR` (default `~/.yash`). Do NOT commit either file.
+This project splits runtime state across two files under `YASH_DATA_DIR` (default `~/.config/yash`). Do NOT commit either file.
 
 On startup, YASH performs a one-time migration from the legacy repository-root `config.json` when that legacy file exists and the runtime config file does not yet exist. It also performs a one-time split migration that moves mutable runtime settings out of `config.json` into `settings.json`.
 
 1. Copy `config.example.json` to your runtime config location and update bootstrap values that are local-only (OBS websocket password, provider credentials, stream keys, etc.).
    ```
-   mkdir -p "${YASH_DATA_DIR:-$HOME/.yash}" && cp config.example.json "${YASH_DATA_DIR:-$HOME/.yash}/config.json"
+   mkdir -p "${YASH_DATA_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/yash}" && cp config.example.json "${YASH_DATA_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/yash}/config.json"
    ```
 2. Copy `settings.example.json` to your runtime settings location and update mutable defaults such as stream metadata, UI preferences, and YouTube setup flags.
    ```
-   mkdir -p "${YASH_DATA_DIR:-$HOME/.yash}" && cp settings.example.json "${YASH_DATA_DIR:-$HOME/.yash}/settings.json"
+   mkdir -p "${YASH_DATA_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/yash}" && cp settings.example.json "${YASH_DATA_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/yash}/settings.json"
    ```
 3. If you already have a legacy repo-root `config.json`, YASH will migrate it once automatically the first time it starts without an existing runtime config file.
 
@@ -128,7 +128,7 @@ On startup, YASH performs a one-time migration from the legacy repository-root `
 
 ## Security
 
-- `YASH_DATA_DIR/config.json`, `YASH_DATA_DIR/settings.json`, and the other files under `YASH_DATA_DIR` (default `~/.yash/`) should be treated as sensitive local secrets
+- `YASH_DATA_DIR/config.json`, `YASH_DATA_DIR/settings.json`, and the other files under `YASH_DATA_DIR` (default `~/.config/yash/`) should be treated as sensitive local secrets
 - This repository is suitable for local or otherwise controlled environments, not as-is for broad public multi-tenant deployment
 - If you expose the web server beyond localhost, you should add a reverse proxy / network ACL layer and explicit authentication controls around any sensitive endpoints
 
@@ -208,7 +208,7 @@ flowchart TD
 
 ## OBS reconnection & backoff
 
-YASH keeps retrying OBS websocket connections both after an established connection drops and when OBS was unavailable during app startup. You can tune that reconnection and backoff behaviour via environment variables or the runtime config file at `YASH_DATA_DIR/config.json` (default `~/.yash/config.json`, under `obs.websocket`). Environment variables take precedence and are useful for CI/runtime overrides.
+YASH keeps retrying OBS websocket connections both after an established connection drops and when OBS was unavailable during app startup. You can tune that reconnection and backoff behaviour via environment variables or the runtime config file at `YASH_DATA_DIR/config.json` (default `~/.config/yash/config.json`, under `obs.websocket`). Environment variables take precedence and are useful for CI/runtime overrides.
 
 **Environment variables:**
 
@@ -231,7 +231,7 @@ export YASH_OBS_RECONNECT_MULTIPLIER=2
 export YASH_OBS_RECONNECT_MAX_ATTEMPTS=10
 ```
 
-**Example (`~/.yash/config.json`):**
+**Example (`~/.config/yash/config.json`):**
 
 ```json
 {

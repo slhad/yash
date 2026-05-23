@@ -14,7 +14,13 @@ export class AuthService {
   // Simple, file-backed token store with no OS keyring or encryption.
   // Use getters so that mutations to process.env.YASH_DATA_DIR (e.g. in tests) take effect.
   private static get DATA_DIR(): string {
-    return process.env.YASH_DATA_DIR || path.join(process.env.HOME || '.', '.yash');
+    return (
+      process.env.YASH_DATA_DIR ||
+      path.join(
+        process.env.XDG_CONFIG_HOME || path.join(process.env.HOME || '.', '.config'),
+        'yash',
+      )
+    );
   }
   private static get TOKENS_FILE(): string {
     return path.join(AuthService.DATA_DIR, 'tokens.json');
