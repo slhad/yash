@@ -23,9 +23,20 @@
 seed scripts, VHS tapes, test databases, recordings, …).  These must not enter
 the repository history — not even on feature branches.
 
-If you have a script or tape that you think should be versioned, move it to an
-appropriate tracked directory (e.g. `scripts/`, `test/fixtures/`) and commit it
-there instead.
+For demos specifically, treat `tmp/` as the only workspace for:
+- VHS tapes and helper shell scripts
+- Playwright recordings and GIF conversions
+- screenshots, GIFs, videos, and any other binary artifacts
+- one-off repro helpers or capture scripts used only for a PR/demo
+
+Do not create new demo artifacts in tracked folders such as `demo/`, `docs/`,
+or `assets/`. Existing tracked files in those locations are legacy and should
+not be copied as a pattern for new work.
+
+If you have a script or tape that truly belongs in version control as a reusable
+fixture, move it to an appropriate tracked directory (e.g. `scripts/`,
+`test/fixtures/`) and commit it there intentionally. Otherwise keep it in
+`tmp/`.
 
 ## Getting Started
 
@@ -44,6 +55,9 @@ When beginning work in this repository:
 Never commit binary files (images, GIFs, fonts, archives, compiled artifacts, etc.) to the repository.
 
 - Store temporary assets in `[tmp]` — it is gitignored and safe.
+- Keep PR/demo source artifacts there too: VHS tapes, recording helper scripts,
+  Playwright videos, converted GIFs, and screenshots all belong under
+  `[tmp]/...`, not in tracked repo folders.
 - For demo GIFs or screenshots that need to be publicly hosted (e.g. inlined in a PR), upload them to the dedicated **`screenshots` release** — a permanent prerelease used exclusively as an asset store:
   ```bash
   gh release upload screenshots tmp/my-demo.gif --clobber
@@ -58,6 +72,7 @@ Never commit binary files (images, GIFs, fonts, archives, compiled artifacts, et
     --prerelease
   ```
 - Never create a `docs/`, `assets/`, or similar directory just to store binaries in git.
+- Never add new files under `demo/` for PR artifacts; use `tmp/` plus hosted release assets instead.
 
 ## Protobuf / Long integer shim (YouTube gRPC decoder)
 
@@ -94,7 +109,7 @@ For steps that are **not applicable** to the current change (e.g. no TUI changes
 3. **Type check** — `bun typecheck` — no errors
 4. **Live TUI check** — verify the feature in the running yash tmux session (window `yash:all`); use the `/test-live` skill
 5. **Live Web UI check** — verify the feature in the web UI
-6. **VHS recording** — generate the TUI demo GIF last, once all checks above pass; host it via the `screenshots` release and link it in the Demo section
+6. **VHS recording** — create tapes, helper scripts, and generated GIFs under `tmp/` only; generate the TUI demo GIF last, once all checks above pass; host it via the `screenshots` release and link it in the Demo section
 7. **Playwright recording** — generate the Web UI demo GIF last, once all checks above pass:
    ```bash
    RECORD_VIDEO=1 npx playwright test --project=chromium
@@ -102,7 +117,7 @@ For steps that are **not applicable** to the current change (e.g. no TUI changes
    ffmpeg -i tmp/playwright-output/<test-name>/video.webm -vf "fps=10,scale=800:-1:flags=lanczos" tmp/<feature>-web.gif
    gh release upload screenshots tmp/<feature>-web.gif --clobber
    ```
-   Link the resulting URL in the Demo section alongside the VHS GIF.
+   Keep any helper scripts, converted media, and staging files under `tmp/`, and link the resulting hosted URL in the Demo section alongside the VHS GIF.
 
 8. **Docs update** — before opening the PR, update `SPECS.md` to reflect any new or changed commands, settings, API routes, env vars, or behavior; update `README.md` if setup steps, IPC behavior, or architecture changed.
 
