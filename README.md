@@ -157,6 +157,7 @@ For example, the bundled `obs-shutdown` action can be configured at:
 {
   "delay": 10,
   "chatInterval": 10,
+  "stopStream": true,
   "scene": "[PS] End",
   "message": "Stream ending in {remaining}s!",
   "source": "[TXT] Countdown",
@@ -164,7 +165,7 @@ For example, the bundled `obs-shutdown` action can be configured at:
 }
 ```
 
-That lets `/action obs.shutdown.initiate` run with config-backed defaults and optionally keep an OBS text source updated during the countdown.
+That lets `/action obs.shutdown.initiate` run with config-backed defaults, optionally keep an OBS text source updated during the countdown, and choose whether the countdown should actually stop the OBS stream when it reaches zero.
 
 ## Security
 

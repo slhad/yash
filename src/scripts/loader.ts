@@ -242,6 +242,8 @@ Configure in \`~/.config/yash/scripts/obs-shutdown/config.jsonc\`:
   "message": "Stream ending in {remaining}s!",
   // How often (in seconds) to post a countdown message to chat
   "chatInterval": 10,
+  // Whether to stop the OBS stream when the countdown reaches zero
+  "stopStream": true,
   // OBS text source to update with remaining time on each tick (optional)
   "source": "CountdownText",
   // Text source template — {remaining} is replaced by seconds left
@@ -253,6 +255,7 @@ Configure in \`~/.config/yash/scripts/obs-shutdown/config.jsonc\`:
 - \`delay\` — countdown duration in seconds (default: 30)
 - \`message\` — chat message template; \`{remaining}\` is replaced by seconds left (default: "Stream ending in {remaining}s!")
 - \`chatInterval\` — how often to post a countdown message, in seconds (default: 10)
+- \`stopStream\` — whether to stop the OBS stream when the countdown reaches zero (default: true)
 - \`source\` — OBS text source name to update with the remaining time on each tick (optional; leave empty to disable)
 - \`sourceText\` — text source template; \`{remaining}\` is replaced by seconds left (default: "{remaining}")
 

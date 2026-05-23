@@ -12,6 +12,7 @@ const cfg = makeScriptCfg(SCRIPT_ID, getDataDir());
 type ActiveShutdown = {
   active: true;
   remaining: number;
+  stopStreamAtEnd: boolean;
   countdownSource: string;
   sourceTemplate: string;
   tickTimer: ReturnType<typeof setTimeout>;
@@ -64,8 +65,9 @@ function createTickTimer(): ReturnType<typeof setTimeout> {
     const s = state as ActiveShutdown;
     s.remaining -= 1;
     if (s.remaining <= 0) {
+      const shouldStopStream = s.stopStreamAtEnd;
       cancelCountdown();
-      if (obsService.isConnected()) {
+      if (shouldStopStream && obsService.isConnected()) {
         try {
           await obsService.stopStream();
         } catch {
@@ -142,6 +144,7 @@ registry.registerAction({
     const template =
       (args.message as string | undefined) ?? cfg('message', 'Stream ending in {remaining}s!');
     const chatInterval: number = cfg('chatInterval', 10);
+    const stopStreamAtEnd = cfg('stopStream', true);
     const countdownSource = (args.source as string | undefined) ?? cfg<string>('source', '');
     const sourceTemplate =
       (args.sourceText as string | undefined) ?? cfg('sourceText', '{remaining}');
@@ -182,6 +185,7 @@ registry.registerAction({
     state = {
       active: true,
       remaining: delay,
+      stopStreamAtEnd,
       countdownSource,
       sourceTemplate,
       tickTimer: createTickTimer(),
@@ -193,12 +197,19 @@ registry.registerAction({
       `[obs-shutdown] countdown started: ${delay}s`,
       `[obs-shutdown] scene → ${scene}`,
       `[obs-shutdown] chat update every ${chatInterval}s`,
+      `[obs-shutdown] stop stream at end → ${stopStreamAtEnd ? 'yes' : 'no'}`,
     ];
     if (countdownSource) outputLines.push(`[obs-shutdown] source → ${countdownSource}`);
 
     return {
       output: outputLines,
-      data: { delay, scene, chatInterval, countdownSource: countdownSource || null },
+      data: {
+        delay,
+        scene,
+        chatInterval,
+        stopStreamAtEnd,
+        countdownSource: countdownSource || null,
+      },
     };
   },
 });
