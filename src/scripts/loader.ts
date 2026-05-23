@@ -38,6 +38,13 @@ export type ScriptApi = {
     isConnected: () => boolean;
     setCurrentScene: (name: string) => Promise<void>;
     setInputSettings: (inputName: string, inputSettings: Record<string, unknown>) => Promise<void>;
+    setInputMute: (inputName: string, muted: boolean) => Promise<void>;
+    getSceneItemId: (sceneName: string, sourceName: string) => Promise<number>;
+    setSceneItemEnabled: (
+      sceneName: string,
+      sceneItemId: number,
+      enabled: boolean,
+    ) => Promise<void>;
     stopStream: () => Promise<void>;
     startStream: () => Promise<void>;
     subscribeToStatusChanges: (cb: (connected: boolean) => void) => () => void;
@@ -127,6 +134,10 @@ function createScriptApi(scriptId: string, cleanupFns: (() => void)[], dataDir: 
       setCurrentScene: (name) => obsService.setCurrentScene(name),
       setInputSettings: (inputName, inputSettings) =>
         obsService.setInputSettings(inputName, inputSettings),
+      setInputMute: (inputName, muted) => obsService.setInputMute(inputName, muted),
+      getSceneItemId: (sceneName, sourceName) => obsService.getSceneItemId(sceneName, sourceName),
+      setSceneItemEnabled: (sceneName, sceneItemId, enabled) =>
+        obsService.setSceneItemEnabled(sceneName, sceneItemId, enabled),
       stopStream: () => obsService.stopStream(),
       startStream: () => obsService.startStream(),
       subscribeToStatusChanges: (cb) => {
@@ -295,6 +306,9 @@ export type ScriptApi = {
     isConnected: () => boolean;
     setCurrentScene: (name: string) => Promise<void>;
     setInputSettings: (inputName: string, inputSettings: Record<string, unknown>) => Promise<void>;
+    setInputMute: (inputName: string, muted: boolean) => Promise<void>;
+    getSceneItemId: (sceneName: string, sourceName: string) => Promise<number>;
+    setSceneItemEnabled: (sceneName: string, sceneItemId: number, enabled: boolean) => Promise<void>;
     stopStream: () => Promise<void>;
     startStream: () => Promise<void>;
     subscribeToStatusChanges: (cb: (connected: boolean) => void) => () => void;

@@ -581,6 +581,23 @@ export class ObsService {
     return this.sendRequest('SetInputSettings', { inputName, inputSettings });
   }
 
+  async setInputMute(inputName: string, inputMuted: boolean): Promise<void> {
+    return this.sendRequest('SetInputMute', { inputName, inputMuted });
+  }
+
+  async getSceneItemId(sceneName: string, sourceName: string): Promise<number> {
+    const res = await this.sendRequest('GetSceneItemId', { sceneName, sourceName });
+    return res.sceneItemId as number;
+  }
+
+  async setSceneItemEnabled(
+    sceneName: string,
+    sceneItemId: number,
+    sceneItemEnabled: boolean,
+  ): Promise<void> {
+    return this.sendRequest('SetSceneItemEnabled', { sceneName, sceneItemId, sceneItemEnabled });
+  }
+
   async getVersion(): Promise<any> {
     return this.sendRequest('GetVersion');
   }
