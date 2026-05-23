@@ -188,7 +188,13 @@ export class ObsService {
                   const key = String(reqId);
                   const pending = this.pendingRequests.get(key);
                   if (pending) {
-                    pending.resolve(msg.d.responseData);
+                    if (msg.d.requestStatus?.result === false) {
+                      const code = msg.d.requestStatus?.code as number | undefined;
+                      const comment = (msg.d.requestStatus?.comment as string | undefined) ?? 'OBS request failed';
+                      pending.reject(new Error(`OBS error ${code ?? '?'}: ${comment}`));
+                    } else {
+                      pending.resolve(msg.d.responseData);
+                    }
                     this.pendingRequests.delete(key);
                   }
                 }
