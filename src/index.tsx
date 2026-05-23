@@ -51,6 +51,7 @@ import { parseMarkerArgs, parseSettingsValue } from './utils/webCommands';
 import './index.ts'; // start Bun.serve web server in the same process
 import { IpcActionError, registry } from './actions/registry';
 import { startIpcServer } from './ipc/server';
+import { loadUserScripts } from './scripts/loader';
 import './actions/markers';
 import './actions/chat';
 import './scripts/obs-shutdown';
@@ -5248,6 +5249,7 @@ async function main() {
   });
 
   await initializeServices();
+  await loadUserScripts(getDataDir());
   startIpcServer(handleCommandForCli, chatService, { youtube, twitch, kick }, (line) => {
     lastMessages.push(line);
     updateUI(lastMessages);

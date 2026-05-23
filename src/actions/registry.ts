@@ -33,6 +33,10 @@ export class ActionRegistry {
     this.actions.set(def.id, def);
   }
 
+  overrideAction(def: YashActionDefinition): void {
+    this.actions.set(def.id, def);
+  }
+
   getAction(id: string): YashActionDefinition | undefined {
     return this.actions.get(id);
   }
