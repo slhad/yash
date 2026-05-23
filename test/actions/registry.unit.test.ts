@@ -319,7 +319,7 @@ describe('invokeAction', () => {
 // 6. markerCreateAction and markersListAction — singleton registration
 // ---------------------------------------------------------------------------
 
-describe('markerCreateAction and markersListAction', () => {
+describe('marker actions', () => {
   test('markerCreateAction is registered in the singleton registry', () => {
     expect(registry.getAction('marker.create')).toBeDefined();
   });
@@ -328,6 +328,7 @@ describe('markerCreateAction and markersListAction', () => {
     const def = registry.getAction('marker.create')!;
     expect(def.domain).toBe('marker');
     expect(def.ipcEnabled).toBe(true);
+    expect(def.ipcOutputMode).toBe('response_and_tui');
     expect(def.voiceHint).toBe(true);
     expect(def.readOnly).toBe(false);
     expect(def.safety).toBe('safe');
@@ -344,6 +345,20 @@ describe('markerCreateAction and markersListAction', () => {
     expect(def.ipcOutputMode).toBe('response_and_tui');
     expect(def.voiceHint).toBe(true);
     expect(def.readOnly).toBe(true);
+    expect(def.safety).toBe('safe');
+  });
+
+  test('markersEditAction is registered in the singleton registry', () => {
+    expect(registry.getAction('markers.edit')).toBeDefined();
+  });
+
+  test('markersEditAction has correct metadata', () => {
+    const def = registry.getAction('markers.edit')!;
+    expect(def.domain).toBe('markers');
+    expect(def.ipcEnabled).toBe(true);
+    expect(def.ipcOutputMode).toBe('response_and_tui');
+    expect(def.voiceHint).toBe(true);
+    expect(def.readOnly).toBe(false);
     expect(def.safety).toBe('safe');
   });
 

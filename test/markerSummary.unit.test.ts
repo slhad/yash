@@ -9,7 +9,7 @@ describe('formatMarkerCreationSummary', () => {
         { platform: 'twitch', marker: { id: 'tw_2', positionInSeconds: 42 } },
         { platform: 'kick', marker: null },
       ]),
-    ).toBe('youtube: ✓ 0s | twitch: ✓ 42s | kick: ✗');
+    ).toBe('youtube: ✓ 0s | twitch: ✓ 42s');
   });
 
   test('compresses known live-state errors to keep the TUI output on one line', () => {

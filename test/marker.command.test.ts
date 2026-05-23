@@ -81,6 +81,73 @@ describe('YouTubeProvider — createMarker (chapter store)', () => {
     (p as any).clearMarkers();
     expect(await p.getMarkers()).toHaveLength(0);
   });
+
+  test('getPersistedMarkerSelectionId returns stable 1-based IDs', async () => {
+    const p = new YouTubeProvider();
+    const first = await p.createMarker('A', 0);
+    const second = await p.createMarker('B', 30);
+    expect(p.getPersistedMarkerSelectionId(first!.id)).toBe(1);
+    expect(p.getPersistedMarkerSelectionId(second!.id)).toBe(2);
+  });
+
+  test('clearPersistedMarkers removes only requested IDs and reports missing ones', async () => {
+    const p = new YouTubeProvider();
+    await p.createMarker('A', 0);
+    await p.createMarker('B', 30);
+    await p.createMarker('C', 60);
+
+    const result = await p.clearPersistedMarkers([2, 5]);
+
+    expect(result).toEqual({ clearedSelectionIds: [2], missingSelectionIds: [5] });
+    expect((await p.getMarkers()).map((marker) => marker.description)).toEqual(['A', 'C']);
+  });
+
+  test('clearPersistedMarkers re-syncs chapter description after removal', async () => {
+    const p = new YouTubeProvider() as any;
+    await p.createMarker('A', 0);
+    await p.createMarker('B', 30);
+    let synced = 0;
+    p._persistChapterDescription = async () => {
+      synced += 1;
+    };
+
+    await p.clearPersistedMarkers([1]);
+
+    expect(synced).toBe(1);
+  });
+
+  test('getPersistedMarkerBySelectionId returns marker by stable index', async () => {
+    const p = new YouTubeProvider();
+    await p.createMarker('A', 0);
+    const second = await p.createMarker('B', 30);
+    expect(p.getPersistedMarkerBySelectionId(2)?.id).toBe(second?.id);
+    expect(p.getPersistedMarkerBySelectionId(9)).toBeNull();
+  });
+
+  test('updatePersistedMarkerBySelectionId updates description and timestamp', async () => {
+    const p = new YouTubeProvider() as any;
+    await p.createMarker('A', 0);
+    await p.createMarker('B', 30);
+    let synced = 0;
+    p._persistChapterDescription = async () => {
+      synced += 1;
+    };
+
+    const updated = await p.updatePersistedMarkerBySelectionId(2, {
+      description: 'Renamed',
+      timestamp: 45,
+    });
+
+    expect(updated?.description).toBe('Renamed');
+    expect(updated?.positionInSeconds).toBe(45);
+    expect(
+      (await p.getMarkers()).map(
+        (marker: { description: string; positionInSeconds: number }) =>
+          `${marker.description}:${marker.positionInSeconds}`,
+      ),
+    ).toEqual(['A:0', 'Renamed:45']);
+    expect(synced).toBe(1);
+  });
 });
 
 // ─── YouTube getChapterDescriptionBlock ──────────────────────────────────────

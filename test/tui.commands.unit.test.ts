@@ -226,10 +226,28 @@ describe('getAutocomplete', () => {
     expect(result.hints).toEqual(['youtube']);
   });
 
+  test('/markers e → completes to /markers edit', () => {
+    const result = getAutocomplete('/markers e');
+    expect(result.completion).toBe('/markers edit');
+    expect(result.hints).toEqual(['edit']);
+  });
+
   test('/markers clear → only clear hint, no extra completion', () => {
     const result = getAutocomplete('/markers clear');
     expect(result.completion).toBeNull();
     expect(result.hints).toEqual(['clear']);
+  });
+
+  test('/markers clear  → hints all and ids placeholder', () => {
+    const result = getAutocomplete('/markers clear ');
+    expect(result.completion).toBeNull();
+    expect(result.hints).toEqual(['all', '<ids>']);
+  });
+
+  test('/markers edit  → hints id placeholder', () => {
+    const result = getAutocomplete('/markers edit ');
+    expect(result.completion).toBeNull();
+    expect(result.hints).toEqual(['<id>']);
   });
 
   test('/markers youtube  → hints limit placeholder', () => {

@@ -417,6 +417,7 @@ Bun.serve({
           targetPlatforms.map(async (p) => {
             const provider = providerMap[p];
             if (!provider) return { platform: p, marker: null, error: 'unknown platform' };
+            if (p === 'kick') return { platform: p, marker: null, skipped: 'unsupported' };
             if (!provider.isAuthenticated())
               return { platform: p, marker: null, error: 'not authenticated' };
             const marker = await provider.createMarker(description, timestamp);
@@ -441,9 +442,19 @@ Bun.serve({
     // Twitch/Kick markers are unaffected.
     // ------------------------------------------------------------------
     '/api/stream/markers/clear': {
-      POST: async () => {
-        await youtube.clearPersistedMarkers();
-        return new Response(JSON.stringify({ success: true, platform: 'youtube' }), {
+      POST: async (req) => {
+        const body = (await req.json().catch(() => ({}))) as { selectionIds?: unknown };
+        const rawSelectionIds = Array.isArray(body.selectionIds)
+          ? (body.selectionIds as unknown[])
+          : undefined;
+        const selectionIds = rawSelectionIds
+          ? rawSelectionIds.filter(
+              (id: unknown): id is number =>
+                typeof id === 'number' && Number.isInteger(id) && id > 0,
+            )
+          : undefined;
+        const result = await youtube.clearPersistedMarkers(selectionIds);
+        return new Response(JSON.stringify({ success: true, platform: 'youtube', ...result }), {
           headers: { 'Content-Type': 'application/json' },
         });
       },
@@ -473,7 +484,14 @@ Bun.serve({
             }
             try {
               const markers = await provider.getMarkers({ limit });
-              return { platform, markers };
+              const decoratedMarkers = markers.map((marker) => {
+                const selectionId =
+                  typeof (provider as typeof youtube).getPersistedMarkerSelectionId === 'function'
+                    ? (provider as typeof youtube).getPersistedMarkerSelectionId(marker.id)
+                    : null;
+                return selectionId === null ? marker : { ...marker, selectionId };
+              });
+              return { platform, markers: decoratedMarkers };
             } catch (err) {
               return { platform, markers: [], error: String(err) };
             }
