@@ -23,6 +23,7 @@ Keep it under 70 characters. No period at the end.
 <!-- For items unrelated to this PR, check them [x] with "N/A — reason" rather than leaving them unchecked. -->
 
 - [ ] `bun test` — N pass, 0 fail
+- [ ] `bun run validate:repo` — no tracked demo artifacts/binaries outside `tmp/`
 - [ ] `bun typecheck` — no errors
 - [ ] Live TUI check (tmux): ...
 - [ ] Live Web UI check: ...

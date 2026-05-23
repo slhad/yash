@@ -105,12 +105,13 @@ Before opening a PR, you **must** complete every step below in order. Do not ski
 For steps that are **not applicable** to the current change (e.g. no TUI changes → no VHS recording needed), mark the checklist item `[x]` with a short `N/A — reason` explanation. Never leave an unrelated item unchecked — an unchecked box signals a missing action, not an inapplicable one.
 
 1. **Unit tests** — run the unit test file(s) relevant to your changes: `bun test test/<relevant>.unit.test.ts` — all must pass
-2. **Full test suite** — `bun run test` — 0 failures
-3. **Type check** — `bun typecheck` — no errors
-4. **Live TUI check** — verify the feature in the running yash tmux session (window `yash:all`); use the `/test-live` skill
-5. **Live Web UI check** — verify the feature in the web UI
-6. **VHS recording** — create tapes, helper scripts, and generated GIFs under `tmp/` only; generate the TUI demo GIF last, once all checks above pass; host it via the `screenshots` release and link it in the Demo section
-7. **Playwright recording** — generate the Web UI demo GIF last, once all checks above pass:
+2. **Repo policy validation** — `bun run validate:repo` — no tracked demo artifacts outside `tmp/`, no tracked binary changes outside `tmp/`
+3. **Full test suite** — `bun run test` — 0 failures
+4. **Type check** — `bun typecheck` — no errors
+5. **Live TUI check** — verify the feature in the running yash tmux session (window `yash:all`); use the `/test-live` skill
+6. **Live Web UI check** — verify the feature in the web UI
+7. **VHS recording** — create tapes, helper scripts, and generated GIFs under `tmp/` only; generate the TUI demo GIF last, once all checks above pass; host it via the `screenshots` release and link it in the Demo section
+8. **Playwright recording** — generate the Web UI demo GIF last, once all checks above pass:
    ```bash
    RECORD_VIDEO=1 npx playwright test --project=chromium
    # videos land in tmp/playwright-output/<test-name>/video.webm
@@ -119,7 +120,7 @@ For steps that are **not applicable** to the current change (e.g. no TUI changes
    ```
    Keep any helper scripts, converted media, and staging files under `tmp/`, and link the resulting hosted URL in the Demo section alongside the VHS GIF.
 
-8. **Docs update** — before opening the PR, update `SPECS.md` to reflect any new or changed commands, settings, API routes, env vars, or behavior; update `README.md` if setup steps, IPC behavior, or architecture changed.
+9. **Docs update** — before opening the PR, update `SPECS.md` to reflect any new or changed commands, settings, API routes, env vars, or behavior; update `README.md` if setup steps, IPC behavior, or architecture changed.
 
 Only after all steps pass, create the PR following the conventions in `.github/PULL_REQUEST_TEMPLATE.md`. PR titles feed directly into the GitHub release changelog.
 
@@ -133,6 +134,7 @@ Default to using Bun instead of Node.js.
 
 - Use `bun <file>` instead of `node <file>` or `ts-node <file>`
 - Use `bun run <script>` for package scripts so Bun lifecycle hooks such as `pretest`, `prestart`, and `post*` actually run
+- Use `bun run validate:repo` before treating a branch as PR-ready; it enforces the tracked demo/binary artifact policy
 - Do not replace `bun run test` with `bun test` when you expect package-script checks to run; `bun test` bypasses `package.json` lifecycle hooks
 - Use `bun test` only when you intentionally want the raw Bun test runner without script hooks
 - Use `bun build <file.html|file.ts|file.css>` instead of `webpack` or `esbuild`

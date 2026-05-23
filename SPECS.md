@@ -463,8 +463,9 @@ interface PlatformProvider {
 - `bun run src/index.tsx` - Launch the TUI application
 - `bun run src/index.ts` - Launch the web server only
 - `bun run start` - Launch both TUI and web server concurrently
+- `bun run validate:repo` - Fail if the current branch introduces tracked demo artifacts outside `tmp/` or tracked binary changes outside `tmp/`
 - `bun test` - Run unit tests only (fast, skips lint/typecheck)
-- `bun run test` - Full check: lint → typecheck → tests
+- `bun run test` - Full check: repo policy validation → lint → typecheck → tests
 - `bun typecheck` - Type-check only (`bun --bun tsc --noEmit`)
 - `bun run cmd <command> [args...]` - Send a command to the running yash TUI via IPC (e.g. `bun run cmd /marker "Intro | 0"`)
 - `biome check --write` - Lint and format code
