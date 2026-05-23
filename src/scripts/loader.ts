@@ -65,9 +65,10 @@ export type ScriptApi = {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function sanitizeScriptId(filename: string): string {
+function sanitizeScriptId(filename: string, scriptsRoot: string): string {
   const base = path.basename(filename, path.extname(filename));
-  const name = base === 'index' ? path.basename(path.dirname(filename)) : base;
+  const parent = path.dirname(filename);
+  const name = base === 'index' && parent !== scriptsRoot ? path.basename(parent) : base;
   return name.toLowerCase().replace(/[^a-z0-9_-]/g, '_');
 }
 
@@ -355,7 +356,11 @@ export async function loadUserScripts(dataDir: string): Promise<void> {
   const scriptFiles: string[] = [];
 
   for (const e of entries) {
-    if ((e.isFile() || e.isSymbolicLink()) && /\.[tj]s$/.test(e.name) && !e.name.endsWith('.d.ts')) {
+    if (
+      (e.isFile() || e.isSymbolicLink()) &&
+      /\.[tj]s$/.test(e.name) &&
+      !e.name.endsWith('.d.ts')
+    ) {
       scriptFiles.push(path.join(dir, e.name));
     } else if (e.isDirectory()) {
       for (const ext of ['ts', 'js']) {
@@ -373,7 +378,7 @@ export async function loadUserScripts(dataDir: string): Promise<void> {
   }
 
   for (const file of scriptFiles) {
-    const scriptId = sanitizeScriptId(file);
+    const scriptId = sanitizeScriptId(file, dir);
     const cleanupFns: (() => void)[] = [];
 
     try {

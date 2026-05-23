@@ -190,7 +190,9 @@ export class ObsService {
                   if (pending) {
                     if (msg.d.requestStatus?.result === false) {
                       const code = msg.d.requestStatus?.code as number | undefined;
-                      const comment = (msg.d.requestStatus?.comment as string | undefined) ?? 'OBS request failed';
+                      const comment =
+                        (msg.d.requestStatus?.comment as string | undefined) ??
+                        'OBS request failed';
                       pending.reject(new Error(`OBS error ${code ?? '?'}: ${comment}`));
                     } else {
                       pending.resolve(msg.d.responseData);
