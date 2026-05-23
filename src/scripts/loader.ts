@@ -65,11 +65,11 @@ export type ScriptApi = {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function sanitizeScriptId(filename: string): string {
-  return path
-    .basename(filename, path.extname(filename))
-    .toLowerCase()
-    .replace(/[^a-z0-9_-]/g, '_');
+function sanitizeScriptId(filename: string, scriptsRoot: string): string {
+  const base = path.basename(filename, path.extname(filename));
+  const parent = path.dirname(filename);
+  const name = base === 'index' && parent !== scriptsRoot ? path.basename(parent) : base;
+  return name.toLowerCase().replace(/[^a-z0-9_-]/g, '_');
 }
 
 /** Unconditionally insert/replace an action in the registry. */
@@ -353,12 +353,32 @@ export async function loadUserScripts(dataDir: string): Promise<void> {
     return;
   }
 
-  const scriptFiles = entries
-    .filter((e) => e.isFile() && /\.[tj]s$/.test(e.name) && !e.name.endsWith('.d.ts'))
-    .map((e) => path.join(dir, e.name));
+  const scriptFiles: string[] = [];
+
+  for (const e of entries) {
+    if (
+      (e.isFile() || e.isSymbolicLink()) &&
+      /\.[tj]s$/.test(e.name) &&
+      !e.name.endsWith('.d.ts')
+    ) {
+      scriptFiles.push(path.join(dir, e.name));
+    } else if (e.isDirectory()) {
+      for (const ext of ['ts', 'js']) {
+        const candidate = path.join(dir, e.name, `index.${ext}`);
+        try {
+          if (fs.statSync(candidate).isFile()) {
+            scriptFiles.push(candidate);
+            break;
+          }
+        } catch {
+          // no index file in this dir
+        }
+      }
+    }
+  }
 
   for (const file of scriptFiles) {
-    const scriptId = sanitizeScriptId(file);
+    const scriptId = sanitizeScriptId(file, dir);
     const cleanupFns: (() => void)[] = [];
 
     try {

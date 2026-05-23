@@ -1,0 +1,52 @@
+{
+  // ─── Prepare phase ────────────────────────────────────────────────────────────
+  // OBS scene to switch to on startup, shown while you get ready (required)
+  "prepareScene": "[PS] PreLive",
+
+  // Sources to hide (disable) in the prepare scene — leave empty to skip
+  // Example: ["[SC] Webcam", "[SC] Alerts"]
+  "hideSources": [],
+
+  // Audio inputs to mute during prepare — leave empty to skip
+  "muteSources": ["Mic/Aux"],
+
+  // ─── Stream start ─────────────────────────────────────────────────────────────
+  // Set to true to call OBS startStream automatically (default: false)
+  // Leave false to start the stream manually or via a separate yash command
+  "startStream": false,
+
+  // ─── Countdown ────────────────────────────────────────────────────────────────
+  // Seconds to count down before switching to the live scene (default: 0 = skip)
+  "countdownDelay": 60,
+
+  // OBS text input source to update with remaining time on each tick (optional)
+  // Leave empty to disable source updates
+  "countdownSource": "[TXT] Countdown",
+
+  // Template written to the text source — {remaining} is replaced by seconds left
+  "countdownSourceText": "{remaining}s",
+
+  // Chat message template sent periodically during the countdown — {remaining} is replaced
+  // Set to "" to disable countdown chat messages
+  "countdownMessage": "Stream starting in {remaining}s!",
+
+  // How often (in seconds) to post a countdown message to chat (default: 10)
+  "chatInterval": 10,
+
+  // Switch to a 1s chat interval when this many seconds remain (0 = disabled)
+  "finalCountdownAt": 5,
+
+  // ─── Go-live phase ────────────────────────────────────────────────────────────
+  // OBS scene to switch to when going live (required)
+  "liveScene": "[PS] Start",
+
+  // Sources to show (enable) in the live scene — leave empty to skip
+  // [SC] Brio NB is hidden by obs-shutdown, re-enable it here
+  "showSources": ["[SC] Brio NB"],
+
+  // Audio inputs to unmute when going live — leave empty to skip
+  "unmuteSources": ["Mic/Aux"],
+
+  // Chat message sent when going live — set to "" to disable
+  "liveMessage": "We're live!"
+}

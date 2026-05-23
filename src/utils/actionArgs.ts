@@ -29,7 +29,10 @@ export function parseActionArgs(
     const value = raw[key] as string;
 
     if (def.type === 'string') {
-      args[key] = value;
+      args[key] =
+        value.length >= 2 && value.startsWith('"') && value.endsWith('"')
+          ? value.slice(1, -1)
+          : value;
     } else if (def.type === 'number') {
       const n = parseFloat(value);
       if (Number.isNaN(n)) {
