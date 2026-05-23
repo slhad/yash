@@ -53,6 +53,7 @@ import { IpcActionError, registry } from './actions/registry';
 import { startIpcServer } from './ipc/server';
 import './actions/markers';
 import './actions/chat';
+import './scripts/obs-shutdown';
 
 const settings = settingsStore;
 
