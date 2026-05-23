@@ -134,29 +134,40 @@ export class Logger {
 // ---------------------------------------------------------------------------
 // File transport — appends to ~/.config/yash/yash.log, rotates at 10 MB
 // ---------------------------------------------------------------------------
-const LOG_DIR = isServer
-  ? process.env.YASH_DATA_DIR ||
-    path.join(process.env.XDG_CONFIG_HOME || path.join(process.env.HOME || '.', '.config'), 'yash')
-  : '';
-const LOG_FILE = isServer ? path.join(LOG_DIR, 'yash.log') : '';
 const LOG_MAX_BYTES = 10 * 1024 * 1024; // 10 MB
+
+function getLogDir(): string {
+  if (!isServer) return '';
+  return (
+    process.env.YASH_DATA_DIR ||
+    path.join(process.env.XDG_CONFIG_HOME || path.join(process.env.HOME || '.', '.config'), 'yash')
+  );
+}
+
+function getLogFile(): string {
+  if (!isServer) return '';
+  return path.join(getLogDir(), 'yash.log');
+}
 
 function fileLog(line: string): void {
   if (!isServer) return;
   try {
-    fs.mkdirSync(LOG_DIR, { recursive: true });
+    const logDir = getLogDir();
+    const logFile = getLogFile();
+
+    fs.mkdirSync(logDir, { recursive: true });
     // Rotate when the file exceeds the size limit
     try {
-      const stat = fs.statSync(LOG_FILE);
+      const stat = fs.statSync(logFile);
       if (stat.size > LOG_MAX_BYTES) {
-        fs.renameSync(LOG_FILE, `${LOG_FILE}.1`);
+        fs.renameSync(logFile, `${logFile}.1`);
       }
     } catch {
       // file doesn't exist yet — fine
     }
     // Always include a timestamp in the file even if the logger omits it
     const ts = new Date().toISOString();
-    fs.appendFileSync(LOG_FILE, `[${ts}] ${line}\n`);
+    fs.appendFileSync(logFile, `[${ts}] ${line}\n`);
   } catch {
     // never crash the app because of a logging failure
   }

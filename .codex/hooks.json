@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "^Bash$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun run \"$(git rev-parse --show-toplevel)/scripts/validate-repo-artifacts.ts\" --codex-pre-tool-use",
+            "timeout": 120,
+            "statusMessage": "Validating repo policy before git commit"
+          }
+        ]
+      }
+    ]
+  }
+}
