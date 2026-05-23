@@ -132,10 +132,11 @@ export class Logger {
 }
 
 // ---------------------------------------------------------------------------
-// File transport — appends to ~/.yash/yash.log, rotates at 10 MB
+// File transport — appends to ~/.config/yash/yash.log, rotates at 10 MB
 // ---------------------------------------------------------------------------
 const LOG_DIR = isServer
-  ? process.env.YASH_DATA_DIR || path.join(process.env.HOME || '.', '.yash')
+  ? process.env.YASH_DATA_DIR ||
+    path.join(process.env.XDG_CONFIG_HOME || path.join(process.env.HOME || '.', '.config'), 'yash')
   : '';
 const LOG_FILE = isServer ? path.join(LOG_DIR, 'yash.log') : '';
 const LOG_MAX_BYTES = 10 * 1024 * 1024; // 10 MB

@@ -49,7 +49,7 @@ import type {
 import { StreamStatus } from './base';
 
 // ---------------------------------------------------------------------------
-// Persistent token shape stored in ~/.yash/kick_tokens.json
+// Persistent token shape stored in ~/.config/yash/kick_tokens.json
 // ---------------------------------------------------------------------------
 interface KickTokenFile extends OAuthToken {
   broadcasterId: number;
@@ -129,7 +129,13 @@ export class KickProvider implements PlatformProvider {
 
   // ---- token file ------------------------------------------------------------
   private static getDataDir(): string {
-    return process.env.YASH_DATA_DIR || path.join(process.env.HOME || '.', '.yash');
+    return (
+      process.env.YASH_DATA_DIR ||
+      path.join(
+        process.env.XDG_CONFIG_HOME || path.join(process.env.HOME || '.', '.config'),
+        'yash',
+      )
+    );
   }
 
   private static getTokenFile(): string {

@@ -137,9 +137,9 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
 - Must use https://github.com/anomalyco/opentui for UI components in terminal
 
 ### Logging
-- All log output is written to both stderr (console) and `~/.yash/yash.log` (file transport)
+- All log output is written to both stderr (console) and `~/.config/yash/yash.log` (file transport)
 - The file always includes an ISO 8601 timestamp even when the console formatter omits it
-- Log file is rotated when it exceeds 10 MB (renamed to `yash.log.1`); data directory defaults to `~/.yash` and can be overridden via `YASH_DATA_DIR`
+- Log file is rotated when it exceeds 10 MB (renamed to `yash.log.1`); data directory defaults to `~/.config/yash` and can be overridden via `YASH_DATA_DIR`
 
 ### Architecture
 - Provider abstraction layer with common `PlatformProvider` interface
@@ -149,7 +149,7 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
 - Token storage for authentication credentials (file-backed). Encryption/keyring-based storage is considered out of scope for this build.
 - OBS-studio integration via obs-websocket library
     * OBS websocket connection retries apply both after disconnects and when OBS is still closed during YASH startup
-- Runtime bootstrap config is stored in `YASH_DATA_DIR/config.json` (default `~/.yash/config.json`); mutable runtime settings are stored in `YASH_DATA_DIR/settings.json`; if the runtime config file does not exist yet and a legacy `[root]/config.json` is present, YASH migrates it once on startup and then moves mutable runtime state into `settings.json`
+- Runtime bootstrap config is stored in `YASH_DATA_DIR/config.json` (default `~/.config/yash/config.json`); mutable runtime settings are stored in `YASH_DATA_DIR/settings.json`; if the runtime config file does not exist yet and a legacy `[root]/config.json` is present, YASH migrates it once on startup and then moves mutable runtime state into `settings.json`
 - TUI and web server run as a single process (`bun run src/index.tsx`); `index.tsx` imports `index.ts` as a side-effect to start `Bun.serve` in the same process. Running them as separate processes causes port 3000 conflicts.
 - `Bun.serve` must use `development: false`. In development mode, Bun writes HTML bundle timing lines (e.g. `Bundled page in 31ms: index.html`) directly to fd 1 via native I/O, bypassing both `process.stdout` and the JS `console.*` API. Since `@opentui` renders the TUI on that same fd, these writes bleed into the TUI display and cannot be intercepted at the JS level. `development: false` suppresses this output; HMR is intentionally disabled as a result.
 - An IPC server (`src/ipc/server.ts`) is started after `initializeServices()` completes; it listens on a Unix Domain Socket at `YASH_DATA_DIR/yash.sock`. It cleans up any stale socket file on startup and removes the socket on `process.on('exit')`. SIGTERM is handled alongside SIGINT for a clean shutdown.
@@ -160,7 +160,7 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
 
 ### Platform Support
 - YouTube: Real OAuth2 integration via Google Data API v3
-    * OAuth2 Authorization Code flow; tokens persisted to `~/.yash/youtube_tokens.json`; access token auto-refreshed before expiry
+    * OAuth2 Authorization Code flow; tokens persisted to `~/.config/yash/youtube_tokens.json`; access token auto-refreshed before expiry
     * `getAuthUrl()` / `handleOAuthCallback(code)` — browser-based consent flow; callback at `GET /api/youtube/callback`
     * `updateStreamMetadata()` — updates live broadcast title/description via `liveBroadcasts.update` (GET + PUT to preserve all snippet fields)
         * Only mutable broadcasts (`created`, `ready`, `testing`, `live`) may be targeted; completed/revoked broadcasts must never be mutated by `/stream`
@@ -180,7 +180,7 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
     * Chapter markers are also persisted in the runtime `settings.json` at `stream.chapters` and reloaded on startup so YASH keeps chapter context across restarts
     * `getChannelInfo()` — returns `{ channelId, channelTitle, broadcastId, liveChatId }`
 - Twitch: OAuth2-only integration (no RTMP stream key)
-    * Real OAuth2 Authorization Code flow; tokens auto-refreshed and persisted to `~/.yash/twitch_tokens.json`
+    * Real OAuth2 Authorization Code flow; tokens auto-refreshed and persisted to `~/.config/yash/twitch_tokens.json`
     * Helix API: update channel title, game/category (resolved by name → ID), tags
     * Stream markers via Helix `POST /helix/streams/markers` (requires channel live); returns position in seconds and marker ID
     * Read markers via Helix `GET /helix/streams/markers` — filterable by videoId
@@ -190,7 +190,7 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
     * Viewer count polled from Helix every 60 seconds
     * `searchCategories(query, limit?)` — calls Helix `/search/categories` paginated
 - Kick: Real OAuth 2.1 PKCE integration via `@nekiro/kick-api`
-    * OAuth 2.1 PKCE flow (code verifier/challenge generated locally); tokens persisted to `~/.yash/kick_tokens.json`; pending PKCE verifier persisted to `~/.yash/kick_pending_auth.json` (10-minute TTL, survives restarts)
+    * OAuth 2.1 PKCE flow (code verifier/challenge generated locally); tokens persisted to `~/.config/yash/kick_tokens.json`; pending PKCE verifier persisted to `~/.config/yash/kick_pending_auth.json` (10-minute TTL, survives restarts)
     * `getAuthUrl()` / `handleOAuthCallback(code)` — browser-based consent flow; callback at `GET /api/kick/callback`
     * `updateStreamMetadata()` — updates title/category/tags via Kick channels API
     * `sendMessage()` — posts to chat via kick-api chat module
@@ -203,7 +203,7 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
     * `handleWebhookEvent(payload)` — dispatches incoming Kick chat webhook events into the chat stream
 
 ### Configuration
-Bootstrap config is stored in `YASH_DATA_DIR/config.json` (default `~/.yash/config.json`). Mutable runtime state is stored in `YASH_DATA_DIR/settings.json`. If the runtime config file does not exist yet and a legacy `[root]/config.json` is present, YASH migrates that legacy file once on startup and then moves mutable settings into `settings.json`. Environment variables take precedence over config file values.
+Bootstrap config is stored in `YASH_DATA_DIR/config.json` (default `~/.config/yash/config.json`). Mutable runtime state is stored in `YASH_DATA_DIR/settings.json`. If the runtime config file does not exist yet and a legacy `[root]/config.json` is present, YASH migrates that legacy file once on startup and then moves mutable settings into `settings.json`. Environment variables take precedence over config file values.
 
 ```json
 {
@@ -250,7 +250,7 @@ Mutable settings live in `settings.json`, including `demo`, `chat.*`, `stream.*`
 
 | Variable | Config key |
 |---|---|
-| `YASH_DATA_DIR` | Data directory for config, settings, log, message DB, and IPC socket (`yash.sock`); default `~/.yash` |
+| `YASH_DATA_DIR` | Data directory for config, settings, log, message DB, and IPC socket (`yash.sock`); default `~/.config/yash` |
 | `YASH_DEMO` | `settings.demo` |
 | `YASH_OBS_SERVER` | `obs.websocket.server` |
 | `YASH_OBS_PORT` | `obs.websocket.port` |

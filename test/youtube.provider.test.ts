@@ -1444,6 +1444,31 @@ describe('YouTubeProvider — broadcastId persistence', () => {
       await removeRepoTempDir(tempDir);
     }
   });
+
+  test('setupWebhooks clears stale broadcastId when no active broadcast found', async () => {
+    const p = makeProvider() as any;
+    p.isAuthenticatedFlag = true;
+    p.tokenData = {
+      accessToken: 'token',
+      refreshToken: 'refresh',
+      expiresIn: 3600,
+      obtainmentTimestamp: Date.now(),
+      channelId: 'chan',
+      channelTitle: 'title',
+    };
+    p.broadcastId = 'stale-broadcast-id';
+    p._findActiveBroadcast = async () => null;
+    p._stopPolling = () => {};
+    const persisted: (string | null)[] = [];
+    p.persistBroadcastId = async (id: string | null) => {
+      persisted.push(id);
+    };
+
+    await p.setupWebhooks({});
+
+    expect(p.broadcastId).toBeNull();
+    expect(persisted).toContain(null);
+  });
 });
 
 // ---------------------------------------------------------------------------

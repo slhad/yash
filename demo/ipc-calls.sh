@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # IPC demo helper — called by better-ipc.tape
-SOCK="${YASH_DATA_DIR:-$HOME/.yash}/yash.sock"
+SOCK="${YASH_DATA_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/yash}/yash.sock"
 ipc() { (printf '%s\n' "$1"; sleep 1) | socat -t6 - UNIX-CONNECT:"$SOCK"; echo; }
 
 case "$1" in

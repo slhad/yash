@@ -10,7 +10,10 @@ function clone<T>(value: T): T {
 }
 
 export function getDataDir(): string {
-  return process.env.YASH_DATA_DIR || path.join(process.env.HOME || '.', '.yash');
+  return (
+    process.env.YASH_DATA_DIR ||
+    path.join(process.env.XDG_CONFIG_HOME || path.join(process.env.HOME || '.', '.config'), 'yash')
+  );
 }
 
 export function getSettingsPath(dataDir?: string): string {
