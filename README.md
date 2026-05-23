@@ -30,6 +30,7 @@ Small toolkit to manage streaming across YouTube, Twitch, and Kick with a unifie
 When a TUI process is running, it listens on a Unix Domain Socket at `YASH_DATA_DIR/yash.sock` (default `~/.config/yash/yash.sock`). The `bun run cmd` script connects to that socket, sends a command, prints the response, and exits.
 
 ```sh
+bun run cmd /action          # list public IPC-safe actions
 bun run cmd /marker          # drop a stream marker
 bun run cmd /markers         # list all markers
 bun run cmd /settings get stream.title
@@ -40,6 +41,8 @@ bun run cmd /help
 ```
 
 Both forms are accepted — `bun run cmd marker` and `bun run cmd /marker` are equivalent; the leading `/` is added automatically if omitted.
+
+Commands invoked over IPC are also echoed into the live TUI chat pane before their output, using an `[ipc → cmd] /...` line. The same command echo exists for typed slash commands inside the TUI as `[you → cmd] /...`.
 
 **Exit behaviour:**
 - Exits `0` with stdout output on success
@@ -60,6 +63,23 @@ Both forms are accepted — `bun run cmd marker` and `bun run cmd /marker` are e
 | `/settings` (bare) | Requires TUI settings modal |
 
 `/settings get <key>` and `/settings set <key> <value>` work normally over IPC.
+
+### `/action` command
+
+`/action` exposes public IPC-safe actions from the internal action registry.
+
+```sh
+bun run cmd /action
+bun run cmd /action obs.shutdown.initiate
+bun run cmd /action obs.shutdown.initiate delay=10 scene='[PS] End'
+```
+
+- `/action` with no action id lists public actions grouped by domain
+- `/action <id>` invokes the action directly when all args are optional
+- `/action <id>` shows help and examples when required args are still missing
+- `/action <id> key=value ...` parses typed args and invokes the action
+
+The TUI autocomplete also understands `/action`, including action ids, `key=` argument names, and enum values.
 
 **Stale socket cleanup:** the server removes any pre-existing socket file at startup, so a leftover socket from a crash does not block a new TUI launch.
 
@@ -125,6 +145,26 @@ On startup, YASH performs a one-time migration from the legacy repository-root `
 3. If you already have a legacy repo-root `config.json`, YASH will migrate it once automatically the first time it starts without an existing runtime config file.
 
 `config.json` holds rarely edited bootstrap data such as OBS, server, and provider credentials/setup fields. `settings.json` holds mutable runtime state such as `stream.*`, `platforms.youtube.setup`, chat/UI preferences, demo mode, and per-platform viewer display settings.
+
+## Script configuration
+
+Bundled and user scripts read JSONC config from `~/.config/yash/scripts/<scriptId>/config.jsonc`.
+
+For example, the bundled `obs-shutdown` action can be configured at:
+
+```jsonc
+// ~/.config/yash/scripts/obs-shutdown/config.jsonc
+{
+  "delay": 10,
+  "chatInterval": 10,
+  "scene": "[PS] End",
+  "message": "Stream ending in {remaining}s!",
+  "source": "[TXT] Countdown",
+  "sourceText": "{remaining}s"
+}
+```
+
+That lets `/action obs.shutdown.initiate` run with config-backed defaults and optionally keep an OBS text source updated during the countdown.
 
 ## Security
 

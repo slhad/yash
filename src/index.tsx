@@ -29,6 +29,7 @@ import {
 } from './services';
 import { ChatterCache } from './services/chatter-cache';
 import { messageLog, type StreamSummary } from './services/message-log';
+import { formatActionHelp, parseActionArgs } from './utils/actionArgs';
 import { type ChatClearLineKind, runChatClearCommand } from './utils/chatClear';
 import { buildChatHistoryMessages } from './utils/chatHistoryLoader';
 import { getDataDir, isDemoMode, saveConfig } from './utils/config';
@@ -36,7 +37,7 @@ import { runIpcCommand } from './utils/ipcCommandRunner';
 import logCollector from './utils/logCollector';
 import { defaultLogger } from './utils/logger';
 import { buildTargetedStreamMetadataUpdate } from './utils/streamMetadata';
-import { getAutocomplete, initTuiCommands } from './utils/tuiCommands';
+import { getAutocomplete, initTuiCommands, setActionRegistry } from './utils/tuiCommands';
 import { installTuiErrorCapture } from './utils/tuiErrorCapture';
 import { type MessageTarget } from './utils/tuiMessageInput';
 import {
@@ -3159,8 +3160,91 @@ const commandHandlers: Record<
       });
     }
   },
+
+  '/action': async (parts, emit) => {
+    // Case 1 — no action id: list all public IPC-enabled actions grouped by domain
+    if (parts.length <= 1) {
+      const allActions = registry.listActions({ ipcOnly: true, details: true }) as Array<{
+        id: string;
+        title: string;
+        domain: string;
+        visibility: string;
+        safety: string;
+      }>;
+      const publicActions = allActions.filter(
+        (a) => a.visibility === 'public' && a.safety !== 'blocked',
+      );
+      const byDomain = new Map<string, typeof publicActions>();
+      for (const action of publicActions) {
+        const group = byDomain.get(action.domain) ?? [];
+        group.push(action);
+        byDomain.set(action.domain, group);
+      }
+      for (const [domain, actions] of byDomain) {
+        emit(`${domain}:`);
+        for (const action of actions) {
+          emit(`  ${action.id.padEnd(30)}${action.title}`);
+        }
+      }
+      return;
+    }
+
+    const id = parts[1] ?? '';
+
+    // Case 2 — action id only, no args: invoke if no args are required, else show help
+    if (parts.length === 2) {
+      const def = registry.getAction(id);
+      if (!def) {
+        emit(`[action] Unknown action: ${id}`);
+        return;
+      }
+      const hasRequiredArgs = Object.values(def.args).some((schema) => schema.required === true);
+      if (!hasRequiredArgs) {
+        // No required args — invoke with config/default-backed empty args
+        try {
+          const ctx = { chatService, providers: { youtube, twitch, kick } };
+          const result = await registry.invokeAction(id, {}, ctx);
+          for (const line of result.output ?? []) emit(line);
+          for (const warn of result.warnings ?? []) emit(`[warning] ${warn}`);
+        } catch (err) {
+          const msg = err instanceof IpcActionError ? err.message : String(err);
+          emit(`[action] Error: ${msg}`);
+        }
+        return;
+      }
+      for (const line of formatActionHelp(def)) emit(line);
+      return;
+    }
+
+    // Case 3 — action id + arg tokens: parse and invoke
+    const def = registry.getAction(id);
+    if (!def) {
+      emit(`[action] Unknown action: ${id}`);
+      return;
+    }
+
+    const { args, errors } = parseActionArgs(parts.slice(2), def.args);
+    if (errors.length > 0) {
+      for (const err of errors) emit(`[action] ${err}`);
+      return;
+    }
+
+    try {
+      const ctx = { chatService, providers: { youtube, twitch, kick } };
+      const result = await registry.invokeAction(id, args, ctx);
+      for (const line of result.output ?? []) emit(line);
+      for (const warn of result.warnings ?? []) emit(`[warning] ${warn}`);
+    } catch (err) {
+      if (err instanceof IpcActionError) {
+        emit(`[action] ${err.message}`);
+      } else {
+        emit(`[action] Internal error`);
+      }
+    }
+  },
 };
 initTuiCommands(Object.keys(commandHandlers).sort());
+setActionRegistry(registry);
 
 async function handleCommand(trimmed: string): Promise<void> {
   if (!trimmed.startsWith('/')) {
@@ -3174,6 +3258,7 @@ async function handleCommand(trimmed: string): Promise<void> {
     return;
   }
 
+  lastMessages.push(transformCommandFeedback('you', trimmed));
   const emit = (line: string) => lastMessages.push(line);
   const parts = trimmed.split(/\s+/);
   const cmd = parts[0].toLowerCase();
@@ -3186,9 +3271,9 @@ async function handleCommand(trimmed: string): Promise<void> {
 }
 
 async function handleCommandForCli(trimmed: string): Promise<string> {
-  let mirrored = false;
+  const mirrored = true;
+  lastMessages.push(transformCommandFeedback('ipc', trimmed));
   const output = await runIpcCommand(trimmed, commandHandlers, pushEvent, (line) => {
-    mirrored = true;
     lastMessages.push(line);
   });
   if (mirrored) updateUI(lastMessages);
@@ -4837,6 +4922,16 @@ function transformOutgoingMessage(target: MessageTarget, message: string): ChatL
       { content: '[you → ', fg: 'white' },
       { content: `${target}`, fg: getMessageTargetColor(target) },
       { content: `] ${message}`, fg: 'white' },
+    ],
+  };
+}
+
+function transformCommandFeedback(origin: 'you' | 'ipc', command: string): ChatLine {
+  return {
+    parts: [
+      { content: `[${origin} → `, fg: 'white' },
+      { content: 'cmd', fg: 'cyan' },
+      { content: `] ${command}`, fg: 'white' },
     ],
   };
 }

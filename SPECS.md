@@ -29,6 +29,7 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
         * `all` clears all Chat pane entries together
         * Available from both the live TUI and IPC (`bun run cmd`) because it does not open a modal or mutate persisted state; it does not clear the merged "Events & Logs" sidebar
     * Command /msg <all|youtube|twitch|kick> <text> - sends a message to the specified platform(s)
+    * Command `/action [action-id] [key=value ...]` - lists public IPC-safe actions, invokes actions directly when all args are optional, and shows help/examples when required args still need values
     * Command /marker [description] [| timestamp_s] - places a stream marker on all platforms
         * Optional description (chapter label, max 140 chars on Twitch)
         * Optional pipe-delimited timestamp in seconds from stream start (used by YouTube for chapter generation; ignored by Twitch which sets position server-side; Kick does not support markers)
@@ -49,9 +50,11 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
     * Message box to send message to [all|youtube|twitch|kick] platform and receive command "/" (without sending to platforms)
         * Input history: Up/Down arrow keys navigate previously-sent messages (like a shell history)
         * Plain messages (input not starting with `/`) show a target preview `all|youtube|twitch|kick > message`; `Tab` cycles between `all` and currently connected providers before sending
+        * Slash commands are echoed into the Chat pane before their output so later feedback lines keep a visible source command context
         * After a successful Twitch send, the chat panel also appends a local self-echo incoming line so Twitch matches the visible send/echo behavior of the other providers
         * Command parameter autocomplete: after typing a command + space, Tab completes available parameters
             * `/connect ` → `youtube | twitch | kick`
+            * `/action ` → public action ids; `/action <id> ` → available `key=` args or enum values
             * `/msg ` → `all | youtube | twitch | kick`
             * `/settings ` → `get | set`; `/settings get/set ` → setting key list
             * `/logs ` → `clear | tail | visible`
@@ -97,8 +100,8 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
     * `bun run cmd <command> [args...]` — forwards a command to the running yash TUI process and prints its output to stdout, then exits
     * Both `/cmd` and `cmd` argument forms are accepted (the leading `/` is inserted automatically if omitted)
     * Prints `yash is not running` to stderr and exits with code 1 when yash is not active (socket absent or connection refused)
-    * Commands available over IPC: `/marker`, `/markers`, `/settings get <key>`, `/settings set <key> <val>`, `/connect`, `/msg`, `/help`, and most non-modal commands
-    * IPC command output is also mirrored into the live TUI chat pane, so `bun run cmd /markers` surfaces the same visible lines as typing `/markers` in-app
+    * Commands available over IPC: `/action`, `/marker`, `/markers`, `/settings get <key>`, `/settings set <key> <val>`, `/connect`, `/msg`, `/help`, and most non-modal commands
+    * IPC command output is also mirrored into the live TUI chat pane, and the invoked command line is echoed there first, so `bun run cmd /markers` surfaces the same visible context as typing `/markers` in-app
     * Commands blocked over IPC (require the live TUI): `/exit`, `/stream`, `/setup-youtube`, `/history`, bare `/settings`, `/chatter`
 
 ## Out of scope (do not touch)

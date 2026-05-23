@@ -48,6 +48,7 @@ export type ScriptApi = {
   obs: {
     isConnected: () => boolean;
     setCurrentScene: (name: string) => Promise<void>;
+    setInputSettings: (inputName: string, inputSettings: Record<string, unknown>) => Promise<void>;
     stopStream: () => Promise<void>;
     startStream: () => Promise<void>;
     /** Returns an unsubscribe function. Also tracked by the loader for cleanup. */
