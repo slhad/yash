@@ -184,6 +184,7 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
     * Live chat receive uses `liveChatMessages.streamList` over gRPC, resuming with `nextPageToken` after reconnects and skipping initial pre-connect history to avoid replaying old messages in YASH
         * Runtime safeguard: YASH pauses reconnects for 60 minutes after quota exhaustion and stops the stream immediately when YouTube reports that the live chat ended or no longer exists
     * Status polling (60 s interval) — detects active broadcast, updates `streamStatus`, viewer count from `liveStreamingDetails.concurrentViewers`
+        * On startup, the TUI Chat pane emits a `[system] YouTube start: ...` summary showing whether the current broadcast is new or unchanged and whether auto-clear markers was enabled and done/skipped
     * In-memory chapter/marker store: `createMarker(description?, timestamp?)` stores `StreamMarker` objects
     * `getChapterDescriptionBlock()` serialises chapters to YouTube timestamp format (`0:00 Intro\n1:23 Q&A\n...`)
     * `getMarkers(options?)` — returns last N markers (default limit 20), filterable by `videoId`

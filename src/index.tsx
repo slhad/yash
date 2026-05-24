@@ -5477,6 +5477,10 @@ async function main() {
   youtube.onActivityEvent(({ type, message }) => {
     pushActivityEvent('youtube', type, message);
   });
+  youtube.onStartupNotice(({ line }) => {
+    lastMessages.push(line);
+    if (uiNodes) updateUI(lastMessages);
+  });
 
   await initializeServices();
   await loadUserScripts(getDataDir());

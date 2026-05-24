@@ -1484,6 +1484,147 @@ describe('YouTubeProvider — broadcastId persistence', () => {
     expect(p.broadcastId).toBeNull();
     expect(persisted).toContain(null);
   });
+
+  test('setupWebhooks clears markers on startup when persisted broadcastId differs and clearMarkersOnNewStream is enabled', async () => {
+    const p = makeProvider() as any;
+    p.isAuthenticatedFlag = true;
+    p.tokenData = {
+      accessToken: 'token',
+      refreshToken: 'refresh',
+      expiresIn: 3600,
+      obtainmentTimestamp: Date.now(),
+      channelId: 'chan',
+      channelTitle: 'title',
+    };
+    p.broadcastId = 'old-broadcast';
+    p.liveChatId = null;
+    p.chatStream = null;
+    p.chapterMarkers = [
+      {
+        id: 'yt_marker_1',
+        createdAt: new Date(),
+        description: 'Intro',
+        positionInSeconds: 0,
+        platform: 'youtube',
+      },
+    ];
+    let cleared = false;
+    p.clearPersistedMarkers = async () => {
+      cleared = true;
+    };
+    p._findActiveBroadcast = async () => ({ id: 'new-broadcast', liveChatId: null });
+    p._stopPolling = () => {};
+
+    await settingsStore.set('platforms.youtube.setup', {
+      clearMarkersOnNewStream: { enabled: true },
+    });
+    await p.setupWebhooks({});
+
+    expect(cleared).toBe(true);
+    expect(p.broadcastId).toBe('new-broadcast');
+  });
+
+  test('setupWebhooks does not clear markers on startup when persisted broadcastId matches current broadcast', async () => {
+    const p = makeProvider() as any;
+    p.isAuthenticatedFlag = true;
+    p.tokenData = {
+      accessToken: 'token',
+      refreshToken: 'refresh',
+      expiresIn: 3600,
+      obtainmentTimestamp: Date.now(),
+      channelId: 'chan',
+      channelTitle: 'title',
+    };
+    p.broadcastId = 'same-broadcast';
+    p.liveChatId = null;
+    p.chatStream = null;
+    let cleared = false;
+    p.clearPersistedMarkers = async () => {
+      cleared = true;
+    };
+    p._findActiveBroadcast = async () => ({ id: 'same-broadcast', liveChatId: null });
+    p._stopPolling = () => {};
+
+    await settingsStore.set('platforms.youtube.setup', {
+      clearMarkersOnNewStream: { enabled: true },
+    });
+    await p.setupWebhooks({});
+
+    expect(cleared).toBe(false);
+    expect(p.broadcastId).toBe('same-broadcast');
+  });
+
+  test('setupWebhooks emits startup notice when a new broadcast is detected', async () => {
+    const p = makeProvider() as any;
+    p.isAuthenticatedFlag = true;
+    p.tokenData = {
+      accessToken: 'token',
+      refreshToken: 'refresh',
+      expiresIn: 3600,
+      obtainmentTimestamp: Date.now(),
+      channelId: 'chan',
+      channelTitle: 'title',
+    };
+    p.broadcastId = 'old-broadcast';
+    p.liveChatId = null;
+    p.chatStream = null;
+    p._findActiveBroadcast = async () => ({ id: 'new-broadcast', liveChatId: null });
+    p._stopPolling = () => {};
+    const notices: unknown[] = [];
+    const unsubscribe = p.onStartupNotice((notice: unknown) => {
+      notices.push(notice);
+    });
+
+    await settingsStore.set('platforms.youtube.setup', {
+      clearMarkersOnNewStream: { enabled: true },
+    });
+    await p.setupWebhooks({});
+    unsubscribe();
+
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toEqual({
+      line: '[system] YouTube start: new broadcast detected; auto-clear markers enabled -> done.',
+      autoClearEnabled: true,
+      autoClearPerformed: true,
+      isNewBroadcast: true,
+    });
+  });
+
+  test('setupWebhooks emits skipped startup notice when the broadcast is unchanged', async () => {
+    const p = makeProvider() as any;
+    p.isAuthenticatedFlag = true;
+    p.tokenData = {
+      accessToken: 'token',
+      refreshToken: 'refresh',
+      expiresIn: 3600,
+      obtainmentTimestamp: Date.now(),
+      channelId: 'chan',
+      channelTitle: 'title',
+    };
+    p.broadcastId = 'same-broadcast';
+    p.liveChatId = null;
+    p.chatStream = null;
+    p._findActiveBroadcast = async () => ({ id: 'same-broadcast', liveChatId: null });
+    p._stopPolling = () => {};
+    const notices: unknown[] = [];
+    const unsubscribe = p.onStartupNotice((notice: unknown) => {
+      notices.push(notice);
+    });
+
+    await settingsStore.set('platforms.youtube.setup', {
+      clearMarkersOnNewStream: { enabled: true },
+    });
+    await p.setupWebhooks({});
+    unsubscribe();
+
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toEqual({
+      line: '[system] YouTube start: broadcast unchanged; auto-clear markers enabled -> skipped.',
+      autoClearEnabled: true,
+      autoClearPerformed: false,
+      isNewBroadcast: false,
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
