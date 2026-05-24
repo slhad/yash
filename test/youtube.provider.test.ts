@@ -206,6 +206,38 @@ describe('YouTubeProvider — chat', () => {
     expect(username).toBe('TestUser');
   });
 
+  test('_simulateMessage emits broadcastId as streamId when known', () => {
+    const p = makeProvider() as any;
+    p.broadcastId = 'broadcast-xyz';
+    let received: any = null;
+    p.onMessage((msg: ChatMessage) => {
+      received = msg;
+    });
+
+    p._simulateMessage('hello');
+
+    expect(received).not.toBeNull();
+    if (!received) throw new Error('expected received message');
+    const msg = received;
+    expect(msg.streamId).toBe('broadcast-xyz');
+  });
+
+  test('_simulateMessage omits streamId when broadcastId is unknown', () => {
+    const p = makeProvider() as any;
+    p.broadcastId = null;
+    let received: any = null;
+    p.onMessage((msg: ChatMessage) => {
+      received = msg;
+    });
+
+    p._simulateMessage('hello');
+
+    expect(received).not.toBeNull();
+    if (!received) throw new Error('expected received message');
+    const msg = received;
+    expect(msg.streamId).toBeUndefined();
+  });
+
   test('chat stream skips historical messages before the initial cutoff', () => {
     const p = makeProvider() as any;
     const received: string[] = [];

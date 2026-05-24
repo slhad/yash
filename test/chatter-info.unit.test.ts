@@ -149,6 +149,7 @@ describe('ChatterInfo shape', () => {
       accountCreatedAt: new Date('2020-01-01'),
       description: 'A cool channel',
       profileImageUrl: 'https://example.com/avatar.jpg',
+      profileUrl: 'https://youtube.com/channel/yt-456',
       subscriberCount: 10000,
       videoCount: 200,
       sessionMessageCount: 12,
@@ -159,6 +160,7 @@ describe('ChatterInfo shape', () => {
     expect(info.accountCreatedAt).toEqual(new Date('2020-01-01'));
     expect(info.description).toBe('A cool channel');
     expect(info.profileImageUrl).toBe('https://example.com/avatar.jpg');
+    expect(info.profileUrl).toBe('https://youtube.com/channel/yt-456');
     expect(info.subscriberCount).toBe(10000);
     expect(info.videoCount).toBe(200);
     expect(info.sessionFirstSeenAt).toEqual(new Date('2024-01-01T12:00:00Z'));

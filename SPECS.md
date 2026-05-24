@@ -68,7 +68,9 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
         * Single-match autocomplete on Enter: if only one command or argument matches the current input, pressing Enter executes that completion directly without needing Tab first
     * Chatter info modal: left-click any chat message, or press Enter while in browse mode (↑/↓ to select a message), to open a modal showing:
         * Platform profile info fetched via `provider.fetchChatterInfo()` (subscriber count, video count, account age, description, avatar URL)
-        * Session stats: number of messages sent this session and time first seen
+        * Clickable username when the provider can resolve a public profile URL
+        * Clickable `Session`, `All time`, and `Context` tab labels in addition to the keyboard shortcuts
+        * Session stats: number of messages sent this session and time first seen; for chatters whose messages carry a stable stream ID, session history follows that stream across YASH restarts instead of only the current process lifetime
         * Last 200 messages from the persistent message log (cross-session history)
         * Dismiss with Escape or q; modal is exclusive (only one open at a time)
     * TUI Layout
