@@ -3083,8 +3083,29 @@ const commandHandlers: Record<
     const parsed = parseMarkersArgs(parts.slice(1));
     if (parsed.error) {
       emit(
-        `[markers] Usage: /markers clear [all|ids] | edit <id> | [all|youtube|twitch|kick] [limit] (${parsed.error})`,
+        `[markers] Usage: /markers restore twitch [limit] | clear [all|ids] | edit <id> | [all|youtube|twitch|kick] [limit] (${parsed.error})`,
       );
+      updateUI(lastMessages);
+      return;
+    }
+
+    if (parsed.action === 'restore') {
+      try {
+        const ctx = { chatService, providers: { youtube, twitch, kick } };
+        const result = await registry.invokeAction(
+          'markers.restore',
+          { source: parsed.restoreSource, limit: parsed.limit },
+          ctx,
+        );
+        for (const line of result.output ?? []) emit(line);
+        for (const warn of result.warnings ?? []) emit(`[system] ${warn}`);
+      } catch (err) {
+        if (err instanceof IpcActionError) {
+          emit(`[markers] ${err.message}`);
+        } else {
+          emit(`[markers] restore error: ${String(err)}`);
+        }
+      }
       updateUI(lastMessages);
       return;
     }

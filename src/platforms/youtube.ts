@@ -1685,6 +1685,56 @@ export class YouTubeProvider implements PlatformProvider {
     return marker;
   }
 
+  async importMissingMarkers(
+    markers: StreamMarker[],
+  ): Promise<{ addedMarkers: StreamMarker[]; skippedMarkers: StreamMarker[] }> {
+    const existingPositions = new Set(
+      this.chapterMarkers.map((marker) => marker.positionInSeconds),
+    );
+    const sortedIncoming = [...markers].sort((a, b) => a.positionInSeconds - b.positionInSeconds);
+    const previousMarkers = [...this.chapterMarkers];
+    const addedMarkers: StreamMarker[] = [];
+    const skippedMarkers: StreamMarker[] = [];
+
+    for (const marker of sortedIncoming) {
+      if (existingPositions.has(marker.positionInSeconds)) {
+        skippedMarkers.push(marker);
+        continue;
+      }
+
+      const importedMarker: StreamMarker = {
+        id: `yt_marker_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        createdAt: marker.createdAt instanceof Date ? marker.createdAt : new Date(marker.createdAt),
+        description: marker.description ?? '',
+        positionInSeconds: marker.positionInSeconds,
+        platform: 'youtube',
+        ...(typeof marker.videoId === 'string' ? { videoId: marker.videoId } : {}),
+        ...(typeof marker.url === 'string' ? { url: marker.url } : {}),
+      };
+      this.chapterMarkers.push(importedMarker);
+      existingPositions.add(importedMarker.positionInSeconds);
+      addedMarkers.push(importedMarker);
+    }
+
+    if (addedMarkers.length === 0) {
+      return { addedMarkers, skippedMarkers };
+    }
+
+    try {
+      await this.persistChapters();
+      await this._persistChapterDescription();
+      return { addedMarkers, skippedMarkers };
+    } catch (err) {
+      this.chapterMarkers = previousMarkers;
+      try {
+        await this.persistChapters();
+      } catch (persistErr) {
+        defaultLogger.error('[YouTube] importMissingMarkers rollback persist error:', persistErr);
+      }
+      throw err;
+    }
+  }
+
   async getMarkers(options?: GetMarkersOptions): Promise<StreamMarker[]> {
     let result = [...this.chapterMarkers];
     if (options?.videoId) result = result.filter((m) => m.videoId === options.videoId);

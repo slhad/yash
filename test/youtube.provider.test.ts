@@ -1118,6 +1118,40 @@ describe('YouTubeProvider — markers', () => {
     expect(all).toHaveLength(2);
   });
 
+  test('importMissingMarkers adds only Twitch markers whose timestamps are missing', async () => {
+    const p = makeProvider() as any;
+    await p.createMarker('Intro', 0);
+    p._persistChapterDescription = async () => {};
+
+    const result = await p.importMissingMarkers([
+      {
+        id: 'tw_1',
+        createdAt: new Date('2026-05-25T10:00:00Z'),
+        description: 'Intro from Twitch',
+        positionInSeconds: 0,
+        platform: 'twitch',
+      },
+      {
+        id: 'tw_2',
+        createdAt: new Date('2026-05-25T10:10:00Z'),
+        description: 'Boss',
+        positionInSeconds: 1964,
+        platform: 'twitch',
+      },
+    ]);
+
+    expect(result.addedMarkers).toHaveLength(1);
+    expect(result.addedMarkers[0]?.description).toBe('Boss');
+    expect(result.addedMarkers[0]?.platform).toBe('youtube');
+    expect(result.skippedMarkers).toHaveLength(1);
+    expect(result.skippedMarkers[0]?.id).toBe('tw_1');
+    expect(
+      (await p.getMarkers()).map(
+        (marker: { positionInSeconds: number }) => marker.positionInSeconds,
+      ),
+    ).toEqual([0, 1964]);
+  });
+
   test('createMarker persists chapters into settings.json and a new provider reloads them', async () => {
     const tempDir = await makeRepoTempDir('yash-youtube-chapters-persist');
     const originalYashDataDir = process.env.YASH_DATA_DIR;

@@ -5,12 +5,13 @@ describe('shared help metadata', () => {
   test('api help includes shared command docs from one source', () => {
     const commands = getHelpCommands('api');
     expect(commands.find((entry) => entry.command === '/marker')).toMatchObject({
-      usage: '/marker [description] [| timestamp_s]',
+      usage: '/marker [description] [| timestamp]',
       example: '/marker Replay | -300',
     });
     expect(commands.find((entry) => entry.command === '/markers')).toMatchObject({
-      usage: '/markers clear [all|ids] | edit <id> | [all|youtube|twitch|kick] [limit]',
-      example: '/markers edit 1',
+      usage:
+        '/markers restore twitch [limit] | clear [all|ids] | edit <id> | [all|youtube|twitch|kick] [limit]',
+      example: '/markers restore twitch',
     });
     expect(commands.find((entry) => entry.command === '/connect')).toMatchObject({
       usage: '/connect <youtube|twitch|kick>',
@@ -30,7 +31,7 @@ describe('shared help metadata', () => {
       '[help]       e.g.  /marker Replay|-300  (YouTube: 5 minutes before current live position)',
     );
     expect(lines).toContain(
-      '[help]   /markers clear [all|ids] | edit <id> | [all|youtube|twitch|kick] [limit]  — List, edit, or clear YouTube chapters',
+      '[help]   /markers restore twitch [limit] | clear [all|ids] | edit <id> | [all|youtube|twitch|kick] [limit]  — List, restore, edit, or clear YouTube chapters',
     );
   });
 });

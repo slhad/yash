@@ -45,6 +45,21 @@ function getPersistedMarkerBySelectionId(
   return null;
 }
 
+async function importMissingYoutubeMarkers(
+  provider: unknown,
+  markers: StreamMarker[],
+): Promise<{ addedMarkers: StreamMarker[]; skippedMarkers: StreamMarker[] } | null> {
+  if (
+    provider &&
+    typeof provider === 'object' &&
+    'importMissingMarkers' in provider &&
+    typeof provider.importMissingMarkers === 'function'
+  ) {
+    return provider.importMissingMarkers(markers);
+  }
+  return null;
+}
+
 async function updatePersistedMarkerBySelectionId(
   provider: unknown,
   selectionId: number,
@@ -275,6 +290,64 @@ export const markersEditAction: YashActionDefinition = {
   },
 };
 
+export const markersRestoreAction: YashActionDefinition = {
+  id: 'markers.restore',
+  title: 'Restore Missing YouTube Markers From Twitch',
+  description: 'Import Twitch markers that are missing from persisted YouTube chapters.',
+  domain: 'markers',
+  ipcEnabled: true,
+  ipcOutputMode: 'response_and_tui',
+  voiceHint: true,
+  readOnly: false,
+  safety: 'safe',
+  visibility: 'public',
+  args: {
+    source: { type: 'enum', required: false, values: ['twitch'] },
+    limit: { type: 'number', required: false, min: 1, max: 100 },
+  },
+  examples: [
+    {
+      args: { source: 'twitch' },
+      description: 'Restore the latest Twitch markers that are missing from YouTube',
+    },
+    {
+      args: { source: 'twitch', limit: 50 },
+      description: 'Restore up to 50 Twitch markers into YouTube chapters',
+    },
+  ],
+  async invoke(args, ctx): Promise<ActionResult> {
+    const source = (args.source as 'twitch' | undefined) ?? 'twitch';
+    const limit = (args.limit as number | undefined) ?? 100;
+
+    if (source !== 'twitch') {
+      throw new IpcActionError('invalid_args', `Unsupported restore source "${source}"`);
+    }
+
+    const twitchProvider = ctx.providers.twitch;
+    const youtubeProvider = ctx.providers.youtube;
+    if (!twitchProvider || typeof twitchProvider.getMarkers !== 'function') {
+      throw new IpcActionError('internal_error', 'Twitch marker provider is unavailable');
+    }
+
+    const twitchMarkers = await twitchProvider.getMarkers({ limit });
+    const imported = await importMissingYoutubeMarkers(youtubeProvider, twitchMarkers);
+    if (!imported) {
+      throw new IpcActionError('internal_error', 'YouTube marker import is unavailable');
+    }
+
+    const added = imported.addedMarkers.length;
+    const skipped = imported.skippedMarkers.length;
+
+    return {
+      output: [
+        `[markers] youtube: restored ${added} missing Twitch marker${added === 1 ? '' : 's'}${skipped > 0 ? ` (skipped ${skipped} existing timestamp${skipped === 1 ? '' : 's'})` : ''}`,
+      ],
+      data: imported,
+    };
+  },
+};
+
 registry.registerAction(markerCreateAction);
 registry.registerAction(markersListAction);
 registry.registerAction(markersEditAction);
+registry.registerAction(markersRestoreAction);

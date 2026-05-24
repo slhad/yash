@@ -33,7 +33,9 @@ When a TUI process is running, it listens on a Unix Domain Socket at `YASH_DATA_
 bun run cmd /action          # list public IPC-safe actions
 bun run cmd /marker          # drop a stream marker
 bun run cmd /marker "Replay | -300"  # 5 minutes before the current live position
+bun run cmd /marker "Boss | 32:44"   # 32 minutes 44 seconds from stream start
 bun run cmd /markers         # list all markers
+bun run cmd /markers restore twitch
 bun run cmd /settings get stream.title
 bun run cmd /settings set demo true
 bun run cmd /connect youtube
@@ -42,6 +44,10 @@ bun run cmd /help
 ```
 
 Both forms are accepted — `bun run cmd marker` and `bun run cmd /marker` are equivalent; the leading `/` is added automatically if omitted.
+
+`/marker` accepts raw seconds as before, and also `mm:ss` or `hh:mm:ss` timestamps for YouTube chapters.
+
+`/markers restore twitch [limit]` imports recent Twitch markers into persisted YouTube chapters, but only when that timestamp is missing from YouTube already.
 
 Commands invoked over IPC are also echoed into the live TUI chat pane before their output, using an `[ipc → cmd] /...` line. The same command echo exists for typed slash commands inside the TUI as `[you → cmd] /...`.
 

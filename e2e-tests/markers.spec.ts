@@ -95,6 +95,32 @@ if (process.env.RUN_PLAYWRIGHT === '1') {
     expect(capturedBody).toMatchObject({ timestamp: 120, description: 'Q&A' });
   });
 
+  test('markers: /marker with mm:ss timestamp sends converted seconds', async ({ page }) => {
+    await gotoUnified(page);
+
+    let capturedBody: Record<string, unknown> = {};
+
+    await page.route('**/api/stream/marker', async (route) => {
+      if (route.request().method() === 'POST') {
+        capturedBody = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>;
+        return route.fulfill({
+          json: {
+            markers: [
+              { platform: 'youtube', marker: { positionInSeconds: 1964 } },
+              { platform: 'twitch', marker: { positionInSeconds: 1964 } },
+            ],
+          },
+        });
+      }
+      return route.continue();
+    });
+
+    await typeAndSend(page, '/marker Boss | 32:44');
+
+    await waitForFeedback(page, 'youtube: ✓ pos=1964s');
+    expect(capturedBody).toMatchObject({ timestamp: 1964, description: 'Boss' });
+  });
+
   // ── Test 3: /markers lists markers ────────────────────────────────────────
   test('markers: /markers lists markers per platform', async ({ page }) => {
     await gotoUnified(page);
@@ -147,6 +173,32 @@ if (process.env.RUN_PLAYWRIGHT === '1') {
     await typeAndSend(page, '/markers clear');
 
     const feedback = await waitForFeedback(page, 'youtube: cleared all persisted markers');
+    await expect(feedback).toBeVisible();
+  });
+
+  test('markers: /markers restore twitch shows restore confirmation', async ({ page }) => {
+    await gotoUnified(page);
+
+    await page.route('**/api/stream/markers/restore', (route) => {
+      if (route.request().method() === 'POST') {
+        return route.fulfill({
+          status: 200,
+          json: {
+            success: true,
+            addedMarkers: [{ id: 'tw_2' }],
+            skippedMarkers: [{ id: 'tw_1' }],
+          },
+        });
+      }
+      return route.continue();
+    });
+
+    await typeAndSend(page, '/markers restore twitch');
+
+    const feedback = await waitForFeedback(
+      page,
+      'youtube: restored 1 missing Twitch marker (skipped 1 existing timestamp)',
+    );
     await expect(feedback).toBeVisible();
   });
 

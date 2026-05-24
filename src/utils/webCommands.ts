@@ -32,13 +32,14 @@ export interface WebCommandContext {
 
 /**
  * Parse the argument string that follows `/marker`.
- * Syntax: `[description] [| timestamp_s]`
+ * Syntax: `[description] [| timestamp]`
  *
  * Examples:
  *   ""            → { }
  *   "Intro"       → { description: "Intro" }
  *   "Q&A | 3723"  → { description: "Q&A", timestamp: 3723 }
  *   "Clip | -300" → { description: "Clip", timestamp: -300 }
+ *   "Intro|32:44" → { description: "Intro", timestamp: 1964 }
  *   "| 120"       → { timestamp: 120 }
  */
 export function parseMarkerArgs(parts: string[]): { description?: string; timestamp?: number } {
@@ -52,9 +53,9 @@ export function parseMarkerArgs(parts: string[]): { description?: string; timest
   } else {
     description = rawArgs.slice(0, pipeIdx).trim() || undefined;
     const tsRaw = rawArgs.slice(pipeIdx + 1).trim();
-    const parsed = Number.parseFloat(tsRaw);
-    if (!Number.isNaN(parsed)) {
-      timestamp = Math.round(parsed);
+    const parsed = parseMarkerTimestamp(tsRaw);
+    if (parsed !== undefined) {
+      timestamp = parsed;
     }
   }
 
@@ -62,9 +63,10 @@ export function parseMarkerArgs(parts: string[]): { description?: string; timest
 }
 
 export function parseMarkersArgs(parts: string[]): {
-  action?: 'clear' | 'edit';
+  action?: 'clear' | 'edit' | 'restore';
   clearSelectionIds?: number[];
   editSelectionId?: number;
+  restoreSource?: 'twitch';
   platforms?: string[];
   limit?: number;
   error?: string;
@@ -109,6 +111,37 @@ export function parseMarkersArgs(parts: string[]): {
     return { action: 'edit', editSelectionId: parsed };
   }
 
+  if (first === 'restore') {
+    const source = (parts[1] ?? '').toLowerCase();
+    if (source !== 'twitch') {
+      return {
+        action: 'restore',
+        error: 'Restore currently supports only "twitch" as the source platform',
+      };
+    }
+    if (parts.length <= 2) {
+      return { action: 'restore', restoreSource: 'twitch' };
+    }
+    if (parts.length !== 3) {
+      return {
+        action: 'restore',
+        restoreSource: 'twitch',
+        error: 'Restore accepts at most one optional limit value',
+      };
+    }
+
+    const parsed = Number.parseInt(parts[2] ?? '', 10);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      return {
+        action: 'restore',
+        restoreSource: 'twitch',
+        error: `Invalid limit "${parts[2]}"`,
+      };
+    }
+
+    return { action: 'restore', restoreSource: 'twitch', limit: parsed };
+  }
+
   const validPlatforms = ['all', 'youtube', 'twitch', 'kick'];
   let platforms: string[] | undefined;
   let limitPart: string | undefined;
@@ -132,6 +165,35 @@ export function parseMarkersArgs(parts: string[]): {
 
 function isStrictPositiveIntegerToken(raw: string): boolean {
   return /^[1-9]\d*$/.test(raw);
+}
+
+function parseMarkerTimestamp(raw: string): number | undefined {
+  if (!raw) return undefined;
+
+  if (raw.includes(':')) {
+    const sign = raw.startsWith('-') ? -1 : 1;
+    const normalized = sign === -1 ? raw.slice(1) : raw;
+    const segments = normalized.split(':');
+    if (segments.length < 2 || segments.length > 3) return undefined;
+    if (!segments.every((segment) => /^\d+$/.test(segment))) return undefined;
+
+    const values = segments.map((segment) => Number.parseInt(segment, 10));
+    const seconds = values[segments.length - 1] ?? 0;
+    const minutes = values[segments.length - 2] ?? 0;
+    if (seconds >= 60) return undefined;
+
+    if (segments.length === 2) {
+      return sign * (minutes * 60 + seconds);
+    }
+
+    const hours = values[0] ?? 0;
+    if (minutes >= 60) return undefined;
+    return sign * (hours * 3600 + minutes * 60 + seconds);
+  }
+
+  const parsed = Number.parseFloat(raw);
+  if (Number.isNaN(parsed)) return undefined;
+  return Math.round(parsed);
 }
 
 /**
@@ -168,8 +230,8 @@ const VALID_COMMANDS = [
  *   "/msg "             → "all | youtube | twitch | kick"
  *   "/settings "        → "get | set"
  *   "/settings get "    → "<key>  e.g. title.visible"
- *   "/marker"           → "[description] [| timestamp_s]"
- *   "/markers"          → "clear [all|ids] | edit <id> | [all|youtube|twitch|kick] [limit]"
+ *   "/marker"           → "[description] [| timestamp]"
+ *   "/markers"          → "restore twitch [limit] | clear [all|ids] | edit <id> | [all|youtube|twitch|kick] [limit]"
  */
 export function getWebAutocomplete(input: string): string | null {
   const trimmed = input.trimStart();
@@ -210,11 +272,11 @@ export function getWebAutocomplete(input: string): string | null {
   }
 
   if (cmd === '/marker') {
-    return '[description] [| timestamp_s]';
+    return '[description] [| timestamp]';
   }
 
   if (cmd === '/markers') {
-    return 'clear [all|ids] | edit <id> | [all|youtube|twitch|kick] [limit]';
+    return 'restore twitch [limit] | clear [all|ids] | edit <id> | [all|youtube|twitch|kick] [limit]';
   }
 
   if (cmd === '/settings') {
@@ -321,7 +383,7 @@ export async function handleWebCommand(text: string, ctx: WebCommandContext): Pr
     return true;
   }
 
-  // ── /marker [description] [| timestamp_s] ────────────────────────────────
+  // ── /marker [description] [| timestamp] ──────────────────────────────────
   if (cmd === '/marker') {
     const { description, timestamp } = parseMarkerArgs(parts.slice(1));
     const targetPlatforms = ctx.platforms.length > 0 ? ctx.platforms : [...VALID_PLATFORMS];
@@ -361,14 +423,38 @@ export async function handleWebCommand(text: string, ctx: WebCommandContext): Pr
     return true;
   }
 
-  // ── /markers clear [all|ids] | edit <id> | [all|youtube|twitch|kick] [limit]
+  // ── /markers restore twitch [limit] | clear [all|ids] | edit <id> | [all|youtube|twitch|kick] [limit]
   if (cmd === '/markers') {
     const parsed = parseMarkersArgs(parts.slice(1));
     if (parsed.error) {
       fb(
         'markers',
-        `Usage: /markers clear [all|ids] | edit <id> | [all|youtube|twitch|kick] [limit] (${parsed.error})`,
+        `Usage: /markers restore twitch [limit] | clear [all|ids] | edit <id> | [all|youtube|twitch|kick] [limit] (${parsed.error})`,
       );
+      return true;
+    }
+
+    if (parsed.action === 'restore') {
+      try {
+        const res = await fetch('/api/stream/markers/restore', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ source: parsed.restoreSource, limit: parsed.limit }),
+        });
+        if (!res.ok) {
+          fb('markers', 'Failed to restore missing Twitch markers into YouTube.');
+          return true;
+        }
+        const data = await res.json();
+        const added = Array.isArray(data.addedMarkers) ? data.addedMarkers.length : 0;
+        const skipped = Array.isArray(data.skippedMarkers) ? data.skippedMarkers.length : 0;
+        fb(
+          'markers',
+          `youtube: restored ${added} missing Twitch marker${added === 1 ? '' : 's'}${skipped > 0 ? ` (skipped ${skipped} existing timestamp${skipped === 1 ? '' : 's'})` : ''}`,
+        );
+      } catch {
+        fb('markers', 'Failed to restore missing Twitch markers into YouTube.');
+      }
       return true;
     }
 
