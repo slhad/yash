@@ -101,6 +101,13 @@ export interface YouTubeBroadcastReferenceGroups {
   all: YouTubeBroadcastReference[];
 }
 
+export interface YouTubeStartupNotice {
+  line: string;
+  autoClearEnabled: boolean;
+  autoClearPerformed: boolean;
+  isNewBroadcast: boolean;
+}
+
 // ---------------------------------------------------------------------------
 // Required OAuth scopes
 // ---------------------------------------------------------------------------
@@ -275,6 +282,7 @@ export class YouTubeProvider implements PlatformProvider {
 
   // ---- activity events -------------------------------------------------------
   private activityCallbacks: ((event: { type: string; message: string }) => void)[] = [];
+  private startupNoticeCallbacks: ((notice: YouTubeStartupNotice) => void)[] = [];
 
   onActivityEvent(cb: (event: { type: string; message: string }) => void): () => void {
     this.activityCallbacks.push(cb);
@@ -285,6 +293,17 @@ export class YouTubeProvider implements PlatformProvider {
 
   private _dispatchActivity(type: string, message: string): void {
     for (const cb of this.activityCallbacks) cb({ type, message });
+  }
+
+  onStartupNotice(cb: (notice: YouTubeStartupNotice) => void): () => void {
+    this.startupNoticeCallbacks.push(cb);
+    return () => {
+      this.startupNoticeCallbacks = this.startupNoticeCallbacks.filter((c) => c !== cb);
+    };
+  }
+
+  private _dispatchStartupNotice(notice: YouTubeStartupNotice): void {
+    for (const cb of this.startupNoticeCallbacks) cb(notice);
   }
 
   // ---- markers (in-memory chapters) -----------------------------------------
@@ -1286,14 +1305,13 @@ export class YouTubeProvider implements PlatformProvider {
     this._stopPolling();
 
     const broadcast = await this._findActiveBroadcast();
+    const previousBroadcastId = this.broadcastId;
+    const previousLiveChatId = this.liveChatId;
     if (broadcast) {
-      this.broadcastId = broadcast.id;
-      void this.persistBroadcastId(broadcast.id).catch((err) =>
-        defaultLogger.error('[YouTube] persistBroadcastId error:', err),
+      await this._applyActiveBroadcast(broadcast, previousBroadcastId, previousLiveChatId);
+      this._dispatchStartupNotice(
+        this._buildStartupNotice(previousBroadcastId, broadcast.id, this.getSetup()),
       );
-      this.liveChatId = broadcast.liveChatId;
-      this.streamStatus = StreamStatus.ONLINE;
-      if (this.liveChatId) this._startChatPoll();
     } else if (this.broadcastId) {
       this.broadcastId = null;
       void this.persistBroadcastId(null).catch((err) =>
@@ -1316,45 +1334,7 @@ export class YouTubeProvider implements PlatformProvider {
       if (broadcast) {
         const previousBroadcastId = this.broadcastId;
         const previousLiveChatId = this.liveChatId;
-        const broadcastChanged = previousBroadcastId !== broadcast.id;
-        this.broadcastId = broadcast.id;
-        if (broadcastChanged)
-          void this.persistBroadcastId(broadcast.id).catch((err) =>
-            defaultLogger.error('[YouTube] persistBroadcastId error:', err),
-          );
-        this.liveChatId = broadcast.liveChatId;
-        this.streamStatus = StreamStatus.ONLINE;
-
-        const shouldStartChatPoll =
-          !!broadcast.liveChatId &&
-          (broadcastChanged ||
-            previousLiveChatId !== broadcast.liveChatId ||
-            this.chatStream === null);
-        if (shouldStartChatPoll) this._startChatPoll();
-
-        if (broadcastChanged) {
-          const setup = this.getSetup();
-          if (setup.clearMarkersOnNewStream.enabled) {
-            await this.clearPersistedMarkers().catch((err) =>
-              defaultLogger.error('[YouTube] auto-clear markers error:', err),
-            );
-            defaultLogger.info(
-              '[YouTube] broadcast changed or startup — chapter markers cleared automatically',
-            );
-          }
-        }
-
-        if (broadcastChanged) {
-          const setup = this.getSetup();
-          if (setup.defaultMarkerAtStart.enabled) {
-            const hasZeroMarker = this.chapterMarkers.some((m) => m.positionInSeconds === 0);
-            if (!hasZeroMarker) {
-              await this.createMarker(setup.defaultMarkerAtStart.message, 0).catch((err) =>
-                defaultLogger.error('[YouTube] auto-start marker error:', err),
-              );
-            }
-          }
-        }
+        await this._applyActiveBroadcast(broadcast, previousBroadcastId, previousLiveChatId);
 
         // Viewer count from liveStreamingDetails
         const videoResp = await this._request(
@@ -1387,6 +1367,68 @@ export class YouTubeProvider implements PlatformProvider {
     } catch (err) {
       defaultLogger.error('[YouTube] _pollStatus error:', err);
     }
+  }
+
+  private async _applyActiveBroadcast(
+    broadcast: { id: string; liveChatId: string | null },
+    previousBroadcastId: string | null,
+    previousLiveChatId: string | null,
+  ): Promise<void> {
+    const broadcastChanged = previousBroadcastId !== broadcast.id;
+    this.broadcastId = broadcast.id;
+    if (broadcastChanged) {
+      void this.persistBroadcastId(broadcast.id).catch((err) =>
+        defaultLogger.error('[YouTube] persistBroadcastId error:', err),
+      );
+    }
+    this.liveChatId = broadcast.liveChatId;
+    this.streamStatus = StreamStatus.ONLINE;
+
+    const shouldStartChatPoll =
+      !!broadcast.liveChatId &&
+      (broadcastChanged || previousLiveChatId !== broadcast.liveChatId || this.chatStream === null);
+    if (shouldStartChatPoll) this._startChatPoll();
+
+    if (!broadcastChanged) return;
+
+    const setup = this.getSetup();
+    if (setup.clearMarkersOnNewStream.enabled) {
+      await this.clearPersistedMarkers().catch((err) =>
+        defaultLogger.error('[YouTube] auto-clear markers error:', err),
+      );
+      defaultLogger.info(
+        '[YouTube] broadcast changed or startup — chapter markers cleared automatically',
+      );
+    }
+
+    if (setup.defaultMarkerAtStart.enabled) {
+      const hasZeroMarker = this.chapterMarkers.some((m) => m.positionInSeconds === 0);
+      if (!hasZeroMarker) {
+        await this.createMarker(setup.defaultMarkerAtStart.message, 0).catch((err) =>
+          defaultLogger.error('[YouTube] auto-start marker error:', err),
+        );
+      }
+    }
+  }
+
+  private _buildStartupNotice(
+    previousBroadcastId: string | null,
+    currentBroadcastId: string,
+    setup: YouTubeStreamSetup,
+  ): YouTubeStartupNotice {
+    const isNewBroadcast = previousBroadcastId !== currentBroadcastId;
+    const autoClearEnabled = setup.clearMarkersOnNewStream.enabled;
+    const autoClearPerformed = isNewBroadcast && autoClearEnabled;
+    const broadcastLabel = isNewBroadcast ? 'new broadcast detected' : 'broadcast unchanged';
+    const autoClearLabel = autoClearEnabled ? 'enabled' : 'disabled';
+    const resultLabel = autoClearPerformed ? 'done' : 'skipped';
+
+    return {
+      line: `[system] YouTube start: ${broadcastLabel}; auto-clear markers ${autoClearLabel} -> ${resultLabel}.`,
+      autoClearEnabled,
+      autoClearPerformed,
+      isNewBroadcast,
+    };
   }
 
   // ---------------------------------------------------------------------------
