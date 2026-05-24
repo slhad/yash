@@ -22,8 +22,10 @@ import {
   youtube,
 } from './services';
 import { isDemoMode, resolvePort } from './utils/config';
+import { getHelpCommands } from './utils/help';
 import { defaultLogger } from './utils/logger';
 import { apiMetricsHandler, prometheusMetricsHandler } from './utils/metricsHandlers';
+import { buildStreamMarkerPayload } from './utils/streamMarkerRoute';
 
 export {
   authService,
@@ -406,29 +408,9 @@ Bun.serve({
     // ------------------------------------------------------------------
     '/api/stream/marker': {
       POST: async (req) => {
-        const body = await req.json().catch(() => ({}));
-        const targetPlatforms: string[] = body?.platforms ?? ['youtube', 'twitch', 'kick'];
-        const description: string | undefined = body?.description;
-        const timestamp: number | undefined =
-          typeof body?.timestamp === 'number' ? body.timestamp : undefined;
-
         const providerMap: Record<string, PlatformProvider> = { youtube, twitch, kick };
-        const results = await Promise.allSettled(
-          targetPlatforms.map(async (p) => {
-            const provider = providerMap[p];
-            if (!provider) return { platform: p, marker: null, error: 'unknown platform' };
-            if (p === 'kick') return { platform: p, marker: null, skipped: 'unsupported' };
-            if (!provider.isAuthenticated())
-              return { platform: p, marker: null, error: 'not authenticated' };
-            const marker = await provider.createMarker(description, timestamp);
-            return { platform: p, marker };
-          }),
-        );
-
-        const payload = results.map((r, i) => {
-          if (r.status === 'fulfilled') return r.value;
-          return { platform: targetPlatforms[i], marker: null, error: String(r.reason) };
-        });
+        const body = await req.json().catch(() => ({}));
+        const payload = await buildStreamMarkerPayload(body, providerMap);
 
         return new Response(JSON.stringify({ markers: payload }), {
           headers: { 'Content-Type': 'application/json' },
@@ -838,48 +820,7 @@ Bun.serve({
       GET: () => {
         return new Response(
           JSON.stringify({
-            commands: [
-              {
-                command: '/help',
-                description: 'Show available commands',
-                example: '/help',
-              },
-              {
-                command: 'status legend',
-                description:
-                  'Status symbols: ✓ = authenticated and online, ○ = authenticated but offline, ✗ = not authenticated',
-              },
-              {
-                command: '/msg',
-                description: 'Send a message to a specific platform or all',
-                example: '/msg all Hello world',
-                usage: '/msg <all|youtube|twitch|kick> <text>',
-              },
-              {
-                command: '/marker',
-                description: 'Place a stream marker on all platforms',
-                example: '/marker Intro | 0',
-                usage: '/marker [description] [| timestamp_s]',
-              },
-              {
-                command: '/markers',
-                description: 'List markers or clear persisted YouTube markers',
-                example: '/markers clear',
-                usage: '/markers clear | [all|youtube|twitch|kick] [limit]',
-              },
-              {
-                command: '/connect',
-                description: 'Authenticate a platform',
-                example: '/connect twitch',
-                usage: '/connect <youtube|twitch|kick>',
-              },
-              {
-                command: '/settings',
-                description: 'Get or set a UI setting',
-                example: '/settings set title.visible true',
-                usage: '/settings get <key> | /settings set <key> <value>',
-              },
-            ],
+            commands: getHelpCommands('api'),
           }),
           { headers: { 'Content-Type': 'application/json' } },
         );

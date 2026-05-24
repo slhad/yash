@@ -33,10 +33,12 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
     * Command /marker [description] [| timestamp_s] - places a stream marker on all platforms
         * Optional description (chapter label, max 140 chars on Twitch)
         * Optional pipe-delimited timestamp in seconds from stream start (used by YouTube for chapter generation; ignored by Twitch which sets position server-side; Kick does not support markers)
+        * Negative timestamps are treated as relative offsets from the current live position on YouTube and clamp at `0` (example: `/marker Replay|-300` means "5 minutes ago")
         * Kick is silently skipped in user-facing marker-create summaries because it has no marker API
         * When no timestamp is provided, YouTube derives the marker position from the current live stream elapsed time when available, falling back to a live API lookup after restart before using `0`
         * TUI output should collapse provider results into a single `[marker] ...` summary line
         * Examples: `/marker Intro | 0`, `/marker Q&A | 3723`, `/marker` (unnamed, no timestamp)
+        * Examples: `/marker Replay|-300` means "5 minutes ago" on YouTube relative to the current live position
     * Command `/markers clear [all|ids] | edit <id> | [all|youtube|twitch|kick] [limit]` - lists existing markers per platform, edits a persisted YouTube chapter, or clears persisted YouTube chapters
         * `clear` removes only YouTube chapter markers persisted under `stream.chapters` in `YASH_DATA_DIR/settings.json`
         * `edit <id>` opens a TUI modal for persisted YouTube marker `#id`; IPC clients should use the `markers.edit` action with the same selection ID

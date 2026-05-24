@@ -1494,11 +1494,11 @@ export class YouTubeProvider implements PlatformProvider {
   }
 
   private async _resolveMarkerTimestamp(timestamp?: number): Promise<number> {
+    if (timestamp !== undefined && timestamp >= 0) return timestamp;
+
     let resolvedSeconds: number;
 
-    if (timestamp !== undefined) {
-      resolvedSeconds = timestamp;
-    } else if (this.streamStartTime) {
+    if (this.streamStartTime) {
       resolvedSeconds = Math.max(
         0,
         Math.floor((Date.now() - this.streamStartTime.getTime()) / 1000),
@@ -1528,11 +1528,14 @@ export class YouTubeProvider implements PlatformProvider {
       );
     }
 
-    if (timestamp === undefined) {
-      const setup = this.getSetup();
-      if (setup.markerSyncDelay.enabled && setup.markerSyncDelay.offsetSeconds !== 0) {
-        resolvedSeconds = Math.max(0, resolvedSeconds + setup.markerSyncDelay.offsetSeconds);
-      }
+    if (timestamp !== undefined) {
+      if (timestamp >= 0) return timestamp;
+      return Math.max(0, resolvedSeconds + timestamp);
+    }
+
+    const setup = this.getSetup();
+    if (setup.markerSyncDelay.enabled && setup.markerSyncDelay.offsetSeconds !== 0) {
+      resolvedSeconds = Math.max(0, resolvedSeconds + setup.markerSyncDelay.offsetSeconds);
     }
     return resolvedSeconds;
   }
