@@ -239,6 +239,38 @@ describe('KickProvider — onMessage', () => {
     expect(typeof received.id).toBe('string');
     expect(typeof received.timestamp).toBe('number');
   });
+
+  test('emits streamId from streamStartTime when known', () => {
+    const p = makeProvider() as any;
+    const startTime = new Date('2026-05-25T10:05:00.000Z');
+    p.streamStartTime = startTime;
+    let received: any = null;
+    p.onMessage((m: ChatMessage) => {
+      received = m;
+    });
+
+    p._simulateMessage('with stream', 'streamer99');
+
+    expect(received).not.toBeNull();
+    if (!received) throw new Error('expected received message');
+    const msg = received;
+    expect(msg.streamId).toBe(startTime.toISOString());
+  });
+
+  test('omits streamId when streamStartTime is unknown', () => {
+    const p = makeProvider();
+    let received: any = null;
+    p.onMessage((m: ChatMessage) => {
+      received = m;
+    });
+
+    p._simulateMessage('without stream', 'streamer99');
+
+    expect(received).not.toBeNull();
+    if (!received) throw new Error('expected received message');
+    const msg = received;
+    expect(msg.streamId).toBeUndefined();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -777,3 +809,5 @@ describe('KickProvider — handleOAuthCallback', () => {
     expect(result.error).toContain('code verifier');
   });
 });
+
+import type { ChatMessage } from '../src/platforms/base';

@@ -214,6 +214,38 @@ describe('TwitchProvider — onMessage', () => {
     expect(typeof received.id).toBe('string');
     expect(typeof received.timestamp).toBe('number');
   });
+
+  test('emits streamId from streamStartTime when known', () => {
+    const p = makeProvider() as any;
+    const startTime = new Date('2026-05-25T10:00:00.000Z');
+    p.streamStartTime = startTime;
+    let received: any = null;
+    p.onMessage((m: ChatMessage) => {
+      received = m;
+    });
+
+    p._simulateMessage('with stream', 'streamer42');
+
+    expect(received).not.toBeNull();
+    if (!received) throw new Error('expected received message');
+    const msg = received;
+    expect(msg.streamId).toBe(startTime.toISOString());
+  });
+
+  test('omits streamId when streamStartTime is unknown', () => {
+    const p = makeProvider();
+    let received: any = null;
+    p.onMessage((m: ChatMessage) => {
+      received = m;
+    });
+
+    p._simulateMessage('without stream', 'streamer42');
+
+    expect(received).not.toBeNull();
+    if (!received) throw new Error('expected received message');
+    const msg = received;
+    expect(msg.streamId).toBeUndefined();
+  });
 });
 
 // ---------------------------------------------------------------------------

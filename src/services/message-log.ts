@@ -77,6 +77,35 @@ export class MessageLog {
     return rows.map(MessageLog._rowToMessage);
   }
 
+  getForUserInStream(platform: string, userId: string, streamId: string): ChatMessage[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM messages
+         WHERE platform = ? AND user_id = ? AND stream_id = ?
+         ORDER BY timestamp ASC`,
+      )
+      .all(platform, userId, streamId) as Array<Record<string, unknown>>;
+    return rows.map(MessageLog._rowToMessage);
+  }
+
+  getSessionStatsForUserInStream(
+    platform: string,
+    userId: string,
+    streamId: string,
+  ): { count: number; firstSeenAt?: Date } {
+    const result = this.db
+      .prepare(
+        `SELECT COUNT(*) as count, MIN(timestamp) as first_seen
+         FROM messages
+         WHERE platform = ? AND user_id = ? AND stream_id = ?`,
+      )
+      .get(platform, userId, streamId) as { count: number; first_seen: number | null } | null;
+    return {
+      count: result?.count ?? 0,
+      firstSeenAt: result?.first_seen != null ? new Date(result.first_seen) : undefined,
+    };
+  }
+
   // All messages from stream sessions where this user participated — newest-first with offset.
   getContextForUserDesc(
     platform: string,

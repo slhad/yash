@@ -45,6 +45,7 @@ export interface ChatterInfo {
   accountCreatedAt?: Date | null;
   description?: string | null;
   profileImageUrl?: string | null;
+  profileUrl?: string | null;
   subscriberCount?: number | null;
   videoCount?: number | null;
   sessionMessageCount: number;

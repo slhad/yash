@@ -2064,6 +2064,7 @@ export class YouTubeProvider implements PlatformProvider {
         accountCreatedAt,
         description: snippet?.description ?? null,
         profileImageUrl: snippet?.thumbnails?.default?.url ?? null,
+        profileUrl: `https://www.youtube.com/channel/${encodeURIComponent(item.id || userId)}`,
         subscriberCount,
         videoCount,
         sessionMessageCount: 0,

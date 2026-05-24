@@ -893,6 +893,7 @@ export class TwitchProvider implements PlatformProvider {
         accountCreatedAt: user.creationDate,
         description: user.description,
         profileImageUrl: user.profilePictureUrl,
+        profileUrl: `https://www.twitch.tv/${encodeURIComponent(user.name)}`,
       };
     } catch {
       return partial;

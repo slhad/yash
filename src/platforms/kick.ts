@@ -951,6 +951,7 @@ export class KickProvider implements PlatformProvider {
         ...partial,
         description: data.user?.bio ?? null,
         profileImageUrl: data.user?.profile_pic ?? null,
+        profileUrl: `https://kick.com/${encodeURIComponent(username.toLowerCase())}`,
         subscriberCount: data.followers_count ?? null,
       };
     } catch {

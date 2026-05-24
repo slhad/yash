@@ -3,6 +3,7 @@ process.setMaxListeners(0);
 
 import {
   BoxRenderable,
+  bold,
   type CliRenderer,
   createCliRenderer,
   fg,
@@ -12,6 +13,7 @@ import {
   StyledText,
   TextAttributes,
   TextRenderable,
+  underline,
 } from '@opentui/core';
 import type { ChatMessage } from './platforms/base';
 import { YT_CATEGORY_NAMES } from './platforms/youtube';
@@ -32,6 +34,14 @@ import { messageLog, type StreamSummary } from './services/message-log';
 import { formatActionHelp, parseActionArgs } from './utils/actionArgs';
 import { type ChatClearLineKind, runChatClearCommand } from './utils/chatClear';
 import { buildChatHistoryMessages } from './utils/chatHistoryLoader';
+import {
+  applySessionStatsToChatterInfo,
+  doesIncomingMessageAffectChatterAllTime,
+  doesIncomingMessageAffectChatterContext,
+  doesIncomingMessageAffectChatterSession,
+  getChatterSessionMessages,
+  getChatterSessionStats,
+} from './utils/chatterInfoSession';
 import { getDataDir, isDemoMode, saveConfig } from './utils/config';
 import { renderTuiHelpLines } from './utils/help';
 import { runIpcCommand } from './utils/ipcCommandRunner';
@@ -332,7 +342,10 @@ interface SettingsModal {
 let activeModal: TwitchSetupModal | null = null;
 let activeStreamModal: StreamModal | null = null;
 let activeSettingsModal: SettingsModal | null = null;
-let activeChatterInfoModal: { box: BoxRenderable } | null = null;
+let activeChatterInfoModal: {
+  box: BoxRenderable;
+  refreshForMessage: (msg: ChatMessage) => void;
+} | null = null;
 let activeHistoryModal: { box: BoxRenderable } | null = null;
 let activeActivityModal: { box: BoxRenderable } | null = null;
 
@@ -4070,19 +4083,46 @@ function openChatterInfoModal(msg: ChatMessage): void {
   let contextExhausted = false;
   let contextLoading = false;
 
-  function renderTabBar(
-    sessionCount: number,
-    alltimeCount: number,
-    contextCount: number,
-  ): StyledText {
-    const sessionColor = activeTab === 'session' ? 'cyan' : '#555555';
-    const alltimeColor = activeTab === 'alltime' ? 'cyan' : '#555555';
-    const contextColor = activeTab === 'context' ? 'cyan' : '#555555';
+  function renderTabBar(tab: 'session' | 'alltime' | 'context', count: number): StyledText {
     return new StyledText([
-      fg(sessionColor)(`  [S] Session (${sessionCount})  `),
-      fg(alltimeColor)(`[A] All time (${alltimeCount})  `),
-      fg(contextColor)(`[C] Context (${contextCount})`),
+      fg(activeTab === tab ? 'cyan' : '#555555')(
+        `  [${tab === 'session' ? 'S' : tab === 'alltime' ? 'A' : 'C'}] `,
+      ),
+      bold(
+        fg(activeTab === tab ? 'cyan' : '#555555')(
+          `${tab === 'session' ? 'Session' : tab === 'alltime' ? 'All time' : 'Context'} (${count})  `,
+        ),
+      ),
     ]);
+  }
+
+  function openExternalUrl(url: string): void {
+    const proc = Bun.spawn(['xdg-open', url]);
+    proc.exited.catch(() => {});
+  }
+
+  function getSessionMessagesForModal(): ChatMessage[] {
+    return getChatterSessionMessages(msg, {
+      getPersistedMessages: (platform, userId, streamId) =>
+        messageLog.getForUserInStream(platform, userId, streamId),
+      getPersistedStats: (platform, userId, streamId) =>
+        messageLog.getSessionStatsForUserInStream(platform, userId, streamId),
+      getInMemoryMessages: () => chatService.getMessageHistory(),
+      getInMemoryStats: (platform, userId, messages) =>
+        chatterCache.computeSessionStats(platform, userId, messages),
+    });
+  }
+
+  function getSessionStatsForModal(): { count: number; firstSeenAt?: Date } {
+    return getChatterSessionStats(msg, {
+      getPersistedMessages: (platform, userId, streamId) =>
+        messageLog.getForUserInStream(platform, userId, streamId),
+      getPersistedStats: (platform, userId, streamId) =>
+        messageLog.getSessionStatsForUserInStream(platform, userId, streamId),
+      getInMemoryMessages: () => chatService.getMessageHistory(),
+      getInMemoryStats: (platform, userId, messages) =>
+        chatterCache.computeSessionStats(platform, userId, messages),
+    });
   }
 
   // Message scroll box — declared before box setup so box.add(msgScroll) is valid
@@ -4119,19 +4159,146 @@ function openChatterInfoModal(msg: ChatMessage): void {
     fg: 'cyan',
     wrapMode: 'none',
   });
-  const tabBarTextNode = new TextRenderable(renderer, { content: '' });
+  let currentInfo: import('./platforms/base').ChatterInfo | null = null;
+  let currentProfileUrl: string | null = null;
+  const usernameTextNode = new TextRenderable(renderer, {
+    content: '',
+    wrapMode: 'none',
+  });
+  usernameTextNode.onMouseDown = (e) => {
+    if (e.button === 0 && currentProfileUrl) openExternalUrl(currentProfileUrl);
+  };
+  const tabBarRow = new BoxRenderable(renderer, {
+    flexDirection: 'row',
+    width: '100%',
+  });
+  const sessionTabTextNode = new TextRenderable(renderer, { content: '' });
+  const alltimeTabTextNode = new TextRenderable(renderer, { content: '' });
+  const contextTabTextNode = new TextRenderable(renderer, { content: '' });
+  sessionTabTextNode.onMouseDown = (e) => {
+    if (e.button === 0) switchTab('session');
+  };
+  alltimeTabTextNode.onMouseDown = (e) => {
+    if (e.button === 0) switchTab('alltime');
+  };
+  contextTabTextNode.onMouseDown = (e) => {
+    if (e.button === 0) switchTab('context');
+  };
+  tabBarRow.add(sessionTabTextNode);
+  tabBarRow.add(alltimeTabTextNode);
+  tabBarRow.add(contextTabTextNode);
+
+  function updateTabBar(): void {
+    sessionTabTextNode.content = renderTabBar('session', tabSessionCount);
+    alltimeTabTextNode.content = renderTabBar('alltime', tabAlltimeCount);
+    contextTabTextNode.content = renderTabBar('context', tabContextCount);
+  }
+
+  function renderInfoSummary(info: import('./platforms/base').ChatterInfo): void {
+    const userColor = info.color ?? 'white';
+    const pColor = platColor(info.platform);
+
+    type InfoRow = [string, string, string];
+    const rows: InfoRow[] = [['Platform:', info.platform, pColor]];
+
+    if (info.accountCreatedAt !== undefined) {
+      const dateStr = info.accountCreatedAt
+        ? (new Date(info.accountCreatedAt).toISOString().split('T')[0] ?? 'Unknown')
+        : 'Unknown';
+      rows.push(['Account created:', dateStr, 'white']);
+    }
+
+    rows.push(['Session messages:', String(info.sessionMessageCount), 'white']);
+
+    if (info.sessionFirstSeenAt) {
+      const timeStr = new Date(info.sessionFirstSeenAt).toLocaleTimeString('en-US', {
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+      rows.push(['First seen:', timeStr, 'white']);
+    } else {
+      rows.push(['First seen:', 'Unknown', '#888888']);
+    }
+
+    if (info.badges && Object.keys(info.badges).length > 0) {
+      rows.push(['Badges:', Object.keys(info.badges).join(', '), 'white']);
+    }
+
+    if (info.subscriberCount !== null && info.subscriberCount !== undefined) {
+      rows.push(['Subscribers:', info.subscriberCount.toLocaleString(), 'white']);
+    }
+
+    const chunks = rows.flatMap(([label, value, valueFg], i) => {
+      const labelPadded = (i > 0 ? '\n' : '') + `  ${label}`.padEnd(20);
+      return [fg('#888888')(labelPadded), fg(valueFg)(value)];
+    });
+    infoText.content = new StyledText(chunks);
+    infoText.height = rows.length;
+    currentProfileUrl = info.profileUrl ?? null;
+    usernameTextNode.content = currentProfileUrl
+      ? new StyledText([
+          fg('#888888')('  Username:'.padEnd(20)),
+          underline(fg(userColor)(`@${info.username}`)),
+        ])
+      : new StyledText([
+          fg('#888888')('  Username:'.padEnd(20)),
+          fg(userColor)(`@${info.username}`),
+        ]);
+
+    tabSessionCount = info.sessionMessageCount;
+    tabAlltimeCount = messageLog.countForUser(msg.platform, msg.userId);
+    tabContextCount = messageLog.countContextForUser(msg.platform, msg.userId);
+    updateTabBar();
+  }
   box.add(infoText);
-  box.add(tabBarTextNode);
+  box.add(usernameTextNode);
+  box.add(tabBarRow);
   box.add(msgScroll);
   box.add(
     new TextRenderable(renderer, {
       content:
-        '  [S] session  [A] all-time  [C] context  [↑] scroll / load older  [↓] scroll  [Esc] close',
+        '  [S] session  [A] all-time  [C] context  [click tabs/username]  [↑] scroll / load older  [↓] scroll  [Esc] close',
       fg: '#888888',
     }),
   );
   renderer.root.add(box);
-  activeChatterInfoModal = { box };
+  activeChatterInfoModal = {
+    box,
+    refreshForMessage: (incomingMsg) => {
+      if (!currentInfo || !activeChatterInfoModal) return;
+      const sessionAffected = doesIncomingMessageAffectChatterSession(msg, incomingMsg);
+      const alltimeAffected = doesIncomingMessageAffectChatterAllTime(msg, incomingMsg);
+      const contextAffected = doesIncomingMessageAffectChatterContext(incomingMsg, (streamId) => {
+        return (
+          messageLog.getSessionStatsForUserInStream(msg.platform, msg.userId, streamId).count > 0
+        );
+      });
+
+      if (!sessionAffected && !alltimeAffected && !contextAffected) return;
+
+      if (sessionAffected) {
+        currentInfo = applySessionStatsToChatterInfo(currentInfo, getSessionStatsForModal());
+      }
+      renderInfoSummary(currentInfo);
+
+      if (activeTab === 'session' && sessionAffected) {
+        fillMessageScroll('session', msg.platform, msg.userId);
+        msgScroll.scrollTo(99999);
+      } else if (activeTab === 'alltime' && alltimeAffected) {
+        alltimeMessages = [];
+        alltimePage = 0;
+        alltimeExhausted = false;
+        fillMessageScroll('alltime', msg.platform, msg.userId);
+        msgScroll.scrollTo(99999);
+      } else if (activeTab === 'context' && contextAffected) {
+        contextMessages = [];
+        contextPage = 0;
+        contextExhausted = false;
+        fillMessageScroll('context', msg.platform, msg.userId);
+        msgScroll.scrollTo(99999);
+      }
+    },
+  };
 
   // ── Alltime tab helpers ────────────────────────────────────────────────────
 
@@ -4337,9 +4504,7 @@ function openChatterInfoModal(msg: ChatMessage): void {
     }
 
     if (tab === 'session') {
-      const messages = chatService
-        .getMessageHistory()
-        .filter((m) => m.platform === platform && m.userId === userId);
+      const messages = getSessionMessagesForModal();
       if (messages.length === 0) {
         msgScroll.add(new TextRenderable(renderer, { content: '  (no messages)', fg: '#888888' }));
         return;
@@ -4390,6 +4555,13 @@ function openChatterInfoModal(msg: ChatMessage): void {
     }
   }
 
+  function switchTab(tab: 'session' | 'alltime' | 'context'): void {
+    if (activeTab === tab) return;
+    activeTab = tab;
+    updateTabBar();
+    fillMessageScroll(tab, msg.platform, msg.userId);
+  }
+
   const modalKeyHandler = (sequence: string): boolean => {
     if (!activeChatterInfoModal) return false;
     if (sequence === '\x1b' || sequence === '\x1b\x1b') {
@@ -4401,27 +4573,15 @@ function openChatterInfoModal(msg: ChatMessage): void {
     }
     // Tab switching
     if (sequence === 's' || sequence === 'S') {
-      if (activeTab !== 'session') {
-        activeTab = 'session';
-        tabBarTextNode.content = renderTabBar(tabSessionCount, tabAlltimeCount, tabContextCount);
-        fillMessageScroll('session', msg.platform, msg.userId);
-      }
+      switchTab('session');
       return true;
     }
     if (sequence === 'a' || sequence === 'A') {
-      if (activeTab !== 'alltime') {
-        activeTab = 'alltime';
-        tabBarTextNode.content = renderTabBar(tabSessionCount, tabAlltimeCount, tabContextCount);
-        fillMessageScroll('alltime', msg.platform, msg.userId);
-      }
+      switchTab('alltime');
       return true;
     }
     if (sequence === 'c' || sequence === 'C') {
-      if (activeTab !== 'context') {
-        activeTab = 'context';
-        tabBarTextNode.content = renderTabBar(tabSessionCount, tabAlltimeCount, tabContextCount);
-        fillMessageScroll('context', msg.platform, msg.userId);
-      }
+      switchTab('context');
       return true;
     }
     // Arrow key scrolling; ↑ at top of alltime/context tab loads older messages
@@ -4480,77 +4640,19 @@ function openChatterInfoModal(msg: ChatMessage): void {
           };
         }
 
-        const stats = chatterCache.computeSessionStats(
-          msg.platform,
-          msg.userId,
-          chatService.getMessageHistory(),
-        );
-        info.sessionMessageCount = stats.count;
-        if (stats.firstSeenAt) info.sessionFirstSeenAt = stats.firstSeenAt;
+        const stats = getSessionStatsForModal();
+        info = applySessionStatsToChatterInfo(info, stats);
 
         chatterCache.set(msg.platform, msg.userId, info);
       } else {
-        const stats = chatterCache.computeSessionStats(
-          msg.platform,
-          msg.userId,
-          chatService.getMessageHistory(),
-        );
-        info.sessionMessageCount = stats.count;
-        if (stats.firstSeenAt) info.sessionFirstSeenAt = stats.firstSeenAt;
+        const stats = getSessionStatsForModal();
+        info = applySessionStatsToChatterInfo(info, stats);
       }
 
       if (!activeChatterInfoModal) return;
 
-      // Build all info rows as a single multi-line StyledText so the yoga layout
-      // only needs to measure one node (avoids dynamic add/remove invalidation bugs).
-      const userColor = info.color ?? 'white';
-      const pColor = platColor(info.platform);
-
-      type InfoRow = [string, string, string]; // [label, value, valueFg]
-      const rows: InfoRow[] = [
-        ['Platform:', info.platform, pColor],
-        ['Username:', `@${info.username}`, userColor],
-      ];
-
-      if (info.accountCreatedAt !== undefined) {
-        const dateStr = info.accountCreatedAt
-          ? (new Date(info.accountCreatedAt).toISOString().split('T')[0] ?? 'Unknown')
-          : 'Unknown';
-        rows.push(['Account created:', dateStr, 'white']);
-      }
-
-      rows.push(['Session messages:', String(info.sessionMessageCount), 'white']);
-
-      if (info.sessionFirstSeenAt) {
-        const timeStr = new Date(info.sessionFirstSeenAt).toLocaleTimeString('en-US', {
-          hour: '2-digit',
-          minute: '2-digit',
-        });
-        rows.push(['First seen:', timeStr, 'white']);
-      } else {
-        rows.push(['First seen:', 'Unknown', '#888888']);
-      }
-
-      if (info.badges && Object.keys(info.badges).length > 0) {
-        rows.push(['Badges:', Object.keys(info.badges).join(', '), 'white']);
-      }
-
-      if (info.subscriberCount !== null && info.subscriberCount !== undefined) {
-        rows.push(['Subscribers:', info.subscriberCount.toLocaleString(), 'white']);
-      }
-
-      const chunks = rows.flatMap(([label, value, valueFg], i) => {
-        const labelPadded = (i > 0 ? '\n' : '') + `  ${label}`.padEnd(20);
-        return [fg('#888888')(labelPadded), fg(valueFg)(value)];
-      });
-      infoText.content = new StyledText(chunks);
-      infoText.height = rows.length;
-
-      // Update tab bar
-      tabSessionCount = info.sessionMessageCount;
-      tabAlltimeCount = messageLog.countForUser(msg.platform, msg.userId);
-      tabContextCount = messageLog.countContextForUser(msg.platform, msg.userId);
-      tabBarTextNode.content = renderTabBar(tabSessionCount, tabAlltimeCount, tabContextCount);
+      currentInfo = info;
+      renderInfoSummary(info);
 
       fillMessageScroll('session', msg.platform, msg.userId);
     } catch (err) {
@@ -5447,6 +5549,8 @@ async function main() {
   chatService.subscribeToMessages((msg) => {
     lastMessages.push(transformMessage(msg));
     lastRawMessages.push(msg);
+    activeChatterInfoModal?.refreshForMessage(msg);
+    if (uiNodes) updateUI(lastMessages);
   });
 
   obsService.subscribeToMessages((event) => {
