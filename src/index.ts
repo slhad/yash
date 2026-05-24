@@ -7,7 +7,7 @@ import commandsJs from './utils/webCommands.bundle.js' with { type: 'text' };
 // only OAuth callbacks and connect/API endpoints are needed.
 const isTuiOnly = process.env.YASH_TUI_ONLY === '1';
 
-import { registry } from './actions/registry';
+import { IpcActionError, registry } from './actions/registry';
 import type { PlatformProvider } from './platforms/base';
 import { YT_CATEGORY_NAMES } from './platforms/youtube';
 import {
@@ -451,19 +451,38 @@ Bun.serve({
     '/api/stream/markers/restore': {
       POST: async (req) => {
         const body = (await req.json().catch(() => ({}))) as { source?: unknown; limit?: unknown };
-        const source = body.source === 'twitch' ? 'twitch' : 'twitch';
+        if (body.source !== undefined && body.source !== 'twitch') {
+          return new Response(JSON.stringify({ error: 'unsupported restore source' }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        const source = body.source === 'twitch' ? 'twitch' : undefined;
         const limit =
           typeof body.limit === 'number' && Number.isInteger(body.limit) && body.limit > 0
             ? Math.min(body.limit, 100)
             : undefined;
-        const result = await registry.invokeAction(
-          'markers.restore',
-          { source, ...(limit !== undefined ? { limit } : {}) },
-          { chatService, providers: { youtube, twitch, kick } },
-        );
-        return new Response(JSON.stringify({ success: true, ...result.data }), {
-          headers: { 'Content-Type': 'application/json' },
-        });
+        try {
+          const result = await registry.invokeAction(
+            'markers.restore',
+            {
+              ...(source !== undefined ? { source } : {}),
+              ...(limit !== undefined ? { limit } : {}),
+            },
+            { chatService, providers: { youtube, twitch, kick } },
+          );
+          return new Response(JSON.stringify({ success: true, ...result.data }), {
+            headers: { 'Content-Type': 'application/json' },
+          });
+        } catch (err) {
+          if (err instanceof IpcActionError) {
+            return new Response(JSON.stringify({ error: err.message, code: err.code }), {
+              status: 400,
+              headers: { 'Content-Type': 'application/json' },
+            });
+          }
+          throw err;
+        }
       },
     },
 

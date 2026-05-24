@@ -202,6 +202,25 @@ if (process.env.RUN_PLAYWRIGHT === '1') {
     await expect(feedback).toBeVisible();
   });
 
+  test('markers: restore endpoint rejects unsupported source', async ({ page }) => {
+    await gotoUnified(page);
+
+    const response = await page.evaluate(async () => {
+      const res = await fetch('/api/stream/markers/restore', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source: 'youtube' }),
+      });
+      return {
+        status: res.status,
+        body: await res.json(),
+      };
+    });
+
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({ error: 'unsupported restore source' });
+  });
+
   // ── Test 5: /markers with invalid limit shows error ───────────────────────
   test('markers: /markers with invalid limit shows error', async ({ page }) => {
     await gotoUnified(page);
