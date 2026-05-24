@@ -40,7 +40,8 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
         * Examples: `/marker Intro | 0`, `/marker Q&A | 3723`, `/marker Boss | 32:44`, `/marker` (unnamed, no timestamp)
         * Examples: `/marker Replay|-300` means "5 minutes ago" on YouTube relative to the current live position
     * Command `/markers restore twitch [limit] | clear [all|ids] | edit <id> | [all|youtube|twitch|kick] [limit]` - lists existing markers per platform, restores missing YouTube chapters from Twitch markers, edits a persisted YouTube chapter, or clears persisted YouTube chapters
-        * `restore twitch` fetches recent Twitch markers (default limit `100`) and imports only timestamps that are missing from YouTube's persisted `stream.chapters`
+        * `restore twitch` fetches recent Twitch markers (default limit `100`) and imports only descriptions that are missing from YouTube's persisted `stream.chapters`
+        * Persisted YouTube chapters stay sorted by timestamp so `/markers`, `edit <id>`, and `clear <id>` use stable order after restore/imports
         * `clear` removes only YouTube chapter markers persisted under `stream.chapters` in `YASH_DATA_DIR/settings.json`
         * `edit <id>` opens a TUI modal for persisted YouTube marker `#id`; IPC clients should use the `markers.edit` action with the same selection ID
         * YouTube marker list rows include stable 1-based selection IDs (`#1`, `#2`, ...) derived from the persisted chapter order so commands like `/markers clear 1,2,5` can remove specific entries

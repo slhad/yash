@@ -625,7 +625,7 @@ describe('handleWebCommand — /markers', () => {
     expect(calls[0]?.init?.body).toBe(JSON.stringify({ source: 'twitch', limit: undefined }));
     expect(feedback).toContainEqual([
       'markers',
-      'youtube: restored 1 missing Twitch marker (skipped 1 existing timestamp)',
+      'youtube: restored 1 missing Twitch marker (skipped 1 existing text match)',
     ]);
   });
 

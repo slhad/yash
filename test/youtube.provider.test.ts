@@ -1118,7 +1118,7 @@ describe('YouTubeProvider — markers', () => {
     expect(all).toHaveLength(2);
   });
 
-  test('importMissingMarkers adds only Twitch markers whose timestamps are missing', async () => {
+  test('importMissingMarkers adds only Twitch markers whose descriptions are missing', async () => {
     const p = makeProvider() as any;
     await p.createMarker('Intro', 0);
     p._persistChapterDescription = async () => {};
@@ -1127,8 +1127,8 @@ describe('YouTubeProvider — markers', () => {
       {
         id: 'tw_1',
         createdAt: new Date('2026-05-25T10:00:00Z'),
-        description: 'Intro from Twitch',
-        positionInSeconds: 0,
+        description: ' Intro ',
+        positionInSeconds: 3,
         platform: 'twitch',
       },
       {
@@ -1150,6 +1150,32 @@ describe('YouTubeProvider — markers', () => {
         (marker: { positionInSeconds: number }) => marker.positionInSeconds,
       ),
     ).toEqual([0, 1964]);
+  });
+
+  test('importMissingMarkers resorts persisted chapters by timestamp for stable selection order', async () => {
+    const p = makeProvider() as any;
+    p._persistChapterDescription = async () => {};
+
+    await p.createMarker('Late', 120);
+    await p.createMarker('Start', 0);
+
+    const result = await p.importMissingMarkers([
+      {
+        id: 'tw_1',
+        createdAt: new Date('2026-05-25T10:00:00Z'),
+        description: 'Middle',
+        positionInSeconds: 60,
+        platform: 'twitch',
+      },
+    ]);
+
+    expect(result.addedMarkers).toHaveLength(1);
+    expect((await p.getMarkers()).map((marker: { description: string }) => marker.description)).toEqual([
+      'Start',
+      'Middle',
+      'Late',
+    ]);
+    expect(p.getPersistedMarkerSelectionId(result.addedMarkers[0].id)).toBe(2);
   });
 
   test('createMarker persists chapters into settings.json and a new provider reloads them', async () => {

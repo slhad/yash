@@ -450,7 +450,7 @@ export async function handleWebCommand(text: string, ctx: WebCommandContext): Pr
         const skipped = Array.isArray(data.skippedMarkers) ? data.skippedMarkers.length : 0;
         fb(
           'markers',
-          `youtube: restored ${added} missing Twitch marker${added === 1 ? '' : 's'}${skipped > 0 ? ` (skipped ${skipped} existing timestamp${skipped === 1 ? '' : 's'})` : ''}`,
+          `youtube: restored ${added} missing Twitch marker${added === 1 ? '' : 's'}${skipped > 0 ? ` (skipped ${skipped} existing text match${skipped === 1 ? '' : 'es'})` : ''}`,
         );
       } catch {
         fb('markers', 'Failed to restore missing Twitch markers into YouTube.');

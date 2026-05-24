@@ -340,7 +340,7 @@ export const markersRestoreAction: YashActionDefinition = {
 
     return {
       output: [
-        `[markers] youtube: restored ${added} missing Twitch marker${added === 1 ? '' : 's'}${skipped > 0 ? ` (skipped ${skipped} existing timestamp${skipped === 1 ? '' : 's'})` : ''}`,
+        `[markers] youtube: restored ${added} missing Twitch marker${added === 1 ? '' : 's'}${skipped > 0 ? ` (skipped ${skipped} existing text match${skipped === 1 ? '' : 'es'})` : ''}`,
       ],
       data: imported,
     };

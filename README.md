@@ -47,7 +47,7 @@ Both forms are accepted — `bun run cmd marker` and `bun run cmd /marker` are e
 
 `/marker` accepts raw seconds as before, and also `mm:ss` or `hh:mm:ss` timestamps for YouTube chapters.
 
-`/markers restore twitch [limit]` imports recent Twitch markers into persisted YouTube chapters, but only when that timestamp is missing from YouTube already.
+`/markers restore twitch [limit]` imports recent Twitch markers into persisted YouTube chapters, but only when that marker text is missing from YouTube already. Persisted YouTube chapters stay sorted by timestamp so `/markers`, edit, and clear IDs remain stable after imports.
 
 Commands invoked over IPC are also echoed into the live TUI chat pane before their output, using an `[ipc → cmd] /...` line. The same command echo exists for typed slash commands inside the TUI as `[you → cmd] /...`.
 

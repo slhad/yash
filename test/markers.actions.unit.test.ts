@@ -132,7 +132,7 @@ describe('marker actions', () => {
     );
 
     expect(result.output).toEqual([
-      '[markers] youtube: restored 1 missing Twitch marker (skipped 1 existing timestamp)',
+      '[markers] youtube: restored 1 missing Twitch marker (skipped 1 existing text match)',
     ]);
     expect(result.data).toEqual({
       addedMarkers: [

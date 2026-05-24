@@ -197,7 +197,7 @@ if (process.env.RUN_PLAYWRIGHT === '1') {
 
     const feedback = await waitForFeedback(
       page,
-      'youtube: restored 1 missing Twitch marker (skipped 1 existing timestamp)',
+      'youtube: restored 1 missing Twitch marker (skipped 1 existing text match)',
     );
     await expect(feedback).toBeVisible();
   });

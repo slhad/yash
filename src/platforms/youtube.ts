@@ -380,6 +380,7 @@ export class YouTubeProvider implements PlatformProvider {
           ...(typeof item.url === 'string' ? { url: item.url } : {}),
         } satisfies StreamMarker;
       });
+    this.sortChapterMarkers();
   }
 
   private loadPersistedBroadcastId(): void {
@@ -399,6 +400,19 @@ export class YouTubeProvider implements PlatformProvider {
         createdAt: marker.createdAt.toISOString(),
       })),
     );
+  }
+
+  private normalizeMarkerDescription(description: string | undefined): string {
+    return (description ?? '').trim().toLowerCase();
+  }
+
+  private sortChapterMarkers(): void {
+    this.chapterMarkers.sort((a, b) => {
+      if (a.positionInSeconds !== b.positionInSeconds) {
+        return a.positionInSeconds - b.positionInSeconds;
+      }
+      return a.createdAt.getTime() - b.createdAt.getTime();
+    });
   }
 
   private async readTokenFile(): Promise<YouTubeTokenFile | null> {
@@ -1666,6 +1680,7 @@ export class YouTubeProvider implements PlatformProvider {
       platform: 'youtube',
     };
     this.chapterMarkers.push(marker);
+    this.sortChapterMarkers();
     try {
       await this.persistChapters();
       await this._persistChapterDescription();
@@ -1688,8 +1703,8 @@ export class YouTubeProvider implements PlatformProvider {
   async importMissingMarkers(
     markers: StreamMarker[],
   ): Promise<{ addedMarkers: StreamMarker[]; skippedMarkers: StreamMarker[] }> {
-    const existingPositions = new Set(
-      this.chapterMarkers.map((marker) => marker.positionInSeconds),
+    const existingDescriptions = new Set(
+      this.chapterMarkers.map((marker) => this.normalizeMarkerDescription(marker.description)),
     );
     const sortedIncoming = [...markers].sort((a, b) => a.positionInSeconds - b.positionInSeconds);
     const previousMarkers = [...this.chapterMarkers];
@@ -1697,7 +1712,8 @@ export class YouTubeProvider implements PlatformProvider {
     const skippedMarkers: StreamMarker[] = [];
 
     for (const marker of sortedIncoming) {
-      if (existingPositions.has(marker.positionInSeconds)) {
+      const normalizedDescription = this.normalizeMarkerDescription(marker.description);
+      if (existingDescriptions.has(normalizedDescription)) {
         skippedMarkers.push(marker);
         continue;
       }
@@ -1712,7 +1728,7 @@ export class YouTubeProvider implements PlatformProvider {
         ...(typeof marker.url === 'string' ? { url: marker.url } : {}),
       };
       this.chapterMarkers.push(importedMarker);
-      existingPositions.add(importedMarker.positionInSeconds);
+      existingDescriptions.add(normalizedDescription);
       addedMarkers.push(importedMarker);
     }
 
@@ -1720,6 +1736,7 @@ export class YouTubeProvider implements PlatformProvider {
       return { addedMarkers, skippedMarkers };
     }
 
+    this.sortChapterMarkers();
     try {
       await this.persistChapters();
       await this._persistChapterDescription();
@@ -1768,6 +1785,7 @@ export class YouTubeProvider implements PlatformProvider {
     };
 
     this.chapterMarkers[selectionId - 1] = updatedMarker;
+    this.sortChapterMarkers();
 
     try {
       await this.persistChapters();
