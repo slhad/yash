@@ -380,6 +380,7 @@ export class YouTubeProvider implements PlatformProvider {
           ...(typeof item.url === 'string' ? { url: item.url } : {}),
         } satisfies StreamMarker;
       });
+    this.sortChapterMarkers();
   }
 
   private loadPersistedBroadcastId(): void {
@@ -399,6 +400,19 @@ export class YouTubeProvider implements PlatformProvider {
         createdAt: marker.createdAt.toISOString(),
       })),
     );
+  }
+
+  private normalizeMarkerDescription(description: string | undefined): string {
+    return (description ?? '').trim().toLowerCase();
+  }
+
+  private sortChapterMarkers(): void {
+    this.chapterMarkers.sort((a, b) => {
+      if (a.positionInSeconds !== b.positionInSeconds) {
+        return a.positionInSeconds - b.positionInSeconds;
+      }
+      return a.createdAt.getTime() - b.createdAt.getTime();
+    });
   }
 
   private async readTokenFile(): Promise<YouTubeTokenFile | null> {
@@ -1666,6 +1680,7 @@ export class YouTubeProvider implements PlatformProvider {
       platform: 'youtube',
     };
     this.chapterMarkers.push(marker);
+    this.sortChapterMarkers();
     try {
       await this.persistChapters();
       await this._persistChapterDescription();
@@ -1683,6 +1698,58 @@ export class YouTubeProvider implements PlatformProvider {
       `[YouTube] chapter marker stored — "${marker.description}" at ${marker.positionInSeconds}s (id: ${marker.id})`,
     );
     return marker;
+  }
+
+  async importMissingMarkers(
+    markers: StreamMarker[],
+  ): Promise<{ addedMarkers: StreamMarker[]; skippedMarkers: StreamMarker[] }> {
+    const existingDescriptions = new Set(
+      this.chapterMarkers.map((marker) => this.normalizeMarkerDescription(marker.description)),
+    );
+    const sortedIncoming = [...markers].sort((a, b) => a.positionInSeconds - b.positionInSeconds);
+    const previousMarkers = [...this.chapterMarkers];
+    const addedMarkers: StreamMarker[] = [];
+    const skippedMarkers: StreamMarker[] = [];
+
+    for (const marker of sortedIncoming) {
+      const normalizedDescription = this.normalizeMarkerDescription(marker.description);
+      if (existingDescriptions.has(normalizedDescription)) {
+        skippedMarkers.push(marker);
+        continue;
+      }
+
+      const importedMarker: StreamMarker = {
+        id: `yt_marker_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        createdAt: marker.createdAt instanceof Date ? marker.createdAt : new Date(marker.createdAt),
+        description: marker.description ?? '',
+        positionInSeconds: marker.positionInSeconds,
+        platform: 'youtube',
+        ...(typeof marker.videoId === 'string' ? { videoId: marker.videoId } : {}),
+        ...(typeof marker.url === 'string' ? { url: marker.url } : {}),
+      };
+      this.chapterMarkers.push(importedMarker);
+      existingDescriptions.add(normalizedDescription);
+      addedMarkers.push(importedMarker);
+    }
+
+    if (addedMarkers.length === 0) {
+      return { addedMarkers, skippedMarkers };
+    }
+
+    this.sortChapterMarkers();
+    try {
+      await this.persistChapters();
+      await this._persistChapterDescription();
+      return { addedMarkers, skippedMarkers };
+    } catch (err) {
+      this.chapterMarkers = previousMarkers;
+      try {
+        await this.persistChapters();
+      } catch (persistErr) {
+        defaultLogger.error('[YouTube] importMissingMarkers rollback persist error:', persistErr);
+      }
+      throw err;
+    }
   }
 
   async getMarkers(options?: GetMarkersOptions): Promise<StreamMarker[]> {
@@ -1718,6 +1785,7 @@ export class YouTubeProvider implements PlatformProvider {
     };
 
     this.chapterMarkers[selectionId - 1] = updatedMarker;
+    this.sortChapterMarkers();
 
     try {
       await this.persistChapters();

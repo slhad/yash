@@ -69,20 +69,22 @@ const HELP_ENTRIES: SharedHelpEntry[] = [
     command: '/marker',
     surfaces: ['tui', 'api'],
     description: 'Place a stream marker on all platforms',
-    usage: '/marker [description] [| timestamp_s]',
+    usage: '/marker [description] [| timestamp]',
     examples: { api: '/marker Replay | -300' },
     tuiExamples: [
       '/marker Intro | 0',
       '/marker Q&A | 3723    (timestamp in seconds, YouTube only)',
+      '/marker Boss|32:44  (YouTube: minutes:seconds also works)',
       '/marker Replay|-300  (YouTube: 5 minutes before current live position)',
     ],
   },
   {
     command: '/markers',
     surfaces: ['tui', 'api'],
-    description: 'List, edit, or clear YouTube chapters',
-    usage: '/markers clear [all|ids] | edit <id> | [all|youtube|twitch|kick] [limit]',
-    example: '/markers edit 1',
+    description: 'List, restore, edit, or clear YouTube chapters',
+    usage:
+      '/markers restore twitch [limit] | clear [all|ids] | edit <id> | [all|youtube|twitch|kick] [limit]',
+    example: '/markers restore twitch',
     tuiExamples: ['/markers clear 1,2,5'],
   },
   {

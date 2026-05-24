@@ -7,6 +7,7 @@ import commandsJs from './utils/webCommands.bundle.js' with { type: 'text' };
 // only OAuth callbacks and connect/API endpoints are needed.
 const isTuiOnly = process.env.YASH_TUI_ONLY === '1';
 
+import { IpcActionError, registry } from './actions/registry';
 import type { PlatformProvider } from './platforms/base';
 import { YT_CATEGORY_NAMES } from './platforms/youtube';
 import {
@@ -21,6 +22,7 @@ import {
   twitch,
   youtube,
 } from './services';
+import './actions/markers';
 import { isDemoMode, resolvePort } from './utils/config';
 import { getHelpCommands } from './utils/help';
 import { defaultLogger } from './utils/logger';
@@ -439,6 +441,48 @@ Bun.serve({
         return new Response(JSON.stringify({ success: true, platform: 'youtube', ...result }), {
           headers: { 'Content-Type': 'application/json' },
         });
+      },
+    },
+
+    // ------------------------------------------------------------------
+    // Restore recent Twitch markers into persisted YouTube chapters when
+    // the YouTube timestamp is missing locally.
+    // ------------------------------------------------------------------
+    '/api/stream/markers/restore': {
+      POST: async (req) => {
+        const body = (await req.json().catch(() => ({}))) as { source?: unknown; limit?: unknown };
+        if (body.source !== undefined && body.source !== 'twitch') {
+          return new Response(JSON.stringify({ error: 'unsupported restore source' }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        const source = body.source === 'twitch' ? 'twitch' : undefined;
+        const limit =
+          typeof body.limit === 'number' && Number.isInteger(body.limit) && body.limit > 0
+            ? Math.min(body.limit, 100)
+            : undefined;
+        try {
+          const result = await registry.invokeAction(
+            'markers.restore',
+            {
+              ...(source !== undefined ? { source } : {}),
+              ...(limit !== undefined ? { limit } : {}),
+            },
+            { chatService, providers: { youtube, twitch, kick } },
+          );
+          return new Response(JSON.stringify({ success: true, ...result.data }), {
+            headers: { 'Content-Type': 'application/json' },
+          });
+        } catch (err) {
+          if (err instanceof IpcActionError) {
+            return new Response(JSON.stringify({ error: err.message, code: err.code }), {
+              status: 400,
+              headers: { 'Content-Type': 'application/json' },
+            });
+          }
+          throw err;
+        }
       },
     },
 

@@ -211,13 +211,20 @@ describe('getAutocomplete', () => {
     expect(result.hints).toEqual(['messages']);
   });
 
-  test('/markers  → hints clear, all, and providers', () => {
+  test('/markers  → hints restore, clear, all, and providers', () => {
     const result = getAutocomplete('/markers ');
+    expect(result.hints).toContain('restore');
     expect(result.hints).toContain('clear');
     expect(result.hints).toContain('all');
     expect(result.hints).toContain('youtube');
     expect(result.hints).toContain('twitch');
     expect(result.hints).toContain('kick');
+  });
+
+  test('/markers r → completes to /markers restore', () => {
+    const result = getAutocomplete('/markers r');
+    expect(result.completion).toBe('/markers restore');
+    expect(result.hints).toEqual(['restore']);
   });
 
   test('/markers y → completes to /markers youtube', () => {
@@ -236,6 +243,18 @@ describe('getAutocomplete', () => {
     const result = getAutocomplete('/markers clear');
     expect(result.completion).toBeNull();
     expect(result.hints).toEqual(['clear']);
+  });
+
+  test('/markers restore  → hints twitch', () => {
+    const result = getAutocomplete('/markers restore ');
+    expect(result.completion).toBeNull();
+    expect(result.hints).toEqual(['twitch']);
+  });
+
+  test('/markers restore twitch  → hints limit placeholder', () => {
+    const result = getAutocomplete('/markers restore twitch ');
+    expect(result.completion).toBeNull();
+    expect(result.hints).toEqual(['<limit>']);
   });
 
   test('/markers clear  → hints all and ids placeholder', () => {

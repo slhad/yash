@@ -52,6 +52,20 @@ describe('parseMarkerArgs', () => {
     });
   });
 
+  test('minutes:seconds timestamp is converted to seconds', () => {
+    expect(parseMarkerArgs(['Boss', '|', '32:44'])).toEqual({
+      description: 'Boss',
+      timestamp: 1964,
+    });
+  });
+
+  test('hours:minutes:seconds timestamp is converted to seconds', () => {
+    expect(parseMarkerArgs(['Boss', '|', '1:02:03'])).toEqual({
+      description: 'Boss',
+      timestamp: 3723,
+    });
+  });
+
   test('no description, pipe + timestamp → {timestamp}', () => {
     expect(parseMarkerArgs(['|', '120'])).toEqual({ timestamp: 120 });
   });
@@ -75,6 +89,11 @@ describe('parseMarkerArgs', () => {
 
   test('non-numeric timestamp after pipe → no timestamp field', () => {
     const result = parseMarkerArgs(['|', 'abc']);
+    expect(result.timestamp).toBeUndefined();
+  });
+
+  test('invalid colon timestamp after pipe → no timestamp field', () => {
+    const result = parseMarkerArgs(['|', '32:99']);
     expect(result.timestamp).toBeUndefined();
   });
 
@@ -137,6 +156,25 @@ describe('parseMarkersArgs', () => {
     expect(parseMarkersArgs(['edit']).error).toContain(
       'Edit requires exactly one marker identifier',
     );
+  });
+
+  test('restore twitch → restore action', () => {
+    expect(parseMarkersArgs(['restore', 'twitch'])).toEqual({
+      action: 'restore',
+      restoreSource: 'twitch',
+    });
+  });
+
+  test('restore twitch with limit → parsed restore limit', () => {
+    expect(parseMarkersArgs(['restore', 'twitch', '50'])).toEqual({
+      action: 'restore',
+      restoreSource: 'twitch',
+      limit: 50,
+    });
+  });
+
+  test('restore rejects unsupported source', () => {
+    expect(parseMarkersArgs(['restore', 'youtube']).error).toContain('Restore currently supports');
   });
 
   test('edit rejects marker IDs with trailing text or decimals', () => {
@@ -557,6 +595,38 @@ describe('handleWebCommand — /markers', () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]?.init?.body).toBe(JSON.stringify({ selectionIds: [1, 2, 5] }));
     expect(feedback).toContainEqual(['markers', 'youtube: cleared markers #1, #2 (missing: #5)']);
+  });
+
+  test('/markers restore twitch → POSTs restore request and reports success', async () => {
+    const { calls } = mockFetch((url, init) => {
+      if (url === '/api/stream/markers/restore' && init?.method === 'POST') {
+        return {
+          ok: true,
+          body: {
+            success: true,
+            addedMarkers: [{ id: 'tw_2' }],
+            skippedMarkers: [{ id: 'tw_1' }],
+          },
+        };
+      }
+      return { ok: false };
+    });
+    const feedback: Array<[string, string]> = [];
+
+    const result = await handleWebCommand('/markers restore twitch', {
+      platforms: [],
+      feedback: (l, t) => feedback.push([l, t]),
+    });
+
+    expect(result).toBe(true);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe('/api/stream/markers/restore');
+    expect(calls[0]?.init?.method).toBe('POST');
+    expect(calls[0]?.init?.body).toBe(JSON.stringify({ source: 'twitch', limit: undefined }));
+    expect(feedback).toContainEqual([
+      'markers',
+      'youtube: restored 1 missing Twitch marker (skipped 1 existing text match)',
+    ]);
   });
 
   test('/markers edit 4 → reports TUI-only guidance without fetch', async () => {

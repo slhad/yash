@@ -124,27 +124,27 @@ describe('getWebAutocomplete — /msg', () => {
 // ─── /marker ─────────────────────────────────────────────────────────────────
 
 describe('getWebAutocomplete — /marker', () => {
-  test('/marker  (trailing space) → [description] [| timestamp_s]', () => {
-    expect(getWebAutocomplete('/marker ')).toBe('[description] [| timestamp_s]');
+  test('/marker  (trailing space) → [description] [| timestamp]', () => {
+    expect(getWebAutocomplete('/marker ')).toBe('[description] [| timestamp]');
   });
 
-  test('/marker anything → [description] [| timestamp_s]', () => {
-    expect(getWebAutocomplete('/marker anything')).toBe('[description] [| timestamp_s]');
+  test('/marker anything → [description] [| timestamp]', () => {
+    expect(getWebAutocomplete('/marker anything')).toBe('[description] [| timestamp]');
   });
 });
 
 // ─── /markers ────────────────────────────────────────────────────────────────
 
 describe('getWebAutocomplete — /markers', () => {
-  test('/markers  (trailing space) → clear [all|ids] | edit <id> | [all|youtube|twitch|kick] [limit]', () => {
+  test('/markers  (trailing space) → restore twitch [limit] | clear [all|ids] | edit <id> | [all|youtube|twitch|kick] [limit]', () => {
     expect(getWebAutocomplete('/markers ')).toBe(
-      'clear [all|ids] | edit <id> | [all|youtube|twitch|kick] [limit]',
+      'restore twitch [limit] | clear [all|ids] | edit <id> | [all|youtube|twitch|kick] [limit]',
     );
   });
 
-  test('/markers clear → clear [all|ids] | edit <id> | [all|youtube|twitch|kick] [limit]', () => {
+  test('/markers clear → restore twitch [limit] | clear [all|ids] | edit <id> | [all|youtube|twitch|kick] [limit]', () => {
     expect(getWebAutocomplete('/markers clear')).toBe(
-      'clear [all|ids] | edit <id> | [all|youtube|twitch|kick] [limit]',
+      'restore twitch [limit] | clear [all|ids] | edit <id> | [all|youtube|twitch|kick] [limit]',
     );
   });
 });

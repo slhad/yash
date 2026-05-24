@@ -30,23 +30,25 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
         * Available from both the live TUI and IPC (`bun run cmd`) because it does not open a modal or mutate persisted state; it does not clear the merged "Events & Logs" sidebar
     * Command /msg <all|youtube|twitch|kick> <text> - sends a message to the specified platform(s)
     * Command `/action [action-id] [key=value ...]` - lists public IPC-safe actions, invokes actions directly when all args are optional, and shows help/examples when required args still need values
-    * Command /marker [description] [| timestamp_s] - places a stream marker on all platforms
+    * Command /marker [description] [| timestamp] - places a stream marker on all platforms
         * Optional description (chapter label, max 140 chars on Twitch)
-        * Optional pipe-delimited timestamp in seconds from stream start (used by YouTube for chapter generation; ignored by Twitch which sets position server-side; Kick does not support markers)
+        * Optional pipe-delimited timestamp accepts raw seconds, `mm:ss`, or `hh:mm:ss` from stream start (used by YouTube for chapter generation; ignored by Twitch which sets position server-side; Kick does not support markers)
         * Negative timestamps are treated as relative offsets from the current live position on YouTube and clamp at `0` (example: `/marker Replay|-300` means "5 minutes ago")
         * Kick is silently skipped in user-facing marker-create summaries because it has no marker API
         * When no timestamp is provided, YouTube derives the marker position from the current live stream elapsed time when available, falling back to a live API lookup after restart before using `0`
         * TUI output should collapse provider results into a single `[marker] ...` summary line
-        * Examples: `/marker Intro | 0`, `/marker Q&A | 3723`, `/marker` (unnamed, no timestamp)
+        * Examples: `/marker Intro | 0`, `/marker Q&A | 3723`, `/marker Boss | 32:44`, `/marker` (unnamed, no timestamp)
         * Examples: `/marker Replay|-300` means "5 minutes ago" on YouTube relative to the current live position
-    * Command `/markers clear [all|ids] | edit <id> | [all|youtube|twitch|kick] [limit]` - lists existing markers per platform, edits a persisted YouTube chapter, or clears persisted YouTube chapters
+    * Command `/markers restore twitch [limit] | clear [all|ids] | edit <id> | [all|youtube|twitch|kick] [limit]` - lists existing markers per platform, restores missing YouTube chapters from Twitch markers, edits a persisted YouTube chapter, or clears persisted YouTube chapters
+        * `restore twitch` fetches recent Twitch markers (default limit `100`) and imports only descriptions that are missing from YouTube's persisted `stream.chapters`
+        * Persisted YouTube chapters stay sorted by timestamp so `/markers`, `edit <id>`, and `clear <id>` use stable order after restore/imports
         * `clear` removes only YouTube chapter markers persisted under `stream.chapters` in `YASH_DATA_DIR/settings.json`
         * `edit <id>` opens a TUI modal for persisted YouTube marker `#id`; IPC clients should use the `markers.edit` action with the same selection ID
         * YouTube marker list rows include stable 1-based selection IDs (`#1`, `#2`, ...) derived from the persisted chapter order so commands like `/markers clear 1,2,5` can remove specific entries
         * The edit modal can update both the marker label and timestamp, and IPC can do the same through `markers.edit`
         * Clearing persisted YouTube markers also re-syncs the generated YouTube timestamps block so removed chapters do not linger in the live description
         * Default list target is `all`; default list limit is `20`
-        * Examples: `/markers`, `/markers youtube`, `/markers twitch 5`, `/markers edit 1`, `/markers clear`, `/markers clear 1,2,5`
+        * Examples: `/markers`, `/markers youtube`, `/markers twitch 5`, `/markers restore twitch`, `/markers edit 1`, `/markers clear`, `/markers clear 1,2,5`
     * Command /settings [get <key>|set <key> <value>] - get or set UI settings; running `/settings` with no arguments opens a TUI modal for display/sidebar/viewer preferences and persists changes to `settings.json`
         * Includes `chat.timestamps.visible` for WebUI unified chat timestamp display
     * Command `/activity` — opens the activity bar modal showing the full event history (follow, sub, cheer, raid) with platform labels and timestamps (TUI only)
@@ -99,8 +101,8 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
     * WebUI commands available in all chat message boxes (`/`, `/unified`, `/sidebyside`):
         * `/help` — list available commands (fetched from `/api/help`)
         * `/msg <all|youtube|twitch|kick> <text>` — send targeted platform message
-        * `/marker [description] [| timestamp_s]` — create stream marker on all (or selected) platforms
-        * `/markers clear | [all|youtube|twitch|kick] [limit]` — list existing markers or clear persisted YouTube chapters
+        * `/marker [description] [| timestamp]` — create stream marker on all (or selected) platforms using seconds, `mm:ss`, or `hh:mm:ss`
+        * `/markers restore twitch [limit] | clear [all|ids] | [all|youtube|twitch|kick] [limit]` — list existing markers, restore missing YouTube chapters from Twitch, or clear persisted YouTube chapters
         * `/connect <youtube|twitch|kick|obs>` — authenticate a platform (all three redirect to real OAuth flows)
         * `/settings get <key>` — read a persistent setting via `/api/settings`
         * `/settings set <key> <value>` — write a persistent setting via `/api/settings`

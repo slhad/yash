@@ -338,6 +338,10 @@ describe('marker actions', () => {
     expect(registry.getAction('markers.list')).toBeDefined();
   });
 
+  test('markersRestoreAction is registered in the singleton registry', () => {
+    expect(registry.getAction('markers.restore')).toBeDefined();
+  });
+
   test('markersListAction has correct metadata', () => {
     const def = registry.getAction('markers.list')!;
     expect(def.domain).toBe('markers');
