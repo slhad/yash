@@ -117,6 +117,11 @@ describe('parseMarkersArgs', () => {
     expect(parseMarkersArgs(['clear', 'youtube']).error).toContain('Invalid marker identifier');
   });
 
+  test('clear rejects marker IDs with trailing text or decimals', () => {
+    expect(parseMarkersArgs(['clear', '1abc']).error).toContain('Invalid marker identifier');
+    expect(parseMarkersArgs(['clear', '2.7']).error).toContain('Invalid marker identifier');
+  });
+
   test('edit with marker ID → parsed edit selection ID', () => {
     expect(parseMarkersArgs(['edit', '4'])).toEqual({ action: 'edit', editSelectionId: 4 });
   });
@@ -125,6 +130,11 @@ describe('parseMarkersArgs', () => {
     expect(parseMarkersArgs(['edit']).error).toContain(
       'Edit requires exactly one marker identifier',
     );
+  });
+
+  test('edit rejects marker IDs with trailing text or decimals', () => {
+    expect(parseMarkersArgs(['edit', '3foo']).error).toContain('Invalid marker identifier');
+    expect(parseMarkersArgs(['edit', '4.5']).error).toContain('Invalid marker identifier');
   });
 });
 

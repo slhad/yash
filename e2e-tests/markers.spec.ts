@@ -136,14 +136,17 @@ if (process.env.RUN_PLAYWRIGHT === '1') {
 
     await page.route('**/api/stream/markers/clear', (route) => {
       if (route.request().method() === 'POST') {
-        return route.fulfill({ status: 200, json: { ok: true } });
+        return route.fulfill({
+          status: 200,
+          json: { ok: true, clearedSelectionIds: [], missingSelectionIds: [] },
+        });
       }
       return route.continue();
     });
 
     await typeAndSend(page, '/markers clear');
 
-    const feedback = await waitForFeedback(page, 'youtube: cleared persisted markers');
+    const feedback = await waitForFeedback(page, 'youtube: cleared all persisted markers');
     await expect(feedback).toBeVisible();
   });
 

@@ -86,10 +86,10 @@ export function parseMarkersArgs(parts: string[]): {
 
     const clearSelectionIds: number[] = [];
     for (const token of tokens) {
-      const parsed = Number.parseInt(token, 10);
-      if (!Number.isFinite(parsed) || parsed <= 0) {
+      if (!isStrictPositiveIntegerToken(token)) {
         return { action: 'clear', error: `Invalid marker identifier "${token}"` };
       }
+      const parsed = Number.parseInt(token, 10);
       clearSelectionIds.push(parsed);
     }
 
@@ -100,10 +100,11 @@ export function parseMarkersArgs(parts: string[]): {
     if (parts.length !== 2) {
       return { action: 'edit', error: 'Edit requires exactly one marker identifier' };
     }
-    const parsed = Number.parseInt(parts[1] ?? '', 10);
-    if (!Number.isFinite(parsed) || parsed <= 0) {
-      return { action: 'edit', error: `Invalid marker identifier "${parts[1] ?? ''}"` };
+    const token = parts[1] ?? '';
+    if (!isStrictPositiveIntegerToken(token)) {
+      return { action: 'edit', error: `Invalid marker identifier "${token}"` };
     }
+    const parsed = Number.parseInt(token, 10);
     return { action: 'edit', editSelectionId: parsed };
   }
 
@@ -126,6 +127,10 @@ export function parseMarkersArgs(parts: string[]): {
   }
 
   return { platforms, limit: parsed };
+}
+
+function isStrictPositiveIntegerToken(raw: string): boolean {
+  return /^[1-9]\d*$/.test(raw);
 }
 
 /**
