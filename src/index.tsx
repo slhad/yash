@@ -33,6 +33,7 @@ import { formatActionHelp, parseActionArgs } from './utils/actionArgs';
 import { type ChatClearLineKind, runChatClearCommand } from './utils/chatClear';
 import { buildChatHistoryMessages } from './utils/chatHistoryLoader';
 import { getDataDir, isDemoMode, saveConfig } from './utils/config';
+import { renderTuiHelpLines } from './utils/help';
 import { runIpcCommand } from './utils/ipcCommandRunner';
 import logCollector from './utils/logCollector';
 import { defaultLogger } from './utils/logger';
@@ -3050,44 +3051,7 @@ const commandHandlers: Record<
   },
 
   '/help': async (_parts, emit) => {
-    emit('[help] Available commands:');
-    emit(
-      '[help] Status symbols: ✓ = authenticated and online, ○ = authenticated but offline, ✗ = not authenticated',
-    );
-    emit('[help]   /connect <youtube|twitch|kick|obs>  — authenticate a platform or configure OBS');
-    emit('[help]   /stream [platform…]  — edit stream info (opens modal, persists to settings)');
-    emit(
-      '[help]   /setup-youtube  — configure YouTube stream options (playlists, tags, chapters, description)',
-    );
-    emit('[help]   /msg <all|youtube|twitch|kick> <text>  — send a message');
-    emit(
-      '[help]   /marker [description] [| timestamp_s]  — place a stream marker on all platforms',
-    );
-    emit('[help]       e.g.  /marker Intro | 0');
-    emit('[help]       e.g.  /marker Q&A | 3723    (timestamp in seconds, YouTube only)');
-    emit(
-      '[help]   /markers clear | [all|youtube|twitch|kick] [limit]  — list markers or clear YouTube chapters',
-    );
-    emit('[help]   /info  — show current stream/channel info from all providers');
-    emit(
-      '[help]   /inject <twitch|youtube|kick> <username> <message>  — inject a fake chat message for offline testing',
-    );
-    emit(
-      '[help]   /chatter <@username>  — open chatter info modal for the most recent message from that user',
-    );
-    emit(
-      '[help]   /chat clear <all|messages|events|logs>  — clear matching entries from Chat only',
-    );
-    emit('[help]   /activity  — open the activity bar modal (follows, subs, cheers, raids)');
-    emit('[help]   /history  — browse all stream broadcasts and search message history');
-    emit('[help]   /history search <query>  — open history with search pre-filled');
-    emit('[help]   /history user <@name>  — search history filtered to a user');
-    emit('[help]   /settings  — open the settings modal');
-    emit('[help]   /settings get <key>  — get a setting value');
-    emit('[help]   /settings set <key> <value>  — set a setting value');
-    emit('[help]   /logs clear | tail <n> | visible <true|false>  — manage logs');
-    emit('[help]   /exit  — exit the app');
-    emit('[help]   /help  — show this help');
+    for (const line of renderTuiHelpLines()) emit(line);
   },
 
   '/info': async (_parts, emit) => {

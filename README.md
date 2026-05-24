@@ -32,6 +32,7 @@ When a TUI process is running, it listens on a Unix Domain Socket at `YASH_DATA_
 ```sh
 bun run cmd /action          # list public IPC-safe actions
 bun run cmd /marker          # drop a stream marker
+bun run cmd /marker "Replay | -300"  # 5 minutes before the current live position
 bun run cmd /markers         # list all markers
 bun run cmd /settings get stream.title
 bun run cmd /settings set demo true
@@ -70,6 +71,7 @@ Commands invoked over IPC are also echoed into the live TUI chat pane before the
 
 ```sh
 bun run cmd /action
+bun run cmd /action marker.create timestamp=-300
 bun run cmd /action obs.shutdown.initiate
 bun run cmd /action obs.shutdown.initiate delay=10 scene='[PS] End'
 ```

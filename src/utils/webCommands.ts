@@ -38,6 +38,7 @@ export interface WebCommandContext {
  *   ""            → { }
  *   "Intro"       → { description: "Intro" }
  *   "Q&A | 3723"  → { description: "Q&A", timestamp: 3723 }
+ *   "Clip | -300" → { description: "Clip", timestamp: -300 }
  *   "| 120"       → { timestamp: 120 }
  */
 export function parseMarkerArgs(parts: string[]): { description?: string; timestamp?: number } {
@@ -52,7 +53,7 @@ export function parseMarkerArgs(parts: string[]): { description?: string; timest
     description = rawArgs.slice(0, pipeIdx).trim() || undefined;
     const tsRaw = rawArgs.slice(pipeIdx + 1).trim();
     const parsed = Number.parseFloat(tsRaw);
-    if (!Number.isNaN(parsed) && parsed >= 0) {
+    if (!Number.isNaN(parsed)) {
       timestamp = Math.round(parsed);
     }
   }

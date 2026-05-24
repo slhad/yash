@@ -31,7 +31,7 @@ export const markerCreateAction: YashActionDefinition = {
   args: {
     text: { type: 'string', required: false, maxLength: 200 },
     platform: { type: 'enum', required: false, values: [...PLATFORM_VALUES] },
-    timestamp: { type: 'number', required: false, min: 0, max: 86400 },
+    timestamp: { type: 'number', required: false, min: -86400, max: 86400 },
   },
   examples: [
     { args: { text: 'Intro' }, description: 'Create a marker labelled "Intro" on all platforms' },

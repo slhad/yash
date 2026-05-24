@@ -910,6 +910,21 @@ describe('YouTubeProvider — markers', () => {
     expect(marker!.positionInSeconds).toBe(3600);
   });
 
+  test('createMarker treats negative explicit timestamp as relative offset from current stream time', async () => {
+    const p = makeProvider() as any;
+    p.streamStartTime = new Date(Date.now() - 600_000);
+    const marker = await p.createMarker('Replay', -300);
+    expect(marker!.positionInSeconds).toBeGreaterThanOrEqual(299);
+    expect(marker!.positionInSeconds).toBeLessThanOrEqual(300);
+  });
+
+  test('createMarker clamps negative relative timestamps at zero', async () => {
+    const p = makeProvider() as any;
+    p.streamStartTime = new Date(Date.now() - 120_000);
+    const marker = await p.createMarker('Start', -300);
+    expect(marker!.positionInSeconds).toBe(0);
+  });
+
   test('createMarker persists chapter descriptions to the current YouTube video', async () => {
     const p = makeProvider() as any;
     p.isAuthenticatedFlag = true;

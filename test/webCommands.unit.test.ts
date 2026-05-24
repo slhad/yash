@@ -61,9 +61,16 @@ describe('parseMarkerArgs', () => {
     expect(timestamp).toBe(4);
   });
 
-  test('negative timestamp is rejected (no timestamp field)', () => {
+  test('negative timestamp is accepted and rounded', () => {
     const result = parseMarkerArgs(['|', '-5']);
-    expect(result.timestamp).toBeUndefined();
+    expect(result.timestamp).toBe(-5);
+  });
+
+  test('negative timestamp without spaces around the pipe is accepted', () => {
+    expect(parseMarkerArgs(['some', 'stufff|-300'])).toEqual({
+      description: 'some stufff',
+      timestamp: -300,
+    });
   });
 
   test('non-numeric timestamp after pipe → no timestamp field', () => {
