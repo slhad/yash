@@ -41,7 +41,7 @@ describe('formatMarkerCreationSummary', () => {
       { platform: 'twitch', marker: null, error: 'stream not live' },
       { platform: 'kick', marker: null },
     ]);
-    expect(result).toBe('youtube: ✓ 10s | twitch: ○ | kick: ✗');
+    expect(result).toBe('youtube: ✓ 10s | twitch: ○');
   });
 
   test('empty array returns empty string', () => {

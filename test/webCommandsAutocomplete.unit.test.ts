@@ -136,12 +136,16 @@ describe('getWebAutocomplete — /marker', () => {
 // ─── /markers ────────────────────────────────────────────────────────────────
 
 describe('getWebAutocomplete — /markers', () => {
-  test('/markers  (trailing space) → clear | [all|youtube|twitch|kick] [limit]', () => {
-    expect(getWebAutocomplete('/markers ')).toBe('clear | [all|youtube|twitch|kick] [limit]');
+  test('/markers  (trailing space) → clear [all|ids] | edit <id> | [all|youtube|twitch|kick] [limit]', () => {
+    expect(getWebAutocomplete('/markers ')).toBe(
+      'clear [all|ids] | edit <id> | [all|youtube|twitch|kick] [limit]',
+    );
   });
 
-  test('/markers clear → clear | [all|youtube|twitch|kick] [limit]', () => {
-    expect(getWebAutocomplete('/markers clear')).toBe('clear | [all|youtube|twitch|kick] [limit]');
+  test('/markers clear → clear [all|ids] | edit <id> | [all|youtube|twitch|kick] [limit]', () => {
+    expect(getWebAutocomplete('/markers clear')).toBe(
+      'clear [all|ids] | edit <id> | [all|youtube|twitch|kick] [limit]',
+    );
   });
 });
 

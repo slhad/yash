@@ -3,7 +3,7 @@ import type { PlatformProvider } from '../platforms/base';
 export async function buildStreamMarkerPayload(
   body: unknown,
   providers: Record<string, PlatformProvider>,
-): Promise<Array<{ platform: string; marker: unknown; error?: string }>> {
+): Promise<Array<{ platform: string; marker: unknown; error?: string; skipped?: string }>> {
   const requestBody = body && typeof body === 'object' ? body : {};
   const targetPlatforms = Array.isArray((requestBody as { platforms?: unknown }).platforms)
     ? ((requestBody as { platforms?: string[] }).platforms ?? [])
@@ -21,6 +21,7 @@ export async function buildStreamMarkerPayload(
     targetPlatforms.map(async (platform) => {
       const provider = providers[platform];
       if (!provider) return { platform, marker: null, error: 'unknown platform' };
+      if (platform === 'kick') return { platform, marker: null, skipped: 'unsupported' };
       if (!provider.isAuthenticated())
         return { platform, marker: null, error: 'not authenticated' };
       const marker = await provider.createMarker(description, timestamp);

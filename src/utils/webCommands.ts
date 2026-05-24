@@ -62,7 +62,9 @@ export function parseMarkerArgs(parts: string[]): { description?: string; timest
 }
 
 export function parseMarkersArgs(parts: string[]): {
-  action?: 'clear';
+  action?: 'clear' | 'edit';
+  clearSelectionIds?: number[];
+  editSelectionId?: number;
   platforms?: string[];
   limit?: number;
   error?: string;
@@ -71,10 +73,40 @@ export function parseMarkersArgs(parts: string[]): {
 
   const first = (parts[0] ?? '').toLowerCase();
   if (first === 'clear') {
-    if (parts.length > 1) {
-      return { action: 'clear', error: 'Clear does not accept additional arguments' };
+    if (parts.length === 1) {
+      return { action: 'clear' };
     }
-    return { action: 'clear' };
+
+    const rawIds = parts.slice(1).join(' ').trim();
+    if (rawIds.toLowerCase() === 'all') return { action: 'clear' };
+
+    const tokens = rawIds.split(/[,\s]+/).filter(Boolean);
+    if (tokens.length === 0) {
+      return { action: 'clear', error: 'Clear requires "all" or one or more marker identifiers' };
+    }
+
+    const clearSelectionIds: number[] = [];
+    for (const token of tokens) {
+      if (!isStrictPositiveIntegerToken(token)) {
+        return { action: 'clear', error: `Invalid marker identifier "${token}"` };
+      }
+      const parsed = Number.parseInt(token, 10);
+      clearSelectionIds.push(parsed);
+    }
+
+    return { action: 'clear', clearSelectionIds: [...new Set(clearSelectionIds)] };
+  }
+
+  if (first === 'edit') {
+    if (parts.length !== 2) {
+      return { action: 'edit', error: 'Edit requires exactly one marker identifier' };
+    }
+    const token = parts[1] ?? '';
+    if (!isStrictPositiveIntegerToken(token)) {
+      return { action: 'edit', error: `Invalid marker identifier "${token}"` };
+    }
+    const parsed = Number.parseInt(token, 10);
+    return { action: 'edit', editSelectionId: parsed };
   }
 
   const validPlatforms = ['all', 'youtube', 'twitch', 'kick'];
@@ -96,6 +128,10 @@ export function parseMarkersArgs(parts: string[]): {
   }
 
   return { platforms, limit: parsed };
+}
+
+function isStrictPositiveIntegerToken(raw: string): boolean {
+  return /^[1-9]\d*$/.test(raw);
 }
 
 /**
@@ -133,7 +169,7 @@ const VALID_COMMANDS = [
  *   "/settings "        → "get | set"
  *   "/settings get "    → "<key>  e.g. title.visible"
  *   "/marker"           → "[description] [| timestamp_s]"
- *   "/markers"          → "clear | [all|youtube|twitch|kick] [limit]"
+ *   "/markers"          → "clear [all|ids] | edit <id> | [all|youtube|twitch|kick] [limit]"
  */
 export function getWebAutocomplete(input: string): string | null {
   const trimmed = input.trimStart();
@@ -178,7 +214,7 @@ export function getWebAutocomplete(input: string): string | null {
   }
 
   if (cmd === '/markers') {
-    return 'clear | [all|youtube|twitch|kick] [limit]';
+    return 'clear [all|ids] | edit <id> | [all|youtube|twitch|kick] [limit]';
   }
 
   if (cmd === '/settings') {
@@ -297,19 +333,25 @@ export async function handleWebCommand(text: string, ctx: WebCommandContext): Pr
       });
       if (res.ok) {
         const data = await res.json();
-        const summary = (
+        const summaryEntries = (
           data.markers as Array<{
             platform: string;
             marker?: { positionInSeconds: number };
             error?: string;
+            skipped?: string;
           }>
         )
+          .filter((m) => m.skipped !== 'unsupported')
           .map(
             (m) =>
               `${m.platform}: ${m.marker ? `✓ pos=${m.marker.positionInSeconds}s` : (m.error ?? 'no marker')}`,
-          )
-          .join(' | ');
-        fb('marker', summary);
+          );
+        fb(
+          'marker',
+          summaryEntries.length > 0
+            ? summaryEntries.join(' | ')
+            : 'No marker-capable platforms selected.',
+        );
       } else {
         fb('marker', 'Failed to create marker.');
       }
@@ -319,25 +361,59 @@ export async function handleWebCommand(text: string, ctx: WebCommandContext): Pr
     return true;
   }
 
-  // ── /markers clear | [all|youtube|twitch|kick] [limit] ───────────────────
+  // ── /markers clear [all|ids] | edit <id> | [all|youtube|twitch|kick] [limit]
   if (cmd === '/markers') {
     const parsed = parseMarkersArgs(parts.slice(1));
     if (parsed.error) {
-      fb('markers', `Usage: /markers clear | [all|youtube|twitch|kick] [limit] (${parsed.error})`);
+      fb(
+        'markers',
+        `Usage: /markers clear [all|ids] | edit <id> | [all|youtube|twitch|kick] [limit] (${parsed.error})`,
+      );
       return true;
     }
 
     if (parsed.action === 'clear') {
       try {
-        const res = await fetch('/api/stream/markers/clear', { method: 'POST' });
+        const res = await fetch('/api/stream/markers/clear', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ selectionIds: parsed.clearSelectionIds }),
+        });
         if (!res.ok) {
           fb('markers', 'Failed to clear YouTube markers.');
           return true;
         }
-        fb('markers', 'youtube: cleared persisted markers');
+        const data = await res.json();
+        const clearedSelectionIds = Array.isArray(data.clearedSelectionIds)
+          ? (data.clearedSelectionIds as number[])
+          : [];
+        const missingSelectionIds = Array.isArray(data.missingSelectionIds)
+          ? (data.missingSelectionIds as number[])
+          : [];
+        if (parsed.clearSelectionIds && parsed.clearSelectionIds.length > 0) {
+          const clearedLabel =
+            clearedSelectionIds.length > 0
+              ? `cleared markers ${clearedSelectionIds.map((id) => `#${id}`).join(', ')}`
+              : 'no matching markers cleared';
+          const missingLabel =
+            missingSelectionIds.length > 0
+              ? ` (missing: ${missingSelectionIds.map((id) => `#${id}`).join(', ')})`
+              : '';
+          fb('markers', `youtube: ${clearedLabel}${missingLabel}`);
+        } else {
+          fb('markers', 'youtube: cleared all persisted markers');
+        }
       } catch {
         fb('markers', 'Failed to clear YouTube markers.');
       }
+      return true;
+    }
+
+    if (parsed.action === 'edit') {
+      fb(
+        'markers',
+        'Editing markers requires the TUI modal. Use /markers edit <id> in YASH or invoke markers.edit over IPC.',
+      );
       return true;
     }
 
@@ -357,7 +433,11 @@ export async function handleWebCommand(text: string, ctx: WebCommandContext): Pr
       const groups = (
         data.markers as Array<{
           platform: string;
-          markers?: Array<{ positionInSeconds: number; description: string }>;
+          markers?: Array<{
+            positionInSeconds: number;
+            description: string;
+            selectionId?: number;
+          }>;
           error?: string;
         }>
       )
@@ -366,7 +446,10 @@ export async function handleWebCommand(text: string, ctx: WebCommandContext): Pr
           const markers = entry.markers ?? [];
           if (markers.length === 0) return `${entry.platform}: none`;
           return `${entry.platform}: ${markers
-            .map((m) => `${m.positionInSeconds}s ${m.description || '(untitled)'}`)
+            .map((m) => {
+              const idPrefix = typeof m.selectionId === 'number' ? `#${m.selectionId} ` : '';
+              return `${idPrefix}${m.positionInSeconds}s ${m.description || '(untitled)'}`;
+            })
             .join(', ')}`;
         })
         .join(' | ');

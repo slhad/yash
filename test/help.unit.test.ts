@@ -8,6 +8,10 @@ describe('shared help metadata', () => {
       usage: '/marker [description] [| timestamp_s]',
       example: '/marker Replay | -300',
     });
+    expect(commands.find((entry) => entry.command === '/markers')).toMatchObject({
+      usage: '/markers clear [all|ids] | edit <id> | [all|youtube|twitch|kick] [limit]',
+      example: '/markers edit 1',
+    });
     expect(commands.find((entry) => entry.command === '/connect')).toMatchObject({
       usage: '/connect <youtube|twitch|kick>',
     });
@@ -24,6 +28,9 @@ describe('shared help metadata', () => {
     );
     expect(lines).toContain(
       '[help]       e.g.  /marker Replay|-300  (YouTube: 5 minutes before current live position)',
+    );
+    expect(lines).toContain(
+      '[help]   /markers clear [all|ids] | edit <id> | [all|youtube|twitch|kick] [limit]  — List, edit, or clear YouTube chapters',
     );
   });
 });

@@ -83,4 +83,22 @@ describe('buildStreamMarkerPayload', () => {
 
     expect(payload).toEqual([{ platform: 'youtube', marker: null, error: 'not authenticated' }]);
   });
+
+  test('marks kick as unsupported without calling provider createMarker', async () => {
+    let called = false;
+    const payload = await buildStreamMarkerPayload(
+      { platforms: ['kick'], description: 'Replay', timestamp: -300 },
+      {
+        kick: makeProvider({
+          onCreateMarker: async () => {
+            called = true;
+            return null;
+          },
+        }),
+      },
+    );
+
+    expect(called).toBe(false);
+    expect(payload).toEqual([{ platform: 'kick', marker: null, skipped: 'unsupported' }]);
+  });
 });

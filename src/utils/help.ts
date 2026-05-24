@@ -80,9 +80,10 @@ const HELP_ENTRIES: SharedHelpEntry[] = [
   {
     command: '/markers',
     surfaces: ['tui', 'api'],
-    description: 'List markers or clear YouTube chapters',
-    usage: '/markers clear | [all|youtube|twitch|kick] [limit]',
-    example: '/markers clear',
+    description: 'List, edit, or clear YouTube chapters',
+    usage: '/markers clear [all|ids] | edit <id> | [all|youtube|twitch|kick] [limit]',
+    example: '/markers edit 1',
+    tuiExamples: ['/markers clear 1,2,5'],
   },
   {
     command: '/info',

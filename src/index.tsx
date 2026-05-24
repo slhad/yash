@@ -49,7 +49,7 @@ import {
   SETTINGS_WIDTH_OPTIONS,
   validateTuiSettingsDraft,
 } from './utils/tuiSettings';
-import { parseMarkerArgs, parseSettingsValue } from './utils/webCommands';
+import { parseMarkerArgs, parseMarkersArgs, parseSettingsValue } from './utils/webCommands';
 import './index.ts'; // start Bun.serve web server in the same process
 import { IpcActionError, registry } from './actions/registry';
 import { startIpcServer } from './ipc/server';
@@ -2162,6 +2162,167 @@ function openYouTubeSetupModal(): void {
   renderer.prependInputHandler(modalKeyHandler);
 }
 
+function openMarkerEditModal(selectionId: number): void {
+  if (!uiNodes || activeModal || activeStreamModal || activeSettingsModal) return;
+  const marker = youtube.getPersistedMarkerBySelectionId(selectionId);
+  if (!marker) {
+    lastMessages.push(`[markers] Unknown persisted marker #${selectionId}`);
+    updateUI(lastMessages);
+    return;
+  }
+
+  const { renderer } = uiNodes;
+  const box = new BoxRenderable(renderer, {
+    position: 'absolute',
+    top: '18%',
+    left: '12%',
+    width: '76%',
+    zIndex: 100,
+    border: true,
+    borderStyle: 'rounded',
+    borderColor: 'cyan',
+    backgroundColor: 'black',
+    shouldFill: true,
+    padding: 1,
+    flexDirection: 'column',
+    gap: 1,
+    title: ` Edit Marker #${selectionId} `,
+  });
+
+  const instructions = new TextRenderable(renderer, {
+    content:
+      ' Update the label and/or timestamp for this persisted YouTube marker. Enter saves, Esc cancels.',
+    fg: 'gray',
+  });
+  const currentText = new TextRenderable(renderer, {
+    content: ` Current: ${marker.description || '(untitled)'} @ ${marker.positionInSeconds}s`,
+    fg: 'yellow',
+  });
+  const descriptionLabel = new TextRenderable(renderer, {
+    content: ' Description:',
+    fg: 'cyan',
+  });
+  const descriptionInput = new InputRenderable(renderer, {
+    placeholder: 'marker label',
+    width: '100%',
+  });
+  descriptionInput.value = marker.description;
+  const descriptionRow = createIndentedInputRow(renderer, descriptionInput, '    ');
+
+  const timestampLabel = new TextRenderable(renderer, {
+    content: ' Timestamp (s):',
+    fg: 'cyan',
+  });
+  const timestampInput = new InputRenderable(renderer, {
+    placeholder: 'seconds from stream start',
+    width: '100%',
+  });
+  timestampInput.value = String(marker.positionInSeconds);
+  const timestampRow = createIndentedInputRow(renderer, timestampInput, '    ');
+
+  const hint = new TextRenderable(renderer, {
+    content: '  [Tab] navigate  [Enter] save  [Esc] cancel',
+    fg: 'gray',
+  });
+
+  box.add(instructions);
+  box.add(currentText);
+  box.add(descriptionLabel);
+  box.add(descriptionRow);
+  box.add(timestampLabel);
+  box.add(timestampRow);
+  box.add(hint);
+  renderer.root.add(box);
+
+  const inputs = [descriptionInput, timestampInput];
+  let focusIndex = 0;
+  activeModal = { box, focusIndex };
+  descriptionInput.focus();
+
+  async function closeModal(save: boolean): Promise<void> {
+    if (!activeModal) return;
+    let parsedTimestamp: number | null = null;
+    if (save) {
+      parsedTimestamp = Number.parseInt(timestampInput.value.trim(), 10);
+      if (!Number.isFinite(parsedTimestamp) || parsedTimestamp < 0) {
+        lastMessages.push('[markers] Timestamp must be a non-negative integer.');
+        updateUI(lastMessages);
+        return;
+      }
+    }
+
+    renderer.removeInputHandler(modalKeyHandler);
+    renderer.root.remove(box.id);
+    activeModal = null;
+    uiNodes?.inputEl.focus();
+
+    if (!save) {
+      lastMessages.push(`[markers] edit cancelled for #${selectionId}`);
+      updateUI(lastMessages);
+      return;
+    }
+
+    try {
+      const ctx = { chatService, providers: { youtube, twitch, kick } };
+      const result = await registry.invokeAction(
+        'markers.edit',
+        {
+          selectionId,
+          text: descriptionInput.value,
+          timestamp: parsedTimestamp,
+        },
+        ctx,
+      );
+      for (const line of result.output ?? []) lastMessages.push(line);
+      for (const warn of result.warnings ?? []) lastMessages.push(`[system] ${warn}`);
+    } catch (err) {
+      if (err instanceof IpcActionError) {
+        lastMessages.push(`[markers] ${err.message}`);
+      } else {
+        lastMessages.push(`[markers] Error: ${String(err)}`);
+      }
+    }
+    updateUI(lastMessages);
+  }
+
+  const modalKeyHandler = (sequence: string): boolean => {
+    if (!activeModal) return false;
+    if (sequence === '\t') {
+      inputs[focusIndex]?.blur();
+      focusIndex = (focusIndex + 1) % inputs.length;
+      activeModal.focusIndex = focusIndex;
+      inputs[focusIndex]?.focus();
+      return true;
+    }
+    if (sequence === '\x1b[Z') {
+      inputs[focusIndex]?.blur();
+      focusIndex = (focusIndex - 1 + inputs.length) % inputs.length;
+      activeModal.focusIndex = focusIndex;
+      inputs[focusIndex]?.focus();
+      return true;
+    }
+    if (sequence === '\r' || sequence === '\n') {
+      void closeModal(true);
+      return true;
+    }
+    if (sequence === '\x1b' || sequence === '\x1b\x1b') {
+      void closeModal(false);
+      return true;
+    }
+    if (sequence === '\x1b[A' || sequence === '\x1b[B') return true;
+    return false;
+  };
+
+  renderer.prependInputHandler(modalKeyHandler);
+
+  const escapeViaKeyDown = (key: { name: string }) => {
+    if (key.name === 'escape' && activeModal) void closeModal(false);
+  };
+  for (const input of inputs) {
+    input.onKeyDown = escapeViaKeyDown;
+  }
+}
+
 function openStreamModal(preselected: string[]): void {
   if (!uiNodes || activeStreamModal || activeModal || activeSettingsModal) return;
   const { renderer } = uiNodes;
@@ -2906,16 +3067,31 @@ const commandHandlers: Record<
   },
 
   '/markers': async (parts, emit) => {
-    if ((parts[1] ?? '').toLowerCase() === 'clear') {
-      if (parts.length > 2) {
-        emit('[markers] Usage: /markers clear | [all|youtube|twitch|kick] [limit]');
-        updateUI(lastMessages);
-        return;
-      }
+    const parsed = parseMarkersArgs(parts.slice(1));
+    if (parsed.error) {
+      emit(
+        `[markers] Usage: /markers clear [all|ids] | edit <id> | [all|youtube|twitch|kick] [limit] (${parsed.error})`,
+      );
+      updateUI(lastMessages);
+      return;
+    }
 
+    if (parsed.action === 'clear') {
       try {
-        await youtube.clearPersistedMarkers();
-        emit('[markers] youtube: cleared persisted markers');
+        const result = await youtube.clearPersistedMarkers(parsed.clearSelectionIds);
+        if (parsed.clearSelectionIds && parsed.clearSelectionIds.length > 0) {
+          const clearedLabel =
+            result.clearedSelectionIds.length > 0
+              ? `cleared markers ${result.clearedSelectionIds.map((id) => `#${id}`).join(', ')}`
+              : 'no matching markers cleared';
+          const missingLabel =
+            result.missingSelectionIds.length > 0
+              ? ` (missing: ${result.missingSelectionIds.map((id) => `#${id}`).join(', ')})`
+              : '';
+          emit(`[markers] youtube: ${clearedLabel}${missingLabel}`);
+        } else {
+          emit('[markers] youtube: cleared all persisted markers');
+        }
       } catch (err) {
         emit(`[markers] youtube: clear error: ${String(err)}`);
       }
@@ -2923,22 +3099,17 @@ const commandHandlers: Record<
       return;
     }
 
-    const firstArg = (parts[1] ?? '').toLowerCase();
-    const hasExplicitPlatform = ['all', 'youtube', 'twitch', 'kick'].includes(firstArg);
-    const platformArg = hasExplicitPlatform ? firstArg : 'all';
-    const limitToken = hasExplicitPlatform ? parts[2] : parts[1];
-    const limit = limitToken ? Number.parseInt(limitToken, 10) : undefined;
-
-    if (limitToken && (limit === undefined || Number.isNaN(limit) || limit <= 0)) {
-      emit('[markers] Usage: /markers clear | [all|youtube|twitch|kick] [limit]');
-      updateUI(lastMessages);
+    if (parsed.action === 'edit') {
+      openMarkerEditModal(parsed.editSelectionId!);
       return;
     }
 
     try {
       const ctx = { chatService, providers: { youtube, twitch, kick } };
-      const actionArgs: Record<string, unknown> = { platform: platformArg };
-      if (limit !== undefined) actionArgs.limit = limit;
+      const actionArgs: Record<string, unknown> = {
+        platform: parsed.platforms?.[0] ?? 'all',
+      };
+      if (parsed.limit !== undefined) actionArgs.limit = parsed.limit;
       const result = await registry.invokeAction('markers.list', actionArgs, ctx);
       for (const line of result.output ?? []) emit(line);
       for (const warn of result.warnings ?? []) emit(`[system] ${warn}`);
