@@ -70,6 +70,16 @@ describe('runIpcCommand — IPC event logging', () => {
     expect(events).toHaveLength(0);
   });
 
+  test('returns TUI-only message for /markers edit without calling onEvent', async () => {
+    const events: Array<[string, string, string]> = [];
+    const result = await runIpcCommand('/markers edit 2', fakeHandlers, () =>
+      events.push(['', '', '']),
+    );
+
+    expect(result).toBe('This command requires the TUI');
+    expect(events).toHaveLength(0);
+  });
+
   test('returns handler output as joined string', async () => {
     const result = await runIpcCommand('/help', fakeHandlers, () => {});
 

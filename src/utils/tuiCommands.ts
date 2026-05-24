@@ -49,7 +49,7 @@ export function initTuiCommands(cmds: string[]): void {
 const PLATFORMS = ['youtube', 'twitch', 'kick', 'obs'];
 const INJECT_PLATFORMS = ['twitch', 'youtube', 'kick'];
 const MSG_TARGETS = ['all', 'youtube', 'twitch', 'kick'];
-const MARKERS_ARGS = ['clear', 'all', 'youtube', 'twitch', 'kick'];
+const MARKERS_ARGS = ['clear', 'edit', 'all', 'youtube', 'twitch', 'kick'];
 const SETTINGS_KEYS = [
   'chat.maxHistorySize',
   'demo',
@@ -203,7 +203,8 @@ export function getAutocomplete(input: string): {
       if (first === '') {
         return { completion: null, hints: MARKERS_ARGS, completions: [] };
       }
-      if (first === 'clear') return { completion: null, hints: [], completions: [] };
+      if (first === 'clear') return { completion: null, hints: ['all', '<ids>'], completions: [] };
+      if (first === 'edit') return { completion: null, hints: ['<id>'], completions: [] };
     }
 
     if (!rest.includes(' ')) {
@@ -212,7 +213,14 @@ export function getAutocomplete(input: string): {
 
     const parts = restLower.split(/\s+/).filter(Boolean);
     const first = parts[0] ?? '';
-    if (first === 'clear') return { completion: null, hints: [], completions: [] };
+    if (first === 'clear') {
+      if (parts.length === 1) return { completion: null, hints: ['clear'], completions: [] };
+      return { completion: null, hints: [], completions: [] };
+    }
+    if (first === 'edit') {
+      if (parts.length === 1) return { completion: null, hints: ['<id>'], completions: [] };
+      return { completion: null, hints: [], completions: [] };
+    }
     if (['all', 'youtube', 'twitch', 'kick'].includes(first) && parts.length === 1) {
       return { completion: null, hints: ['<limit>'], completions: [] };
     }

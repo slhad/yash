@@ -1541,7 +1541,7 @@ export class YouTubeProvider implements PlatformProvider {
     if (!this.isAuthenticated() || !this.tokenData) return;
 
     const setup = this.getSetup();
-    if (!setup.chaptering.enabled || this.chapterMarkers.length === 0) return;
+    if (!setup.chaptering.enabled) return;
 
     const streamConfig = settingsStore.get('stream', {});
     const userDesc = typeof streamConfig.description === 'string' ? streamConfig.description : '';
@@ -1549,7 +1549,6 @@ export class YouTubeProvider implements PlatformProvider {
       ? streamConfig.tags.filter((tag: unknown): tag is string => typeof tag === 'string')
       : undefined;
     const finalDescription = this.buildFinalDescription(userDesc, tags);
-    if (!finalDescription) return;
 
     const target =
       (this.broadcastId ? { id: this.broadcastId, liveChatId: this.liveChatId } : null) ??
@@ -1648,9 +1647,91 @@ export class YouTubeProvider implements PlatformProvider {
     return result.slice(-limit);
   }
 
-  async clearPersistedMarkers(): Promise<void> {
-    this.chapterMarkers = [];
-    await this.persistChapters();
+  getPersistedMarkerSelectionId(markerId: string): number | null {
+    const index = this.chapterMarkers.findIndex((marker) => marker.id === markerId);
+    return index === -1 ? null : index + 1;
+  }
+
+  getPersistedMarkerBySelectionId(selectionId: number): StreamMarker | null {
+    if (!Number.isInteger(selectionId) || selectionId <= 0) return null;
+    return this.chapterMarkers[selectionId - 1] ?? null;
+  }
+
+  async updatePersistedMarkerBySelectionId(
+    selectionId: number,
+    updates: { description?: string; timestamp?: number },
+  ): Promise<StreamMarker | null> {
+    if (!Number.isInteger(selectionId) || selectionId <= 0) return null;
+    const previousMarkers = [...this.chapterMarkers];
+    const current = this.chapterMarkers[selectionId - 1];
+    if (!current) return null;
+
+    const updatedMarker: StreamMarker = {
+      ...current,
+      ...(updates.description !== undefined ? { description: updates.description } : {}),
+      ...(updates.timestamp !== undefined ? { positionInSeconds: updates.timestamp } : {}),
+    };
+
+    this.chapterMarkers[selectionId - 1] = updatedMarker;
+
+    try {
+      await this.persistChapters();
+      await this._persistChapterDescription();
+      return updatedMarker;
+    } catch (err) {
+      this.chapterMarkers = previousMarkers;
+      try {
+        await this.persistChapters();
+      } catch (persistErr) {
+        defaultLogger.error(
+          '[YouTube] updatePersistedMarkerBySelectionId rollback persist error:',
+          persistErr,
+        );
+      }
+      throw err;
+    }
+  }
+
+  async clearPersistedMarkers(
+    selectionIds?: number[],
+  ): Promise<{ clearedSelectionIds: number[]; missingSelectionIds: number[] }> {
+    const previousMarkers = [...this.chapterMarkers];
+    const normalizedSelectionIds =
+      selectionIds === undefined
+        ? undefined
+        : [...new Set(selectionIds.filter((id) => Number.isInteger(id) && id > 0))];
+    const existingSelectionIds = new Set(previousMarkers.map((_, index) => index + 1));
+    const clearedSelectionIds =
+      normalizedSelectionIds === undefined
+        ? previousMarkers.map((_, index) => index + 1)
+        : normalizedSelectionIds.filter((id) => existingSelectionIds.has(id));
+    const missingSelectionIds =
+      normalizedSelectionIds === undefined
+        ? []
+        : normalizedSelectionIds.filter((id) => !existingSelectionIds.has(id));
+
+    if (normalizedSelectionIds === undefined) {
+      this.chapterMarkers = [];
+    } else if (clearedSelectionIds.length > 0) {
+      const selectionSet = new Set(clearedSelectionIds);
+      this.chapterMarkers = previousMarkers.filter((_, index) => !selectionSet.has(index + 1));
+    } else {
+      return { clearedSelectionIds, missingSelectionIds };
+    }
+
+    try {
+      await this.persistChapters();
+      await this._persistChapterDescription();
+      return { clearedSelectionIds, missingSelectionIds };
+    } catch (err) {
+      this.chapterMarkers = previousMarkers;
+      try {
+        await this.persistChapters();
+      } catch (persistErr) {
+        defaultLogger.error('[YouTube] clearPersistedMarkers rollback persist error:', persistErr);
+      }
+      throw err;
+    }
   }
 
   clearMarkers(): void {

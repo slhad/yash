@@ -102,8 +102,39 @@ describe('parseMarkersArgs', () => {
     expect(parseMarkersArgs(['clear'])).toEqual({ action: 'clear' });
   });
 
-  test('clear with extra args → error', () => {
-    expect(parseMarkersArgs(['clear', 'youtube']).error).toContain('Clear does not accept');
+  test('clear all → clear action without explicit IDs', () => {
+    expect(parseMarkersArgs(['clear', 'all'])).toEqual({ action: 'clear' });
+  });
+
+  test('clear with marker IDs → parsed ID list', () => {
+    expect(parseMarkersArgs(['clear', '1,2', '5'])).toEqual({
+      action: 'clear',
+      clearSelectionIds: [1, 2, 5],
+    });
+  });
+
+  test('clear with invalid marker ID → error', () => {
+    expect(parseMarkersArgs(['clear', 'youtube']).error).toContain('Invalid marker identifier');
+  });
+
+  test('clear rejects marker IDs with trailing text or decimals', () => {
+    expect(parseMarkersArgs(['clear', '1abc']).error).toContain('Invalid marker identifier');
+    expect(parseMarkersArgs(['clear', '2.7']).error).toContain('Invalid marker identifier');
+  });
+
+  test('edit with marker ID → parsed edit selection ID', () => {
+    expect(parseMarkersArgs(['edit', '4'])).toEqual({ action: 'edit', editSelectionId: 4 });
+  });
+
+  test('edit with missing marker ID → error', () => {
+    expect(parseMarkersArgs(['edit']).error).toContain(
+      'Edit requires exactly one marker identifier',
+    );
+  });
+
+  test('edit rejects marker IDs with trailing text or decimals', () => {
+    expect(parseMarkersArgs(['edit', '3foo']).error).toContain('Invalid marker identifier');
+    expect(parseMarkersArgs(['edit', '4.5']).error).toContain('Invalid marker identifier');
   });
 });
 
@@ -371,6 +402,7 @@ describe('handleWebCommand — /marker', () => {
         markers: [
           { platform: 'youtube', marker: { positionInSeconds: 10 } },
           { platform: 'twitch', marker: null, error: 'not live' },
+          { platform: 'kick', marker: null, skipped: 'unsupported' },
         ],
       },
     }));
@@ -383,6 +415,7 @@ describe('handleWebCommand — /marker', () => {
     expect(markerFeedback).toBeDefined();
     expect(markerFeedback![1]).toContain('youtube');
     expect(markerFeedback![1]).toContain('twitch');
+    expect(markerFeedback![1]).not.toContain('kick');
   });
 
   test('fetch failure → error feedback', async () => {
@@ -432,7 +465,10 @@ describe('handleWebCommand — /markers', () => {
           ok: true,
           body: {
             markers: [
-              { platform: 'youtube', markers: [{ positionInSeconds: 10, description: 'Intro' }] },
+              {
+                platform: 'youtube',
+                markers: [{ positionInSeconds: 10, description: 'Intro', selectionId: 3 }],
+              },
               { platform: 'twitch', markers: [], error: 'not authenticated' },
             ],
           },
@@ -448,6 +484,7 @@ describe('handleWebCommand — /markers', () => {
     const markersFeedback = feedback.find(([l]) => l === 'markers');
     expect(markersFeedback).toBeDefined();
     expect(markersFeedback![1]).toContain('youtube');
+    expect(markersFeedback![1]).toContain('#3');
     expect(markersFeedback![1]).toContain('Intro');
     expect(markersFeedback![1]).toContain('twitch');
   });
@@ -466,7 +503,10 @@ describe('handleWebCommand — /markers', () => {
   test('/markers clear → POSTs clear request and reports success', async () => {
     const { calls } = mockFetch((url, init) => {
       if (url === '/api/stream/markers/clear' && init?.method === 'POST') {
-        return { ok: true, body: { success: true, platform: 'youtube' } };
+        return {
+          ok: true,
+          body: { success: true, platform: 'youtube', clearedSelectionIds: [1, 2] },
+        };
       }
       return { ok: false };
     });
@@ -481,20 +521,51 @@ describe('handleWebCommand — /markers', () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]?.url).toBe('/api/stream/markers/clear');
     expect(calls[0]?.init?.method).toBe('POST');
-    expect(feedback).toContainEqual(['markers', 'youtube: cleared persisted markers']);
+    expect(calls[0]?.init?.body).toBe(JSON.stringify({ selectionIds: undefined }));
+    expect(feedback).toContainEqual(['markers', 'youtube: cleared all persisted markers']);
   });
 
-  test('/markers clear extra → usage feedback without fetch', async () => {
+  test('/markers clear 1,2,5 → POSTs targeted clear request and reports success', async () => {
+    const { calls } = mockFetch((url, init) => {
+      if (url === '/api/stream/markers/clear' && init?.method === 'POST') {
+        return {
+          ok: true,
+          body: {
+            success: true,
+            platform: 'youtube',
+            clearedSelectionIds: [1, 2],
+            missingSelectionIds: [5],
+          },
+        };
+      }
+      return { ok: false };
+    });
+    const feedback: Array<[string, string]> = [];
+
+    await handleWebCommand('/markers clear 1,2,5', {
+      platforms: [],
+      feedback: (l, t) => feedback.push([l, t]),
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.init?.body).toBe(JSON.stringify({ selectionIds: [1, 2, 5] }));
+    expect(feedback).toContainEqual(['markers', 'youtube: cleared markers #1, #2 (missing: #5)']);
+  });
+
+  test('/markers edit 4 → reports TUI-only guidance without fetch', async () => {
     const { calls } = mockFetch(() => ({ ok: true, body: {} }));
     const feedback: Array<[string, string]> = [];
 
-    await handleWebCommand('/markers clear extra', {
+    await handleWebCommand('/markers edit 4', {
       platforms: [],
       feedback: (l, t) => feedback.push([l, t]),
     });
 
     expect(calls).toHaveLength(0);
-    expect(feedback.some(([, t]) => t.includes('Usage'))).toBe(true);
+    expect(feedback).toContainEqual([
+      'markers',
+      'Editing markers requires the TUI modal. Use /markers edit <id> in YASH or invoke markers.edit over IPC.',
+    ]);
   });
 });
 
