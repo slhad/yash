@@ -1,5 +1,6 @@
 import type { FfzEmoteDefinition } from './ffz';
 import { parseMessageWithFfzEmotes } from './ffz';
+import type { SharedTwitchEmoteDefinition } from './ffz-fetch';
 
 export type TuiChatPart = {
   content: string;
@@ -11,6 +12,7 @@ export type TuiFfzUploadOptions = {
   pngBytes: Uint8Array;
   width: number;
   height: number;
+  columns: number;
   passthrough: 'none' | 'tmux';
 };
 
@@ -25,6 +27,27 @@ export function getTuiFfzPlaceholderCell(): string {
   return `${PLACEHOLDER}${DIACRITIC_ZERO}${DIACRITIC_ZERO}`;
 }
 
+export function getTuiFfzColumnSpan(scalePercent: number): number {
+  if (!Number.isFinite(scalePercent) || scalePercent <= 0) return 1;
+  return Math.max(1, Math.min(4, Math.round(scalePercent / 100)));
+}
+
+export function getTuiFfzUploadUrl(emote: SharedTwitchEmoteDefinition): string {
+  return emote.source === 'twitch' ? emote.staticUrl ?? emote.url : emote.url;
+}
+
+export function isTuiFfzPassthroughEnabled(optionValue: string | null | undefined): boolean {
+  if (!optionValue) return false;
+  const normalized = optionValue.trim().toLowerCase();
+  return normalized === 'on' || normalized === 'all';
+}
+
+export function getTuiFfzPlaceholderCells(columns: number): string {
+  const clampedColumns = Math.max(1, Math.floor(columns));
+  if (clampedColumns === 1) return getTuiFfzPlaceholderCell();
+  return getTuiFfzPlaceholderCell() + PLACEHOLDER.repeat(clampedColumns - 1);
+}
+
 export function imageIdToColorHex(imageId: number): string {
   const normalized = imageId & 0xffffff;
   return `#${normalized.toString(16).padStart(6, '0')}`;
@@ -36,6 +59,7 @@ export function buildTuiFfzMessageParts(
   defaultFg: string,
   emotes: Record<string, FfzEmoteDefinition>,
   imageIdsByName: Record<string, number>,
+  columns = 1,
 ): TuiChatPart[] {
   if (platform !== 'twitch') {
     return [{ content: message, fg: defaultFg }];
@@ -59,7 +83,7 @@ export function buildTuiFfzMessageParts(
 
     sawPlaceholder = true;
     pushMergedPart(parts, {
-      content: getTuiFfzPlaceholderCell(),
+      content: getTuiFfzPlaceholderCells(columns),
       fg: imageIdToColorHex(imageId),
     });
   }
@@ -98,7 +122,7 @@ export function buildTuiFfzUploadSequences(options: TuiFfzUploadOptions): string
     const chunk = payload.slice(index, nextIndex);
     const more = nextIndex < payload.length ? 1 : 0;
     const prefix = firstChunk
-      ? `a=T,q=2,f=100,U=1,s=${width},v=${height},c=1,r=1,i=${options.imageId},`
+      ? `a=T,q=2,f=100,U=1,s=${width},v=${height},c=${Math.max(1, Math.floor(options.columns))},r=1,i=${options.imageId},`
       : '';
     const apc = `${ESC}_G${prefix}m=${more};${chunk}${APC_SUFFIX}`;
     sequences.push(options.passthrough === 'tmux' ? wrapTmuxPassthrough(apc) : apc);

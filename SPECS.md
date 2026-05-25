@@ -64,7 +64,8 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
     * Web chat views (`/`, `/unified`, `/sidebyside`)
         * Twitch messages render FrankerFaceZ emotes inline across the WebUI chat surfaces using a cached `/api/twitch/ffz-emotes` lookup keyed by the authenticated Twitch channel login
     * TUI chat rendering
-        * Twitch messages render FrankerFaceZ emotes inline in the Chat pane and chatter/history modal message rows when the active terminal supports Kitty-style Unicode image placeholders (for example Ghostty through tmux with `allow-passthrough on`); otherwise the original token text remains visible
+        * Twitch messages render FrankerFaceZ emotes inline in the Chat pane and chatter/history modal message rows when the active terminal supports Kitty-style Unicode image placeholders (for example Ghostty through tmux with `allow-passthrough on` or `allow-passthrough all`); otherwise the original token text remains visible
+        * `tui.emotes.scale` controls the TUI inline emote size and applies immediately when changed through `/settings`; users migrating from the early broken sizing behavior may need to increase existing saved values (for example `200` or `400`) to get the desired visible size
         * Persisted chat messages remain plain text; FFZ substitution is render-time only
         * Command parameter autocomplete: after typing a command + space, Tab completes available parameters
             * `/connect ` → `youtube | twitch | kick`

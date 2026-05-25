@@ -316,6 +316,7 @@ const SETTINGS_KEYS = [
   'viewers.mode',
   'messages.position',
   'chat.timestamps.visible',
+  'tui.emotes.scale',
   'events.visible',
   'events.tail',
   'events.width',

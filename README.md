@@ -192,7 +192,11 @@ The WebUI chat surfaces at `/`, `/unified`, and `/sidebyside` render Twitch Fran
 
 ## TUI chat emotes
 
-The TUI uses the same cached FrankerFaceZ map for Twitch messages, but keeps substitution as a render-time concern so persisted chat history stays plain text. When the active terminal supports Kitty-style Unicode image placeholders, YASH swaps matching Twitch tokens inline in the main Chat pane and the chatter/history modal message rows; verified on Ghostty through tmux with `allow-passthrough on`. On terminals without that support, YASH leaves the original token text visible instead of breaking layout.
+The TUI uses the same cached FrankerFaceZ map for Twitch messages, but keeps substitution as a render-time concern so persisted chat history stays plain text. When the active terminal supports Kitty-style Unicode image placeholders, YASH swaps matching Twitch tokens inline in the main Chat pane and the chatter/history modal message rows; verified on Ghostty through tmux with `allow-passthrough on` or `allow-passthrough all`. On terminals without that support, YASH leaves the original token text visible instead of breaking layout.
+
+You can scale TUI emotes with `tui.emotes.scale` in `settings.json` or through `/settings set tui.emotes.scale <percent>`. `100` keeps the default size, `150` makes them larger, and the live TUI reuploads the inline images immediately after the setting changes.
+
+If you tried `tui.emotes.scale` before the sizing fix on this branch, revisit your saved value. Visible growth now happens in terminal cell spans, so you may want a larger setting such as `200` or `400` for a more obvious change.
 
 ## PR proof uploads
 

@@ -10,6 +10,7 @@ export interface TuiSettingsDraftInput {
   viewersMode: string;
   messagesPosition: string;
   chatTimestampsVisible: boolean;
+  tuiEmotesScale: string;
   chatMaxHistorySize: string;
   eventsVisible: boolean;
   eventsTail: string;
@@ -32,6 +33,7 @@ export interface TuiSettingsValues {
   viewersMode: (typeof SETTINGS_VIEWER_MODES)[number];
   messagesPosition: (typeof SETTINGS_MESSAGE_POSITIONS)[number];
   chatTimestampsVisible: boolean;
+  tuiEmotesScale: number;
   chatMaxHistorySize: number;
   eventsVisible: boolean;
   eventsTail: number;
@@ -66,6 +68,7 @@ export function validateTuiSettingsDraft(draft: TuiSettingsDraftInput): {
   errors: string[];
 } {
   const errors: string[] = [];
+  const tuiEmotesScale = parsePositiveInt(draft.tuiEmotesScale, 'tui.emotes.scale', errors);
   const chatMaxHistorySize = parsePositiveInt(
     draft.chatMaxHistorySize,
     'chat.maxHistorySize',
@@ -113,6 +116,7 @@ export function validateTuiSettingsDraft(draft: TuiSettingsDraftInput): {
       viewersMode: draft.viewersMode as (typeof SETTINGS_VIEWER_MODES)[number],
       messagesPosition: draft.messagesPosition as (typeof SETTINGS_MESSAGE_POSITIONS)[number],
       chatTimestampsVisible: draft.chatTimestampsVisible,
+      tuiEmotesScale: tuiEmotesScale as number,
       chatMaxHistorySize: chatMaxHistorySize as number,
       eventsVisible: draft.eventsVisible,
       eventsTail: eventsTail as number,
@@ -139,6 +143,7 @@ export function buildTuiSettingsEntries(values: TuiSettingsValues): TuiSettingsE
     { key: 'viewers.mode', value: values.viewersMode },
     { key: 'messages.position', value: values.messagesPosition },
     { key: 'chat.timestamps.visible', value: values.chatTimestampsVisible },
+    { key: 'tui.emotes.scale', value: values.tuiEmotesScale },
     { key: 'chat.maxHistorySize', value: values.chatMaxHistorySize },
     { key: 'events.visible', value: values.eventsVisible },
     { key: 'events.tail', value: values.eventsTail },

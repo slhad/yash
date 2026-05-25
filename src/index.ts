@@ -24,11 +24,15 @@ import {
 } from './services';
 import './actions/markers';
 import { isDemoMode, resolvePort } from './utils/config';
-import { getFfzEmotePayload } from './utils/ffz-fetch';
+import { getFfzEmotePayload, type TwitchEmoteFetchContext } from './utils/ffz-fetch';
 import { getHelpCommands } from './utils/help';
 import { defaultLogger } from './utils/logger';
 import { apiMetricsHandler, prometheusMetricsHandler } from './utils/metricsHandlers';
 import { buildStreamMarkerPayload } from './utils/streamMarkerRoute';
+
+type TwitchProviderEmoteContext = TwitchEmoteFetchContext & {
+  getUserLogin?: () => string | null;
+};
 
 export {
   authService,
@@ -111,14 +115,15 @@ Bun.serve({
     },
     '/api/twitch/ffz-emotes': {
       GET: async () => {
-        const twitchWithUserLogin = twitch as typeof twitch & {
-          getUserLogin?: () => string | null;
-        };
+        const twitchWithEmoteContext = twitch as unknown as TwitchProviderEmoteContext;
         const channel =
-          typeof twitchWithUserLogin.getUserLogin === 'function'
-            ? twitchWithUserLogin.getUserLogin()
+          typeof twitchWithEmoteContext.getUserLogin === 'function'
+            ? twitchWithEmoteContext.getUserLogin()
             : null;
-        const payload = await getFfzEmotePayload(channel);
+        const payload = await getFfzEmotePayload(channel, {
+          apiClient: twitchWithEmoteContext.apiClient ?? null,
+          userId: twitchWithEmoteContext.userId ?? null,
+        });
         return new Response(JSON.stringify(payload), {
           headers: { 'Content-Type': 'application/json' },
         });
