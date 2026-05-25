@@ -5,7 +5,7 @@
 
   // Sources to hide (disable) in the prepare scene — leave empty to skip
   // Example: ["[SC] Webcam", "[SC] Alerts"]
-  "hideSources": [],
+  "hideSources": ["[SC] Brio NB"],
 
   // Audio inputs to mute during prepare — leave empty to skip
   "muteSources": ["Mic/Aux"],
