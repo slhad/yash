@@ -21,6 +21,7 @@ Small toolkit to manage streaming across YouTube, Twitch, and Kick with a unifie
 - `bun run start:webui` runs only the web server (`src/index.ts`)
 - `bun run start:tui` runs the TUI-focused mode (`YASH_TUI_ONLY=1 bun run src/index.tsx`)
 - `bun run cmd <command>` sends a command to a running TUI process via IPC (see [CLI IPC](#cli-ipc) below)
+- `bun ~/.agents/skills/github-pr-attachments/scripts/upload_pr_attachment.ts --file tmp/<artifact>.mp4 [--pr <number|url>]` uploads a local proof artifact through GitHub's PR editor and prints a `github.com/user-attachments/...` URL that GitHub will inline in the PR body
 - `Bun.serve` intentionally uses `development: false`; Bun development-mode bundle timing output corrupts the TUI rendering on the shared terminal fd
 
 > **Note:** Running the TUI process and web server as separate long-lived processes against the same port is not the supported default flow anymore. Use `bun run start` unless you explicitly want a web-only or TUI-only mode.
@@ -188,6 +189,22 @@ The `/stream` modal (TUI) and stream form (WebUI) have per-platform category fie
 ## HTML chat emotes
 
 The WebUI chat surfaces at `/`, `/unified`, and `/sidebyside` render Twitch FrankerFaceZ emotes inline when YASH knows the authenticated Twitch channel login. The browser fetches a cached emote map from `GET /api/twitch/ffz-emotes`; persisted chat messages remain plain text, and only the WebUI rendering layer swaps matching Twitch tokens for emote images.
+
+## PR proof uploads
+
+GitHub only renders inline PR videos reliably when the body contains a `https://github.com/user-attachments/assets/...` URL. Release asset URLs from `gh release upload` remain useful as downloadable artifacts, but GitHub usually treats them as plain links instead of rendering embedded video blocks.
+
+Use the global GitHub PR attachment helper when you need an inline PR video:
+
+```sh
+bun ~/.agents/skills/github-pr-attachments/scripts/upload_pr_attachment.ts --pr 35 --file tmp/ffz-web.mp4
+```
+
+- The script reuses the shared persistent Playwright browser profile at `~/.cache/codex/github-pr-attachments/playwright-profile`
+- If that profile is not logged in yet, sign in once in the opened browser window and rerun or let the script continue
+- The helper uploads through the PR conversation editor, extracts the `user-attachments` URL, and prints it
+- Add that raw URL on its own line in the PR body so GitHub renders the inline video
+- For templated PR bodies, use `--mode apply --placeholder __ATTACHMENT_URL__` to patch the live PR body through `gh pr edit`
 
 ## YouTube `/stream` targeting notes
 
