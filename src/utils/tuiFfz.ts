@@ -33,7 +33,7 @@ export function getTuiFfzColumnSpan(scalePercent: number): number {
 }
 
 export function getTuiFfzUploadUrl(emote: SharedTwitchEmoteDefinition): string {
-  return emote.source === 'twitch' ? emote.staticUrl ?? emote.url : emote.url;
+  return emote.source === 'twitch' ? (emote.staticUrl ?? emote.url) : emote.url;
 }
 
 export function isTuiFfzPassthroughEnabled(optionValue: string | null | undefined): boolean {

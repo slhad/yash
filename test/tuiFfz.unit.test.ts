@@ -1,14 +1,14 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
-  getTuiFfzColumnSpan,
   buildTuiFfzMessageParts,
   buildTuiFfzUploadSequences,
-  getTuiFfzPlaceholderCells,
+  getTuiFfzColumnSpan,
   getTuiFfzPlaceholderCell,
+  getTuiFfzPlaceholderCells,
   getTuiFfzUploadUrl,
-  isTuiFfzPassthroughEnabled,
   imageIdToColorHex,
+  isTuiFfzPassthroughEnabled,
   parsePngDimensions,
   supportsTuiFfzClientTerm,
 } from '../src/utils/tuiFfz';

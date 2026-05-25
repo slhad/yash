@@ -53,10 +53,10 @@ import { getAutocomplete, initTuiCommands, setActionRegistry } from './utils/tui
 import { installTuiErrorCapture } from './utils/tuiErrorCapture';
 import {
   buildTuiFfzMessageParts,
+  buildTuiFfzUploadSequences,
   getTuiFfzColumnSpan,
   getTuiFfzUploadUrl,
   isTuiFfzPassthroughEnabled,
-  buildTuiFfzUploadSequences,
   parsePngDimensions,
   supportsTuiFfzClientTerm,
 } from './utils/tuiFfz';
@@ -5363,7 +5363,7 @@ async function refreshTuiFfzEmotes(reason: string): Promise<void> {
 
       for (const [name, emote] of Object.entries(payload.emotes)) {
         tuiFfzEmotes[name] = emote;
-        const cacheKey = emote.source === 'twitch' ? emote.staticUrl ?? emote.url : emote.url;
+        const cacheKey = emote.source === 'twitch' ? (emote.staticUrl ?? emote.url) : emote.url;
         try {
           let imageId = tuiFfzImageIdsByUrl.get(cacheKey);
           if (!imageId) {

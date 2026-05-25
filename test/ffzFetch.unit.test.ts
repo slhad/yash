@@ -42,7 +42,8 @@ describe('shared twitch emote payload', () => {
               {
                 name: 'LUL',
                 formats: ['static'],
-                getImageUrl: () => 'https://static-cdn.jtvnw.net/emoticons/v2/425618/default/dark/2.0',
+                getImageUrl: () =>
+                  'https://static-cdn.jtvnw.net/emoticons/v2/425618/default/dark/2.0',
                 getStaticImageUrl: () => 'https://static.test/lul.png',
               },
             ],

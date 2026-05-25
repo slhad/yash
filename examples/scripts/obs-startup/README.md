@@ -1,7 +1,7 @@
 # obs-startup
 
-A yash user script that runs your stream startup sequence as an async 4-phase pipeline:
-**prepare → stream start → countdown → go live**.
+A yash user script that runs your stream startup sequence as an async 5-phase pipeline:
+**prepare → pre-start wait → stream start → countdown → go live**.
 
 Registers three actions: `obs.startup.begin`, `obs.startup.cancel`, and `obs.startup.status`.
 
@@ -38,6 +38,7 @@ Edit `config.jsonc` (or the symlinked copy in `~/.config/yash/scripts/obs-startu
 | Key | Default | Description |
 |---|---|---|
 | `startStream` | `false` | Whether to call OBS `startStream` automatically. Left `false` by default — start the stream manually or via a separate yash command when you are ready |
+| `preStartDelay` | `0` | Optional safety wait in seconds before calling OBS `startStream`. Useful when you want a short cancel window after the prepare scene is already active |
 
 ### Countdown phase
 
@@ -68,6 +69,7 @@ Kicks off the startup sequence. Returns immediately after the prepare phase begi
 |---|---|
 | `prepareScene` | `prepareScene` |
 | `liveScene` | `liveScene` |
+| `preStartDelay` | `preStartDelay` |
 | `delay` | `countdownDelay` |
 | `startStream` | `startStream` |
 | `countdownSource` | `countdownSource` |
@@ -88,6 +90,7 @@ From the yash TUI command bar (using `/action <id>` syntax):
 
 ```
 /action obs.startup.begin
+/action obs.startup.begin preStartDelay=15 startStream=true
 /action obs.startup.begin delay=30
 /action obs.startup.begin startStream=true
 /action obs.startup.begin prepareScene="Starting Soon" liveScene="Main"
@@ -104,6 +107,10 @@ obs.startup.begin
   ├─ [prepare]      Switch to prepareScene
   │                 Hide hideSources in prepareScene
   │                 Mute muteSources
+  │
+  ├─ [pre-start-wait]
+  │                 Wait preStartDelay seconds before calling OBS startStream
+  │                 (skipped unless startStream: true and preStartDelay > 0)
   │
   ├─ [stream-start] Start OBS stream (only if startStream: true)
   │
