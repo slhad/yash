@@ -14,10 +14,18 @@ export interface StreamSummary {
 
 export class MessageLog {
   private db: Database;
+  private currentDbPath: string;
+  private readonly explicitDbPath: boolean;
 
   constructor(dbPath: string = path.join(getDataDir(), 'messages.db')) {
-    this.db = new Database(dbPath, { create: true });
-    this.db.exec(`CREATE TABLE IF NOT EXISTS messages (
+    this.explicitDbPath = dbPath !== path.join(getDataDir(), 'messages.db');
+    this.currentDbPath = dbPath;
+    this.db = this.openDatabase(dbPath);
+  }
+
+  private openDatabase(dbPath: string): Database {
+    const db = new Database(dbPath, { create: true });
+    db.exec(`CREATE TABLE IF NOT EXISTS messages (
       id TEXT PRIMARY KEY,
       platform TEXT NOT NULL,
       user_id TEXT NOT NULL,
@@ -30,17 +38,26 @@ export class MessageLog {
     )`);
     // Migrate existing DBs that predate stream_id
     try {
-      this.db.exec('ALTER TABLE messages ADD COLUMN stream_id TEXT');
+      db.exec('ALTER TABLE messages ADD COLUMN stream_id TEXT');
     } catch {
       // Column already exists — ignore
     }
-    this.db.exec(
-      `CREATE INDEX IF NOT EXISTS idx_user ON messages (platform, user_id, timestamp DESC)`,
-    );
-    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_stream ON messages (stream_id, timestamp DESC)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_user ON messages (platform, user_id, timestamp DESC)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_stream ON messages (stream_id, timestamp DESC)`);
+    return db;
+  }
+
+  private ensureActiveDatabase(): void {
+    if (this.explicitDbPath) return;
+    const desiredPath = path.join(getDataDir(), 'messages.db');
+    if (desiredPath === this.currentDbPath) return;
+    this.db.close();
+    this.currentDbPath = desiredPath;
+    this.db = this.openDatabase(desiredPath);
   }
 
   insert(msg: ChatMessage): void {
+    this.ensureActiveDatabase();
     // ignore if already exists (idempotent)
     this.db
       .prepare(`INSERT OR IGNORE INTO messages (id, platform, user_id, username, message, timestamp, color, badges, stream_id)
@@ -59,6 +76,7 @@ export class MessageLog {
   }
 
   getForUser(platform: string, userId: string, limit = 100): ChatMessage[] {
+    this.ensureActiveDatabase();
     const rows = this.db
       .prepare(
         `SELECT * FROM messages WHERE platform = ? AND user_id = ? ORDER BY timestamp DESC LIMIT ?`,
@@ -69,6 +87,7 @@ export class MessageLog {
 
   // Newest-first with offset — used for lazy loading in the chatter info modal.
   getForUserDesc(platform: string, userId: string, limit: number, offset: number): ChatMessage[] {
+    this.ensureActiveDatabase();
     const rows = this.db
       .prepare(
         `SELECT * FROM messages WHERE platform = ? AND user_id = ? ORDER BY timestamp DESC LIMIT ? OFFSET ?`,
@@ -78,6 +97,7 @@ export class MessageLog {
   }
 
   getForUserInStream(platform: string, userId: string, streamId: string): ChatMessage[] {
+    this.ensureActiveDatabase();
     const rows = this.db
       .prepare(
         `SELECT * FROM messages
@@ -93,6 +113,7 @@ export class MessageLog {
     userId: string,
     streamId: string,
   ): { count: number; firstSeenAt?: Date } {
+    this.ensureActiveDatabase();
     const result = this.db
       .prepare(
         `SELECT COUNT(*) as count, MIN(timestamp) as first_seen
@@ -113,6 +134,7 @@ export class MessageLog {
     limit: number,
     offset: number,
   ): ChatMessage[] {
+    this.ensureActiveDatabase();
     const rows = this.db
       .prepare(
         `SELECT * FROM messages
@@ -127,6 +149,7 @@ export class MessageLog {
   }
 
   countContextForUser(platform: string, userId: string): number {
+    this.ensureActiveDatabase();
     const result = this.db
       .prepare(
         `SELECT COUNT(*) as count FROM messages
@@ -146,6 +169,7 @@ export class MessageLog {
     pageSize: number,
     offset: number,
   ): ChatMessage[] {
+    this.ensureActiveDatabase();
     const rows = this.db
       .prepare(
         `SELECT * FROM messages WHERE platform = ? AND user_id = ? ORDER BY timestamp ASC LIMIT ? OFFSET ?`,
@@ -169,6 +193,7 @@ export class MessageLog {
   }
 
   countForUser(platform: string, userId: string): number {
+    this.ensureActiveDatabase();
     const result = this.db
       .prepare(`SELECT COUNT(*) as count FROM messages WHERE platform = ? AND user_id = ?`)
       .get(platform, userId) as { count: number } | null;
@@ -177,6 +202,7 @@ export class MessageLog {
 
   // All unique streams, most-recent first, with per-stream stats.
   getStreams(): StreamSummary[] {
+    this.ensureActiveDatabase();
     const rows = this.db
       .prepare(`
       SELECT
@@ -204,6 +230,7 @@ export class MessageLog {
 
   // Messages for one stream, newest-first with offset (for lazy-load prepend).
   getForStream(streamId: string, limit: number, offset: number): ChatMessage[] {
+    this.ensureActiveDatabase();
     const rows = this.db
       .prepare(
         `SELECT * FROM messages WHERE stream_id = ? ORDER BY timestamp DESC LIMIT ? OFFSET ?`,
@@ -213,6 +240,7 @@ export class MessageLog {
   }
 
   countForStream(streamId: string): number {
+    this.ensureActiveDatabase();
     const result = this.db
       .prepare(`SELECT COUNT(*) as count FROM messages WHERE stream_id = ?`)
       .get(streamId) as { count: number } | null;
@@ -224,6 +252,7 @@ export class MessageLog {
     query: string,
     opts?: { username?: string; platform?: string; limit?: number },
   ): ChatMessage[] {
+    this.ensureActiveDatabase();
     const limit = opts?.limit ?? 200;
     const conditions: string[] = [];
     const params: string[] = [];

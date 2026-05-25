@@ -61,6 +61,8 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
         * Plain messages (input not starting with `/`) show a target preview `all|youtube|twitch|kick > message`; `Tab` cycles between `all` and currently connected providers before sending
         * Slash commands are echoed into the Chat pane before their output so later feedback lines keep a visible source command context
         * After a successful Twitch send, the chat panel also appends a local self-echo incoming line so Twitch matches the visible send/echo behavior of the other providers
+    * Web chat views (`/`, `/unified`, `/sidebyside`)
+        * Twitch messages render FrankerFaceZ emotes inline across the WebUI chat surfaces using a cached `/api/twitch/ffz-emotes` lookup keyed by the authenticated Twitch channel login
         * Command parameter autocomplete: after typing a command + space, Tab completes available parameters
             * `/connect ` → `youtube | twitch | kick`
             * `/action ` → public action ids; `/action <id> ` → available `key=` args or enum values
@@ -320,6 +322,7 @@ Mutable settings live in `settings.json`, including `demo`, `chat.*`, `stream.*`
 | GET | `/api/status` | Platform + stream status for all platforms; each platform entry includes `viewerCount: number` and `streamStartTime: string\|null` |
 | GET | `/api/chat/history` | Full chat message history |
 | POST | `/api/chat/send` | Send message: `{ message, platforms? }` |
+| GET | `/api/twitch/ffz-emotes` | Cached FrankerFaceZ emote map for the authenticated Twitch channel used by HTML chat rendering |
 | GET | `/api/stream` | Read persisted stream metadata from runtime settings |
 | POST | `/api/stream` | Update metadata on platforms: `{ platforms?, metadata? }` — also persists to `YASH_DATA_DIR/settings.json`; response includes `{ success, platformResults }` with per-platform warnings/diagnostics |
 | POST | `/api/stream/marker` | Cross-platform marker: `{ platforms?, description?, timestamp? }` |

@@ -859,6 +859,10 @@ export class TwitchProvider implements PlatformProvider {
     return 'twitch';
   }
 
+  getUserLogin(): string | null {
+    return this.userLogin;
+  }
+
   getStatus(): PlatformStatus {
     return {
       authenticated: this.isAuthenticated(),

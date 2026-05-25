@@ -209,6 +209,20 @@ body.yash-sidebyside .msg .text {
   color: #e0e0e0;
 }
 
+body.yash-unified .msg .text,
+body.yash-sidebyside .msg .text {
+  white-space: pre-wrap;
+}
+
+body.yash-unified .emote-inline,
+body.yash-sidebyside .emote-inline {
+  display: inline-block;
+  vertical-align: middle;
+  margin: 0 1px;
+  max-height: 1.6em;
+  width: auto;
+}
+
 body.yash-unified #msgbox,
 body.yash-sidebyside #msgbox {
   background: #1a1a2e;

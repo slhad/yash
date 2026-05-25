@@ -1,9 +1,13 @@
 /** @jsxImportSource react */
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import type { FfzEmoteDefinition } from '../utils/ffz';
 import { ChatDisplay } from './ChatDisplay';
 import { MessageInput } from './MessageInput';
 import { StatusBar } from './StatusBar';
 import { StreamControls, type StreamMetadata } from './StreamControls';
+
+const FFZ_RETRY_INTERVAL_MS = 5_000;
+const FFZ_REFRESH_INTERVAL_MS = 5 * 60_000;
 
 interface DashboardProps {
   platforms: string[];
@@ -94,6 +98,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
   >([]);
   const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>([]);
   const [sendToAll, setSendToAll] = useState(true);
+  const [ffzEmotes, setFfzEmotes] = useState<Record<string, FfzEmoteDefinition>>({});
+  const ffzEmotesRef = useRef<Record<string, FfzEmoteDefinition>>({});
 
   useEffect(() => {
     // Initialize status objects with the correct types for each state
@@ -165,6 +171,42 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
     return () => clearInterval(interval);
   }, [getChatMessages]);
+
+  useEffect(() => {
+    ffzEmotesRef.current = ffzEmotes;
+  }, [ffzEmotes]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadFfzEmotes = async () => {
+      try {
+        const res = await fetch('/api/twitch/ffz-emotes');
+        if (!res.ok) return;
+        const data = (await res.json()) as {
+          emotes?: Record<string, FfzEmoteDefinition>;
+        };
+        if (!cancelled) {
+          setFfzEmotes(data.emotes ?? {});
+        }
+      } catch {}
+    };
+
+    void loadFfzEmotes();
+    const retryInterval = setInterval(() => {
+      if (Object.keys(ffzEmotesRef.current).length > 0) return;
+      void loadFfzEmotes();
+    }, FFZ_RETRY_INTERVAL_MS);
+    const refreshInterval = setInterval(() => {
+      void loadFfzEmotes();
+    }, FFZ_REFRESH_INTERVAL_MS);
+
+    return () => {
+      cancelled = true;
+      clearInterval(retryInterval);
+      clearInterval(refreshInterval);
+    };
+  }, []);
 
   const handleUpdateMetadata = async (metadata: StreamMetadata) => {
     await onUpdateMetadata(selectedPlatforms, metadata);
@@ -309,7 +351,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
             <div style={{ marginBottom: '8px' }}>
               <span style={{ fontWeight: 'bold' }}>Unified Chat</span>
             </div>
-            <ChatDisplay messages={messages} showTimestamps={showChatTimestamps} />
+            <ChatDisplay
+              messages={messages}
+              ffzEmotes={ffzEmotes}
+              showTimestamps={showChatTimestamps}
+            />
           </div>
 
           <MessageInput

@@ -1170,11 +1170,9 @@ describe('YouTubeProvider — markers', () => {
     ]);
 
     expect(result.addedMarkers).toHaveLength(1);
-    expect((await p.getMarkers()).map((marker: { description: string }) => marker.description)).toEqual([
-      'Start',
-      'Middle',
-      'Late',
-    ]);
+    expect(
+      (await p.getMarkers()).map((marker: { description: string }) => marker.description),
+    ).toEqual(['Start', 'Middle', 'Late']);
     expect(p.getPersistedMarkerSelectionId(result.addedMarkers[0].id)).toBe(2);
   });
 
