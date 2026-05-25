@@ -18,6 +18,24 @@ describe('parseActionArgs', () => {
     expect(errors).toEqual([]);
   });
 
+  test('single-quoted string arg is unwrapped', () => {
+    const schema: Record<string, ActionArgSchema> = {
+      source: { type: 'string', maxLength: 200 },
+    };
+    const { args, errors } = parseActionArgs(["source='[SC] Brio NB'"], schema);
+    expect(args).toEqual({ source: '[SC] Brio NB' });
+    expect(errors).toEqual([]);
+  });
+
+  test('double-quoted string arg is unwrapped', () => {
+    const schema: Record<string, ActionArgSchema> = {
+      source: { type: 'string', maxLength: 200 },
+    };
+    const { args, errors } = parseActionArgs(['source="[SC] Brio NB"'], schema);
+    expect(args).toEqual({ source: '[SC] Brio NB' });
+    expect(errors).toEqual([]);
+  });
+
   // ---- number ----
 
   test('single key=value number arg coerced to number', () => {

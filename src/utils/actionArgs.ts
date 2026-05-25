@@ -1,5 +1,15 @@
 import type { ActionArgSchema, YashActionDefinition } from '../actions/types';
 
+function unquoteString(value: string): string {
+  if (value.length < 2) return value;
+  const first = value[0];
+  const last = value[value.length - 1];
+  if ((first === '"' || first === "'") && first === last) {
+    return value.slice(1, -1);
+  }
+  return value;
+}
+
 export function parseActionArgs(
   tokens: string[],
   schema: Record<string, ActionArgSchema>,
@@ -29,10 +39,7 @@ export function parseActionArgs(
     const value = raw[key] as string;
 
     if (def.type === 'string') {
-      args[key] =
-        value.length >= 2 && value.startsWith('"') && value.endsWith('"')
-          ? value.slice(1, -1)
-          : value;
+      args[key] = unquoteString(value);
     } else if (def.type === 'number') {
       const n = parseFloat(value);
       if (Number.isNaN(n)) {
