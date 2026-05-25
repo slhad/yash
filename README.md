@@ -190,6 +190,14 @@ The `/stream` modal (TUI) and stream form (WebUI) have per-platform category fie
 
 The WebUI chat surfaces at `/`, `/unified`, and `/sidebyside` render Twitch FrankerFaceZ emotes inline when YASH knows the authenticated Twitch channel login. The browser fetches a cached emote map from `GET /api/twitch/ffz-emotes`; persisted chat messages remain plain text, and only the WebUI rendering layer swaps matching Twitch tokens for emote images.
 
+## TUI chat emotes
+
+The TUI uses the same cached FrankerFaceZ map for Twitch messages, but keeps substitution as a render-time concern so persisted chat history stays plain text. When the active terminal supports Kitty-style Unicode image placeholders, YASH swaps matching Twitch tokens inline in the main Chat pane and the chatter/history modal message rows; verified on Ghostty through tmux with `allow-passthrough on` or `allow-passthrough all`. On terminals without that support, YASH leaves the original token text visible instead of breaking layout.
+
+You can scale TUI emotes with `tui.emotes.scale` in `settings.json` or through `/settings set tui.emotes.scale <percent>`. `100` keeps the default size, `150` makes them larger, and the live TUI reuploads the inline images immediately after the setting changes.
+
+If you tried `tui.emotes.scale` before the sizing fix on this branch, revisit your saved value. Visible growth now happens in terminal cell spans, so you may want a larger setting such as `200` or `400` for a more obvious change.
+
 ## PR proof uploads
 
 GitHub only renders inline PR videos reliably when the body contains a `https://github.com/user-attachments/assets/...` URL. Release asset URLs from `gh release upload` remain useful as downloadable artifacts, but GitHub usually treats them as plain links instead of rendering embedded video blocks.

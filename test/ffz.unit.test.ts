@@ -77,4 +77,39 @@ describe('ffz utils', () => {
       { type: 'text', content: 'ok' },
     ]);
   });
+
+  test('parses a shared Twitch and FFZ emote map while preserving exact-token matching', () => {
+    const parts = parseMessageWithFfzEmotes('Kappa Keepo OMEGALUL Kappa! notKappa', {
+      Kappa: { name: 'Kappa', url: 'https://static-cdn.jtvnw.net/emoticons/v2/25/default/dark/2.0' },
+      Keepo: {
+        name: 'Keepo',
+        url: 'https://static-cdn.jtvnw.net/emoticons/v2/1902/default/dark/2.0',
+      },
+      OMEGALUL: { name: 'OMEGALUL', url: 'https://cdn.ffz.global/omega-2' },
+    });
+
+    expect(parts).toEqual([
+      {
+        type: 'emote',
+        emote: { name: 'Kappa', url: 'https://static-cdn.jtvnw.net/emoticons/v2/25/default/dark/2.0' },
+      },
+      { type: 'text', content: ' ' },
+      {
+        type: 'emote',
+        emote: {
+          name: 'Keepo',
+          url: 'https://static-cdn.jtvnw.net/emoticons/v2/1902/default/dark/2.0',
+        },
+      },
+      { type: 'text', content: ' ' },
+      {
+        type: 'emote',
+        emote: { name: 'OMEGALUL', url: 'https://cdn.ffz.global/omega-2' },
+      },
+      { type: 'text', content: ' ' },
+      { type: 'text', content: 'Kappa!' },
+      { type: 'text', content: ' ' },
+      { type: 'text', content: 'notKappa' },
+    ]);
+  });
 });

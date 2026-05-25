@@ -63,6 +63,10 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
         * After a successful Twitch send, the chat panel also appends a local self-echo incoming line so Twitch matches the visible send/echo behavior of the other providers
     * Web chat views (`/`, `/unified`, `/sidebyside`)
         * Twitch messages render FrankerFaceZ emotes inline across the WebUI chat surfaces using a cached `/api/twitch/ffz-emotes` lookup keyed by the authenticated Twitch channel login
+    * TUI chat rendering
+        * Twitch messages render FrankerFaceZ emotes inline in the Chat pane and chatter/history modal message rows when the active terminal supports Kitty-style Unicode image placeholders (for example Ghostty through tmux with `allow-passthrough on` or `allow-passthrough all`); otherwise the original token text remains visible
+        * `tui.emotes.scale` controls the TUI inline emote size and applies immediately when changed through `/settings`; users migrating from the early broken sizing behavior may need to increase existing saved values (for example `200` or `400`) to get the desired visible size
+        * Persisted chat messages remain plain text; FFZ substitution is render-time only
         * Command parameter autocomplete: after typing a command + space, Tab completes available parameters
             * `/connect ` → `youtube | twitch | kick`
             * `/action ` → public action ids; `/action <id> ` → available `key=` args or enum values
@@ -328,7 +332,7 @@ Mutable settings live in `settings.json`, including `demo`, `chat.*`, `stream.*`
 | GET | `/api/status` | Platform + stream status for all platforms; each platform entry includes `viewerCount: number` and `streamStartTime: string\|null` |
 | GET | `/api/chat/history` | Full chat message history |
 | POST | `/api/chat/send` | Send message: `{ message, platforms? }` |
-| GET | `/api/twitch/ffz-emotes` | Cached FrankerFaceZ emote map for the authenticated Twitch channel used by HTML chat rendering |
+| GET | `/api/twitch/ffz-emotes` | Cached FrankerFaceZ emote map for the authenticated Twitch channel used by WebUI and TUI render-time chat substitution |
 | GET | `/api/stream` | Read persisted stream metadata from runtime settings |
 | POST | `/api/stream` | Update metadata on platforms: `{ platforms?, metadata? }` — also persists to `YASH_DATA_DIR/settings.json`; response includes `{ success, platformResults }` with per-platform warnings/diagnostics |
 | POST | `/api/stream/marker` | Cross-platform marker: `{ platforms?, description?, timestamp? }` |

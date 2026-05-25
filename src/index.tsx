@@ -43,6 +43,7 @@ import {
   getChatterSessionStats,
 } from './utils/chatterInfoSession';
 import { getDataDir, isDemoMode, saveConfig } from './utils/config';
+import { getFfzEmotePayload, type SharedTwitchEmoteDefinition } from './utils/ffz-fetch';
 import { renderTuiHelpLines } from './utils/help';
 import { runIpcCommand } from './utils/ipcCommandRunner';
 import logCollector from './utils/logCollector';
@@ -50,6 +51,15 @@ import { defaultLogger } from './utils/logger';
 import { buildTargetedStreamMetadataUpdate } from './utils/streamMetadata';
 import { getAutocomplete, initTuiCommands, setActionRegistry } from './utils/tuiCommands';
 import { installTuiErrorCapture } from './utils/tuiErrorCapture';
+import {
+  buildTuiFfzMessageParts,
+  getTuiFfzColumnSpan,
+  getTuiFfzUploadUrl,
+  isTuiFfzPassthroughEnabled,
+  buildTuiFfzUploadSequences,
+  parsePngDimensions,
+  supportsTuiFfzClientTerm,
+} from './utils/tuiFfz';
 import { type MessageTarget } from './utils/tuiMessageInput';
 import {
   buildTuiSettingsEntries,
@@ -69,6 +79,14 @@ import './actions/chat';
 import './scripts/obs-shutdown';
 
 const settings = settingsStore;
+
+type TwitchProviderEmoteContext = {
+  getUserLogin?: () => string | null;
+  userId?: string | null;
+  apiClient?: { chat?: unknown } | null;
+};
+
+const DEFAULT_TUI_EMOTE_SCALE_PERCENT = 100;
 
 installTuiErrorCapture();
 
@@ -3003,6 +3021,9 @@ const commandHandlers: Record<
         const res = await provider.authenticate();
         if (res?.success) {
           emit(`[system] ${platform} authentication succeeded`);
+          if (platform === 'twitch') {
+            void refreshTuiFfzEmotes('twitch-authentication');
+          }
           updateUI(lastMessages);
           if (platform === 'youtube' && !youtube.getStreamKey()) {
             openYouTubeStreamPickerModal();
@@ -3171,11 +3192,16 @@ const commandHandlers: Record<
       const value = parseSettingsValue(rawValue);
       const changedKeys = await persistSettingEntries([{ key, value }]);
       if (changedKeys.length === 0) emit('[settings] No changes.');
-      else emit(`[settings] set ${key} = ${JSON.stringify(value)}`);
+      else {
+        emit(`[settings] set ${key} = ${JSON.stringify(value)}`);
+        if (changedKeys.includes('tui.emotes.scale')) {
+          void reloadTuiFfzEmotes('tui-emote-scale-command');
+        }
+      }
     } else {
       emit('[system] Usage: /settings | /settings get <key> | /settings set <key> <json-value>');
       emit(
-        '[system] Common keys: stream.title, stream.description, chat.maxHistorySize, demo, title.visible, logs.visible, logs.height, logs.tail, viewers.visible, viewers.mode, messages.position, chat.timestamps.visible, events.visible, events.tail, events.width, platforms.<provider>.showViewers, platforms.youtube.setup.*',
+        '[system] Common keys: stream.title, stream.description, chat.maxHistorySize, demo, title.visible, logs.visible, logs.height, logs.tail, viewers.visible, viewers.mode, messages.position, chat.timestamps.visible, tui.emotes.scale, events.visible, events.tail, events.width, platforms.<provider>.showViewers, platforms.youtube.setup.*',
       );
     }
   },
@@ -3460,6 +3486,12 @@ function openSettingsModal(): void {
     viewersMode: String(settings.get('viewers.mode', 'per-platform') ?? 'per-platform'),
     messagesPosition: String(settings.get('messages.position', 'bottom') ?? 'bottom'),
     chatTimestampsVisible: boolSetting(settings.get('chat.timestamps.visible', true), true),
+    tuiEmotesScale: String(
+      numSetting(
+        settings.get('tui.emotes.scale', DEFAULT_TUI_EMOTE_SCALE_PERCENT),
+        DEFAULT_TUI_EMOTE_SCALE_PERCENT,
+      ),
+    ),
     chatMaxHistorySize: String(numSetting(settings.get('chat.maxHistorySize', 1000), 1000)),
     eventsVisible: boolSetting(settings.get('events.visible', true), true),
     eventsTail: String(numSetting(settings.get('events.tail', 15), 15)),
@@ -3538,6 +3570,15 @@ function openSettingsModal(): void {
   const viewersModeRow = new TextRenderable(renderer, { content: '', fg: 'white' });
   const messagesPositionRow = new TextRenderable(renderer, { content: '', fg: 'white' });
   const chatTimestampsRow = new TextRenderable(renderer, { content: '', fg: 'white' });
+  const tuiEmotesScaleLabel = makeLabel(
+    '  tui.emotes.scale: percent size for inline TUI emotes (100 = normal, 150 = larger)',
+  );
+  const tuiEmotesScaleInput = new InputRenderable(renderer, {
+    placeholder: '100',
+    width: '100%',
+  });
+  const tuiEmotesScaleInputRow = createIndentedInputRow(renderer, tuiEmotesScaleInput, '    ');
+  tuiEmotesScaleInput.value = draft.tuiEmotesScale;
   const historySizeLabel = makeLabel('  chat.maxHistorySize: keep the last N chat lines in memory');
   const historySizeInput = new InputRenderable(renderer, {
     placeholder: '1000',
@@ -3616,6 +3657,8 @@ function openSettingsModal(): void {
   contentBox.add(viewersModeRow);
   contentBox.add(messagesPositionRow);
   contentBox.add(chatTimestampsRow);
+  contentBox.add(tuiEmotesScaleLabel);
+  contentBox.add(tuiEmotesScaleInputRow);
   contentBox.add(historySizeLabel);
   contentBox.add(historySizeInputRow);
   contentBox.add(sidebarHeading);
@@ -3665,7 +3708,7 @@ function openSettingsModal(): void {
   // Approximate scroll-line target for each focusable item.
   // contentBox has gap:1, so each child is 2 lines wide (content + gap).
   // Non-focusable items (headings, labels) each consume 2 lines and shift subsequent offsets.
-  // items: [demo, title, viewers, viewersMode, msgPos, chatTs, histSize,
+  // items: [demo, title, viewers, viewersMode, msgPos, chatTs, emoteScale, histSize,
   //         eventsVis, eventsTail, eventsW, logsVis, logsH, logsT,
   //         ytV, twitchV, kickV, actVis, actMode, actTimeout]
   const FOCUS_SCROLL_TARGETS = [
@@ -3675,19 +3718,20 @@ function openSettingsModal(): void {
     8,
     10,
     12, // Display section (displayHeading=0, then items at 2..12)
-    16, // historySizeInput (historySizeLabel at 14)
-    20, // eventsVisible (sidebarHeading at 18)
-    24,
-    26,
-    28, // eventsTailInput, eventsWidth, logsVisible (eventsTailLabel at 22)
-    32,
-    36, // logsHeightInput, logsTailInput (labels at 30, 34)
-    40,
-    42,
-    44, // per-platform viewers (providerHeading at 38)
-    48,
-    50,
-    54, // activity section (activityHeading at 46, label at 52)
+    16, // tuiEmotesScaleInput (label at 14)
+    20, // historySizeInput (label at 18)
+    24, // eventsVisible (sidebarHeading at 22)
+    28,
+    30,
+    32, // eventsTailInput, eventsWidth, logsVisible (eventsTailLabel at 26)
+    36,
+    40, // logsHeightInput, logsTailInput (labels at 34, 38)
+    44,
+    46,
+    48, // per-platform viewers (providerHeading at 42)
+    52,
+    54,
+    58, // activity section (activityHeading at 50, label at 56)
   ] as const;
 
   let settingsScrollLine = 0;
@@ -3792,6 +3836,7 @@ function openSettingsModal(): void {
         draft.chatTimestampsVisible = !draft.chatTimestampsVisible;
       },
     },
+    { kind: 'input', node: tuiEmotesScaleInput },
     { kind: 'input', node: historySizeInput },
     {
       kind: 'toggle',
@@ -3944,6 +3989,7 @@ function openSettingsModal(): void {
   async function saveAndClose(): Promise<void> {
     const result = validateTuiSettingsDraft({
       ...draft,
+      tuiEmotesScale: tuiEmotesScaleInput.value,
       chatMaxHistorySize: historySizeInput.value,
       eventsTail: eventsTailInput.value,
       logsHeight: logsHeightInput.value,
@@ -3975,6 +4021,9 @@ function openSettingsModal(): void {
         if (changedKeys.includes('chat.timestamps.visible')) {
           lastMessages.length = 0;
           for (const raw of lastRawMessages) lastMessages.push(transformMessage(raw));
+        }
+        if (changedKeys.includes('tui.emotes.scale')) {
+          void reloadTuiFfzEmotes('tui-emote-scale-change');
         }
       }
     } catch (err) {
@@ -4331,7 +4380,16 @@ function openChatterInfoModal(msg: ChatMessage): void {
   function makeMessageRow(m: ChatMessage): BoxRenderable {
     const row = new BoxRenderable(renderer, { flexDirection: 'row' });
     row.add(new TextRenderable(renderer, { content: fmtTimestamp(m.timestamp), fg: '#888888' }));
-    row.add(new TextRenderable(renderer, { content: m.message, fg: 'white' }));
+    for (const part of buildTuiFfzMessageParts(
+      m.platform,
+      m.message,
+      'white',
+      tuiFfzEmotes,
+      tuiFfzImageIdsByName,
+      getTuiEmoteColumns(),
+    )) {
+      row.add(new TextRenderable(renderer, { content: part.content, fg: part.fg }));
+    }
     return row;
   }
 
@@ -4353,13 +4411,31 @@ function openChatterInfoModal(msg: ChatMessage): void {
           fg: m.color ?? platColor(m.platform),
         }),
       );
-      row.add(new TextRenderable(renderer, { content: m.message, fg: 'white' }));
+      for (const part of buildTuiFfzMessageParts(
+        m.platform,
+        m.message,
+        'white',
+        tuiFfzEmotes,
+        tuiFfzImageIdsByName,
+        getTuiEmoteColumns(),
+      )) {
+        row.add(new TextRenderable(renderer, { content: part.content, fg: part.fg }));
+      }
     } else {
       row.add(
         new TextRenderable(renderer, { content: `[${m.platform}] `, fg: platColor(m.platform) }),
       );
       row.add(new TextRenderable(renderer, { content: `${m.username}: `, fg: '#888888' }));
-      row.add(new TextRenderable(renderer, { content: m.message, fg: '#aaaaaa' }));
+      for (const part of buildTuiFfzMessageParts(
+        m.platform,
+        m.message,
+        '#aaaaaa',
+        tuiFfzEmotes,
+        tuiFfzImageIdsByName,
+        getTuiEmoteColumns(),
+      )) {
+        row.add(new TextRenderable(renderer, { content: part.content, fg: part.fg }));
+      }
     }
     return row;
   }
@@ -4917,7 +4993,16 @@ function openHistoryModal(opts?: { query?: string }): void {
             fg: m.color ?? platColor(m.platform),
           }),
         );
-        row.add(new TextRenderable(renderer, { content: m.message, fg: 'white' }));
+        for (const part of buildTuiFfzMessageParts(
+          m.platform,
+          m.message,
+          'white',
+          tuiFfzEmotes,
+          tuiFfzImageIdsByName,
+          getTuiEmoteColumns(),
+        )) {
+          row.add(new TextRenderable(renderer, { content: part.content, fg: part.fg }));
+        }
         contentScroll.add(row, idx++);
       }
 
@@ -4970,7 +5055,16 @@ function openHistoryModal(opts?: { query?: string }): void {
           fg: m.color ?? platColor(m.platform),
         }),
       );
-      row.add(new TextRenderable(renderer, { content: m.message, fg: 'white' }));
+      for (const part of buildTuiFfzMessageParts(
+        m.platform,
+        m.message,
+        'white',
+        tuiFfzEmotes,
+        tuiFfzImageIdsByName,
+        getTuiEmoteColumns(),
+      )) {
+        row.add(new TextRenderable(renderer, { content: part.content, fg: part.fg }));
+      }
       contentScroll.add(row);
     }
 
@@ -5139,11 +5233,165 @@ let browseModeActive = false;
 let browseSelectedIdx: number | null = null; // index into lastMessages
 const lastRawMessages: ChatMessage[] = []; // parallel to lastMessages (only chat platform messages)
 
+const tuiFfzEmotes: Record<string, SharedTwitchEmoteDefinition> = {};
+const tuiFfzImageIdsByName: Record<string, number> = {};
+const tuiFfzImageIdsByUrl = new Map<string, number>();
+let nextTuiFfzImageId = 1;
+let tuiFfzRefreshPromise: Promise<void> | null = null;
+let tuiFfzSupported: boolean | null = null;
+let tuiFfzLastChannel: string | null = null;
+
 function platformColor(platform: string): string {
   if (platform === 'youtube') return 'red';
   if (platform === 'twitch') return '#9146FF';
   if (platform === 'kick') return 'green';
   return 'white';
+}
+
+function getTuiFfzPassthroughMode(): 'none' | 'tmux' {
+  return process.env.TMUX ? 'tmux' : 'none';
+}
+
+function getTuiEmoteScalePercent(): number {
+  const raw = Number(settings.get('tui.emotes.scale', DEFAULT_TUI_EMOTE_SCALE_PERCENT));
+  return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_TUI_EMOTE_SCALE_PERCENT;
+}
+
+function getTuiEmoteColumns(): number {
+  return getTuiFfzColumnSpan(getTuiEmoteScalePercent());
+}
+
+function detectTuiFfzSupport(): boolean {
+  if (tuiFfzSupported !== null) return tuiFfzSupported;
+
+  const termName = (() => {
+    if (!process.env.TMUX) return process.env.TERM ?? null;
+    try {
+      const proc = Bun.spawnSync(['tmux', 'display-message', '-p', '#{client_termname}']);
+      const name = proc.stdout.toString().trim();
+      return name.length > 0 ? name : null;
+    } catch {
+      return null;
+    }
+  })();
+
+  const passthroughEnabled = (() => {
+    if (!process.env.TMUX) return true;
+    try {
+      const proc = Bun.spawnSync(['tmux', 'show-options', '-gsv', 'allow-passthrough']);
+      return isTuiFfzPassthroughEnabled(proc.stdout.toString());
+    } catch {
+      return false;
+    }
+  })();
+
+  tuiFfzSupported = passthroughEnabled && supportsTuiFfzClientTerm(termName);
+  return tuiFfzSupported;
+}
+
+function clearTuiFfzState(): void {
+  tuiFfzLastChannel = null;
+  for (const key of Object.keys(tuiFfzEmotes)) delete tuiFfzEmotes[key];
+  for (const key of Object.keys(tuiFfzImageIdsByName)) delete tuiFfzImageIdsByName[key];
+  tuiFfzImageIdsByUrl.clear();
+}
+
+async function uploadTuiFfzImage(
+  emote: SharedTwitchEmoteDefinition,
+  imageId: number,
+): Promise<void> {
+  const uploadUrl = getTuiFfzUploadUrl(emote);
+  const response = await fetch(uploadUrl);
+  if (!response.ok) {
+    throw new Error(`FFZ image fetch returned ${response.status} for ${emote.name}`);
+  }
+
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  const parsed = parsePngDimensions(bytes);
+  const width = emote.width ?? parsed.width;
+  const height = emote.height ?? parsed.height;
+
+  for (const sequence of buildTuiFfzUploadSequences({
+    imageId,
+    pngBytes: bytes,
+    width,
+    height,
+    columns: getTuiEmoteColumns(),
+    passthrough: getTuiFfzPassthroughMode(),
+  })) {
+    process.stdout.write(sequence);
+  }
+}
+
+function rerenderRawChatLines(): void {
+  let changed = false;
+  for (let i = 0; i < lastMessages.length; i++) {
+    const line = lastMessages[i];
+    if (typeof line === 'string' || !line?.rawMsg) continue;
+    lastMessages[i] = transformMessage(line.rawMsg);
+    changed = true;
+  }
+  if (changed && uiNodes) updateUI(lastMessages);
+}
+
+async function refreshTuiFfzEmotes(reason: string): Promise<void> {
+  if (!detectTuiFfzSupport()) return;
+  if (tuiFfzRefreshPromise) return tuiFfzRefreshPromise;
+
+  const twitchWithEmoteContext = twitch as unknown as TwitchProviderEmoteContext;
+  const channel =
+    typeof twitchWithEmoteContext.getUserLogin === 'function'
+      ? twitchWithEmoteContext.getUserLogin()
+      : null;
+
+  if (!channel) {
+    clearTuiFfzState();
+    return;
+  }
+
+  tuiFfzRefreshPromise = (async () => {
+    try {
+      const payload = await getFfzEmotePayload(channel, {
+        apiClient: twitchWithEmoteContext.apiClient ?? null,
+        userId: twitchWithEmoteContext.userId ?? null,
+      });
+      if (payload.channel !== channel) return;
+      if (payload.channel !== tuiFfzLastChannel) {
+        clearTuiFfzState();
+      }
+      tuiFfzLastChannel = payload.channel;
+
+      for (const [name, emote] of Object.entries(payload.emotes)) {
+        tuiFfzEmotes[name] = emote;
+        const cacheKey = emote.source === 'twitch' ? emote.staticUrl ?? emote.url : emote.url;
+        try {
+          let imageId = tuiFfzImageIdsByUrl.get(cacheKey);
+          if (!imageId) {
+            imageId = nextTuiFfzImageId++;
+            await uploadTuiFfzImage(emote, imageId);
+            tuiFfzImageIdsByUrl.set(cacheKey, imageId);
+          }
+          tuiFfzImageIdsByName[name] = imageId;
+        } catch (error) {
+          delete tuiFfzImageIdsByName[name];
+          defaultLogger.warn(`[FFZ:TUI] Skipping ${name}: ${String(error)}`);
+        }
+      }
+
+      rerenderRawChatLines();
+    } catch (error) {
+      defaultLogger.warn(`[FFZ:TUI] ${reason}: ${String(error)}`);
+    } finally {
+      tuiFfzRefreshPromise = null;
+    }
+  })();
+
+  return tuiFfzRefreshPromise;
+}
+
+async function reloadTuiFfzEmotes(reason: string): Promise<void> {
+  clearTuiFfzState();
+  await refreshTuiFfzEmotes(reason);
 }
 
 function transformMessage(msg: ChatMessage): ChatLine {
@@ -5158,18 +5406,23 @@ function transformMessage(msg: ChatMessage): ChatLine {
     const ss = String(d.getSeconds()).padStart(2, '0');
     tsStr = ` ${hh}:${mi}:${ss}`;
   }
-  if (userColor === platColor) {
-    return {
-      content: `[${msg.platform}]${tsStr} ${msg.username}: ${msg.message}`,
-      fg: platColor,
-      rawMsg: msg,
-    };
-  }
+
+  const parts: ChatLinePart[] = [];
+  parts.push({ content: `[${msg.platform}]${tsStr} `, fg: platColor });
+  parts.push({ content: `${msg.username}: `, fg: userColor });
+  parts.push(
+    ...buildTuiFfzMessageParts(
+      msg.platform,
+      msg.message,
+      userColor === platColor ? platColor : 'white',
+      tuiFfzEmotes,
+      tuiFfzImageIdsByName,
+      getTuiEmoteColumns(),
+    ),
+  );
+
   return {
-    parts: [
-      { content: `[${msg.platform}]${tsStr} `, fg: platColor },
-      { content: `${msg.username}: ${msg.message}`, fg: userColor },
-    ],
+    parts,
     rawMsg: msg,
   };
 }
@@ -5571,6 +5824,9 @@ async function main() {
     lastMessages.push(transformMessage(msg));
     lastRawMessages.push(msg);
     activeChatterInfoModal?.refreshForMessage(msg);
+    if (msg.platform === 'twitch' && Object.keys(tuiFfzEmotes).length === 0) {
+      void refreshTuiFfzEmotes('incoming-twitch-message');
+    }
     if (uiNodes) updateUI(lastMessages);
   });
 
@@ -5654,6 +5910,7 @@ async function main() {
 
   // Build UI tree once — no flicker on periodic updates
   uiNodes = initUI(renderer, lastMessages);
+  void refreshTuiFfzEmotes('startup');
 
   // Focus input and wire ENTER + INPUT handlers once
   ensureMainInputFocus();
@@ -5665,7 +5922,13 @@ async function main() {
   uiNodes.inputEl.on(InputRenderableEvents.ENTER, async () => {
     // Browse mode: Enter opens chatter info for the selected message
     if (browseModeActive && browseSelectedIdx !== null) {
-      const rawMsg = lastRawMessages[browseSelectedIdx];
+      const selectedLine = lastMessages[browseSelectedIdx];
+      const rawMsg =
+        typeof selectedLine === 'string'
+          ? undefined
+          : 'rawMsg' in selectedLine
+            ? selectedLine.rawMsg
+            : undefined;
       if (rawMsg !== undefined) {
         openChatterInfoModal(rawMsg);
       }

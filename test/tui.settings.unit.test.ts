@@ -10,6 +10,7 @@ describe('validateTuiSettingsDraft', () => {
       viewersMode: 'both',
       messagesPosition: 'top',
       chatTimestampsVisible: true,
+      tuiEmotesScale: '150',
       chatMaxHistorySize: '1500',
       eventsVisible: true,
       eventsTail: '30',
@@ -33,6 +34,7 @@ describe('validateTuiSettingsDraft', () => {
       viewersMode: 'both',
       messagesPosition: 'top',
       chatTimestampsVisible: true,
+      tuiEmotesScale: 150,
       chatMaxHistorySize: 1500,
       eventsVisible: true,
       eventsTail: 30,
@@ -57,6 +59,7 @@ describe('validateTuiSettingsDraft', () => {
       viewersMode: 'sideways',
       messagesPosition: 'middle',
       chatTimestampsVisible: false,
+      tuiEmotesScale: '0',
       chatMaxHistorySize: '0',
       eventsVisible: false,
       eventsTail: '-2',
@@ -73,6 +76,7 @@ describe('validateTuiSettingsDraft', () => {
     });
 
     expect(result.values).toBeNull();
+    expect(result.errors).toContain('tui.emotes.scale must be a positive integer.');
     expect(result.errors).toContain('chat.maxHistorySize must be a positive integer.');
     expect(result.errors).toContain('events.tail must be a positive integer.');
     expect(result.errors).toContain('logs.height must be a positive integer.');
@@ -92,6 +96,7 @@ describe('validateTuiSettingsDraft', () => {
       viewersMode: 'both',
       messagesPosition: 'top',
       chatTimestampsVisible: false,
+      tuiEmotesScale: '100',
       chatMaxHistorySize: '100',
       eventsVisible: false,
       eventsTail: '10',
@@ -119,6 +124,7 @@ describe('validateTuiSettingsDraft', () => {
       viewersMode: 'both',
       messagesPosition: 'top',
       chatTimestampsVisible: false,
+      tuiEmotesScale: '100',
       chatMaxHistorySize: '100',
       eventsVisible: false,
       eventsTail: '10',
@@ -146,6 +152,7 @@ describe('validateTuiSettingsDraft', () => {
       viewersMode: 'both',
       messagesPosition: 'top',
       chatTimestampsVisible: false,
+      tuiEmotesScale: '100',
       chatMaxHistorySize: '100',
       eventsVisible: false,
       eventsTail: '10',
@@ -175,6 +182,7 @@ describe('validateTuiSettingsDraft', () => {
       viewersMode: 'both',
       messagesPosition: 'top',
       chatTimestampsVisible: false,
+      tuiEmotesScale: '100',
       chatMaxHistorySize: '100',
       eventsVisible: false,
       eventsTail: '10',
@@ -205,6 +213,7 @@ describe('buildTuiSettingsEntries', () => {
       viewersMode: 'per-platform',
       messagesPosition: 'bottom',
       chatTimestampsVisible: true,
+      tuiEmotesScale: 125,
       chatMaxHistorySize: 1000,
       eventsVisible: true,
       eventsTail: 15,
@@ -221,11 +230,12 @@ describe('buildTuiSettingsEntries', () => {
     });
 
     expect(entries).toContainEqual({ key: 'messages.position', value: 'bottom' });
+    expect(entries).toContainEqual({ key: 'tui.emotes.scale', value: 125 });
     expect(entries).toContainEqual({ key: 'logs.tail', value: 20 });
     expect(entries).toContainEqual({ key: 'platforms.kick.showViewers', value: false });
     expect(entries).toContainEqual({ key: 'activity.visible', value: true });
     expect(entries).toContainEqual({ key: 'activity.mode', value: 'permanent' });
     expect(entries).toContainEqual({ key: 'activity.timeout', value: 10 });
-    expect(entries).toHaveLength(19);
+    expect(entries).toHaveLength(20);
   });
 });

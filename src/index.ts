@@ -24,11 +24,15 @@ import {
 } from './services';
 import './actions/markers';
 import { isDemoMode, resolvePort } from './utils/config';
-import { buildFfzEmoteMap, type FfzGlobalResponse, type FfzRoomResponse } from './utils/ffz';
+import { getFfzEmotePayload, type TwitchEmoteFetchContext } from './utils/ffz-fetch';
 import { getHelpCommands } from './utils/help';
 import { defaultLogger } from './utils/logger';
 import { apiMetricsHandler, prometheusMetricsHandler } from './utils/metricsHandlers';
 import { buildStreamMarkerPayload } from './utils/streamMarkerRoute';
+
+type TwitchProviderEmoteContext = TwitchEmoteFetchContext & {
+  getUserLogin?: () => string | null;
+};
 
 export {
   authService,
@@ -56,63 +60,6 @@ function applySettingSideEffects(key: string, value: unknown): void {
   if (Number.isFinite(parsed) && parsed > 0) {
     chatService.setMaxHistorySize(parsed);
   }
-}
-
-type FfzEmoteApiPayload = {
-  channel: string | null;
-  emotes: ReturnType<typeof buildFfzEmoteMap>;
-};
-
-const FFZ_CACHE_TTL_MS = 5 * 60_000;
-let ffzEmoteCache: {
-  channel: string | null;
-  expiresAt: number;
-  payload: FfzEmoteApiPayload;
-} | null = null;
-
-async function fetchJsonOrNull(url: string): Promise<unknown | null> {
-  try {
-    const res = await fetch(url);
-    if (res.status === 404) return null;
-    if (!res.ok) {
-      throw new Error(`${url} returned ${res.status}`);
-    }
-    return await res.json();
-  } catch (error) {
-    defaultLogger.warn(`[FFZ] Failed to fetch ${url}: ${String(error)}`);
-    return null;
-  }
-}
-
-async function getFfzEmotePayload(channel: string | null): Promise<FfzEmoteApiPayload> {
-  if (!channel) {
-    return { channel: null, emotes: {} };
-  }
-
-  if (ffzEmoteCache && ffzEmoteCache.channel === channel && ffzEmoteCache.expiresAt > Date.now()) {
-    return ffzEmoteCache.payload;
-  }
-
-  const [globalData, roomData] = await Promise.all([
-    fetchJsonOrNull('https://api.frankerfacez.com/v1/set/global'),
-    fetchJsonOrNull(`https://api.frankerfacez.com/v1/room/${encodeURIComponent(channel)}`),
-  ]);
-
-  const payload = {
-    channel,
-    emotes: buildFfzEmoteMap(
-      globalData as FfzGlobalResponse | null,
-      roomData as FfzRoomResponse | null,
-    ),
-  };
-
-  ffzEmoteCache = {
-    channel,
-    expiresAt: Date.now() + FFZ_CACHE_TTL_MS,
-    payload,
-  };
-
-  return payload;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -168,14 +115,15 @@ Bun.serve({
     },
     '/api/twitch/ffz-emotes': {
       GET: async () => {
-        const twitchWithUserLogin = twitch as typeof twitch & {
-          getUserLogin?: () => string | null;
-        };
+        const twitchWithEmoteContext = twitch as unknown as TwitchProviderEmoteContext;
         const channel =
-          typeof twitchWithUserLogin.getUserLogin === 'function'
-            ? twitchWithUserLogin.getUserLogin()
+          typeof twitchWithEmoteContext.getUserLogin === 'function'
+            ? twitchWithEmoteContext.getUserLogin()
             : null;
-        const payload = await getFfzEmotePayload(channel);
+        const payload = await getFfzEmotePayload(channel, {
+          apiClient: twitchWithEmoteContext.apiClient ?? null,
+          userId: twitchWithEmoteContext.userId ?? null,
+        });
         return new Response(JSON.stringify(payload), {
           headers: { 'Content-Type': 'application/json' },
         });

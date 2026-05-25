@@ -24,6 +24,7 @@ const ALL_SETTINGS_KEYS = [
   'viewers.mode',
   'messages.position',
   'chat.timestamps.visible',
+  'tui.emotes.scale',
   'events.visible',
   'events.tail',
   'events.width',
@@ -169,6 +170,10 @@ describe('getWebAutocomplete — /settings', () => {
     expect(result).toBe('chat.maxHistorySize  chat.timestamps.visible');
   });
 
+  test('/settings get tui → only keys starting with "tui"', () => {
+    expect(getWebAutocomplete('/settings get tui')).toBe('tui.emotes.scale');
+  });
+
   test('/settings get nonexistent_prefix → null', () => {
     expect(getWebAutocomplete('/settings get nonexistent_prefix')).toBeNull();
   });
@@ -177,8 +182,16 @@ describe('getWebAutocomplete — /settings', () => {
     expect(getWebAutocomplete('/settings set ')).toBe(ALL_SETTINGS_KEYS);
   });
 
+  test('/settings set tui → only keys starting with "tui"', () => {
+    expect(getWebAutocomplete('/settings set tui')).toBe('tui.emotes.scale');
+  });
+
   test('/settings set chat.maxHistorySize  (key typed + space) → <value>', () => {
     expect(getWebAutocomplete('/settings set chat.maxHistorySize ')).toBe('<value>');
+  });
+
+  test('/settings set tui.emotes.scale  (key typed + space) → <value>', () => {
+    expect(getWebAutocomplete('/settings set tui.emotes.scale ')).toBe('<value>');
   });
 });
 
