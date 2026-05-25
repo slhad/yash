@@ -7,6 +7,7 @@
 - **Check status / ongoing work**: read both sources and merge:
   1. `cat tmp/ONGOING.md 2>/dev/null || echo "No ongoing work"`
   2. `gh issue list --label "ai-ready,idea" --state open --json number,title,body,url`
+- **Check local ideas / candidate work**: `cat tmp/TO_PICK.md 2>/dev/null || echo "No local ideas to pick"`
 - **Send a command to a running yash instance**: `bun run cmd <command>` (e.g. `bun run cmd /marker Intro`)
   - Requires yash to be running; exits 1 with "yash is not running" if the socket is absent
   - The slash prefix is optional: `bun run cmd marker Intro` is equivalent to `bun run cmd /marker Intro`
@@ -49,6 +50,11 @@ When beginning work in this repository:
 6. **When building or updating TUI modals** (such as `/stream`, `/settings`, or future settings/edit dialogs): keep descriptive labels aligned with other modal rows, indent editable value fields slightly further right than their description to show the relationship clearly, and verify the rendered spacing in the live `yash` tmux session rather than trusting code inspection alone
 7. **ALWAYS Write** ongoing work/parts in `[tmp]/ONGOING.md` to keep track of everything
 8. **Clean `[tmp]/ONGOING.md` immediately after completion is verified** — remove each item as soon as the work is confirmed done by tests, runtime checks, or explicit user verification; do not leave completed items in the file
+9. **When picking new work or ideas**, check `[tmp]/TO_PICK.md` in addition to the GitHub `ai-ready` idea queue
+10. **Use one of these two pick-up paths for items from `[tmp]/TO_PICK.md`**:
+    - If you are grooming or surfacing an idea, confirm it against the codebase, sharpen the problem statement a little, then create the corresponding GitHub issue so it becomes visible in the backlog
+    - If you are directly starting implementation, copy the selected item into `[tmp]/ONGOING.md` and work from there even if no GitHub issue exists yet
+11. **Once work is active, keep it in `[tmp]/ONGOING.md`** even if a matching GitHub issue also exists
 
 ## No Binary Files Policy
 

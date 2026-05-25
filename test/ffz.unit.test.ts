@@ -80,7 +80,10 @@ describe('ffz utils', () => {
 
   test('parses a shared Twitch and FFZ emote map while preserving exact-token matching', () => {
     const parts = parseMessageWithFfzEmotes('Kappa Keepo OMEGALUL Kappa! notKappa', {
-      Kappa: { name: 'Kappa', url: 'https://static-cdn.jtvnw.net/emoticons/v2/25/default/dark/2.0' },
+      Kappa: {
+        name: 'Kappa',
+        url: 'https://static-cdn.jtvnw.net/emoticons/v2/25/default/dark/2.0',
+      },
       Keepo: {
         name: 'Keepo',
         url: 'https://static-cdn.jtvnw.net/emoticons/v2/1902/default/dark/2.0',
@@ -91,7 +94,10 @@ describe('ffz utils', () => {
     expect(parts).toEqual([
       {
         type: 'emote',
-        emote: { name: 'Kappa', url: 'https://static-cdn.jtvnw.net/emoticons/v2/25/default/dark/2.0' },
+        emote: {
+          name: 'Kappa',
+          url: 'https://static-cdn.jtvnw.net/emoticons/v2/25/default/dark/2.0',
+        },
       },
       { type: 'text', content: ' ' },
       {
