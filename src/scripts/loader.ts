@@ -44,6 +44,9 @@ export type ScriptApi = {
     getCurrentScene: () => Promise<string>;
     setCurrentScene: (name: string) => Promise<void>;
     getInputSettings: (inputName: string) => Promise<Record<string, unknown>>;
+    getSceneItemList: (
+      sceneName: string,
+    ) => Promise<Array<{ sceneItemId: number; sourceName: string; sourceType?: string }>>;
     setInputSettings: (inputName: string, inputSettings: Record<string, unknown>) => Promise<void>;
     setInputMute: (inputName: string, muted: boolean) => Promise<void>;
     getSceneItemId: (sceneName: string, sourceName: string) => Promise<number>;
@@ -161,6 +164,7 @@ function createScriptApi(scriptId: string, cleanupFns: (() => void)[], dataDir: 
       getCurrentScene: () => obsService.getCurrentScene(),
       setCurrentScene: (name) => obsService.setCurrentScene(name),
       getInputSettings: (inputName) => obsService.getInputSettings(inputName),
+      getSceneItemList: (sceneName) => obsService.getSceneItemList(sceneName),
       setInputSettings: (inputName, inputSettings) =>
         obsService.setInputSettings(inputName, inputSettings),
       setInputMute: (inputName, muted) => obsService.setInputMute(inputName, muted),
@@ -364,6 +368,7 @@ export type ScriptApi = {
     getCurrentScene: () => Promise<string>;
     setCurrentScene: (name: string) => Promise<void>;
     getInputSettings: (inputName: string) => Promise<Record<string, unknown>>;
+    getSceneItemList: (sceneName: string) => Promise<Array<{ sceneItemId: number; sourceName: string; sourceType?: string }>>;
     setInputSettings: (inputName: string, inputSettings: Record<string, unknown>) => Promise<void>;
     setInputMute: (inputName: string, muted: boolean) => Promise<void>;
     getSceneItemId: (sceneName: string, sourceName: string) => Promise<number>;

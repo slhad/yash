@@ -388,6 +388,13 @@ export class ObsService {
         };
       case 'GetCurrentProgramScene':
         return { currentProgramSceneName: 'Scene 1' };
+      case 'GetSceneItemList':
+        return {
+          sceneItems: [
+            { sceneItemId: 7, sourceName: 'Camera', sourceType: 'OBS_SOURCE_TYPE_INPUT' },
+            { sceneItemId: 8, sourceName: 'Overlay', sourceType: 'OBS_SOURCE_TYPE_INPUT' },
+          ],
+        };
       case 'GetInputSettings':
         return {
           inputName: requestData.inputName ?? 'Input 1',
@@ -635,6 +642,31 @@ export class ObsService {
   async getInputSettings(inputName: string): Promise<Record<string, unknown>> {
     const res = await this.sendRequest('GetInputSettings', { inputName });
     return (res.inputSettings ?? {}) as Record<string, unknown>;
+  }
+
+  async getSceneItemList(
+    sceneName: string,
+  ): Promise<Array<{ sceneItemId: number; sourceName: string; sourceType?: string }>> {
+    type SceneItemRecord = {
+      sceneItemId: number;
+      sourceName: string;
+      sourceType?: string;
+    };
+    const res = await this.sendRequest('GetSceneItemList', { sceneName });
+    const sceneItems: unknown[] = Array.isArray(res.sceneItems) ? res.sceneItems : [];
+    return sceneItems
+      .filter(
+        (item): item is SceneItemRecord =>
+          typeof item === 'object' &&
+          item !== null &&
+          typeof (item as Record<string, unknown>).sceneItemId === 'number' &&
+          typeof (item as Record<string, unknown>).sourceName === 'string',
+      )
+      .map((item) => ({
+        sceneItemId: item.sceneItemId,
+        sourceName: item.sourceName,
+        sourceType: typeof item.sourceType === 'string' ? item.sourceType : undefined,
+      }));
   }
 
   async setInputSettings(inputName: string, inputSettings: Record<string, unknown>): Promise<void> {

@@ -92,6 +92,106 @@ function longestCommonPrefix(strs: string[]): string {
   return prefix;
 }
 
+type RankedMatch = {
+  candidate: string;
+  lower: string;
+  score: number;
+  gapScore: number;
+  index: number;
+};
+
+function getFuzzyGapScore(partialLower: string, candidateLower: string): number | null {
+  if (partialLower.length === 0) return 0;
+
+  let searchFrom = 0;
+  let gapScore = 0;
+
+  for (const ch of partialLower) {
+    const foundAt = candidateLower.indexOf(ch, searchFrom);
+    if (foundAt === -1) return null;
+    gapScore += foundAt - searchFrom;
+    searchFrom = foundAt + 1;
+  }
+
+  return gapScore;
+}
+
+function rankCandidates(candidates: string[], partial: string): RankedMatch[] {
+  const partialLower = partial.toLowerCase();
+
+  return candidates
+    .map((candidate, index) => {
+      const lower = candidate.toLowerCase();
+      if (partialLower.length === 0) {
+        return { candidate, lower, score: 0, gapScore: 0, index };
+      }
+
+      if (lower.startsWith(partialLower)) {
+        return { candidate, lower, score: 0, gapScore: 0, index };
+      }
+
+      const substringIndex = lower.indexOf(partialLower);
+      if (substringIndex !== -1) {
+        return { candidate, lower, score: 1, gapScore: substringIndex, index };
+      }
+
+      const gapScore = getFuzzyGapScore(partialLower, lower);
+      if (gapScore === null) return null;
+      return { candidate, lower, score: 2, gapScore, index };
+    })
+    .filter((match): match is RankedMatch => match !== null)
+    .sort(
+      (a, b) =>
+        a.score - b.score ||
+        a.gapScore - b.gapScore ||
+        a.candidate.length - b.candidate.length ||
+        a.index - b.index,
+    );
+}
+
+function buildTokenAutocomplete(
+  cmd: string,
+  candidates: string[],
+  partial: string,
+): { completion: string | null; hints: string[]; completions: string[] } {
+  const matches = rankCandidates(candidates, partial);
+  if (matches.length === 0) return { completion: null, hints: [], completions: [] };
+
+  const hints = matches.map((match) => match.candidate);
+  const prefixMatches = matches.filter((match) => match.lower.startsWith(partial.toLowerCase()));
+
+  if (prefixMatches.length === 1) {
+    return {
+      completion: `${cmd} ${prefixMatches[0]?.candidate ?? ''}`,
+      hints,
+      completions: hints.map((hint) => `${cmd} ${hint}`),
+    };
+  }
+
+  if (prefixMatches.length > 1) {
+    const prefix = longestCommonPrefix(prefixMatches.map((match) => match.candidate));
+    return {
+      completion: prefix.length > partial.length ? `${cmd} ${prefix}` : null,
+      hints,
+      completions: hints.map((hint) => `${cmd} ${hint}`),
+    };
+  }
+
+  if (matches.length === 1) {
+    return {
+      completion: `${cmd} ${matches[0]?.candidate ?? ''}`,
+      hints,
+      completions: hints.map((hint) => `${cmd} ${hint}`),
+    };
+  }
+
+  return {
+    completion: null,
+    hints,
+    completions: hints.map((hint) => `${cmd} ${hint}`),
+  };
+}
+
 /**
  * Given the current input value, returns:
  *   - `completion`: the longest unambiguous prefix to complete to (or null)
@@ -110,16 +210,31 @@ export function getAutocomplete(input: string): {
 
   // ── Command-level autocomplete (no space yet) ──────────────────────────────
   if (!lower.includes(' ')) {
-    const matches = _registered.filter((c) => c.startsWith(lower));
+    const matches = rankCandidates([..._registered], lower);
     if (matches.length === 0) return { completion: null, hints: [], completions: [] };
-    if (matches.length === 1)
-      return { completion: matches[0] ?? null, hints: matches, completions: matches };
-    const prefix = longestCommonPrefix(matches);
-    return {
-      completion: prefix.length > lower.length ? prefix : null,
-      hints: matches,
-      completions: matches,
-    };
+
+    const hints = matches.map((match) => match.candidate);
+    const completions = [...hints];
+    const prefixMatches = matches.filter((match) => match.lower.startsWith(lower));
+
+    if (prefixMatches.length === 1) {
+      return { completion: prefixMatches[0]?.candidate ?? null, hints, completions };
+    }
+
+    if (prefixMatches.length > 1) {
+      const prefix = longestCommonPrefix(prefixMatches.map((match) => match.candidate));
+      return {
+        completion: prefix.length > lower.length ? prefix : null,
+        hints,
+        completions,
+      };
+    }
+
+    if (matches.length === 1) {
+      return { completion: matches[0]?.candidate ?? null, hints, completions };
+    }
+
+    return { completion: null, hints, completions };
   }
 
   // ── Argument-level autocomplete ────────────────────────────────────────────
@@ -133,15 +248,7 @@ export function getAutocomplete(input: string): {
     candidates: string[],
     partial: string,
   ): { completion: string | null; hints: string[]; completions: string[] } {
-    const matches = candidates.filter((c) => c.startsWith(partial));
-    if (matches.length === 0) return { completion: null, hints: [], completions: [] };
-    const prefix = longestCommonPrefix(matches);
-    const fullCompletion = `${cmd} ${prefix}`;
-    return {
-      completion: prefix.length > partial.length ? fullCompletion : null,
-      hints: matches,
-      completions: matches.map((m) => `${cmd} ${m}`),
-    };
+    return buildTokenAutocomplete(cmd, candidates, partial);
   }
 
   if (cmd === '/connect') {
@@ -164,14 +271,19 @@ export function getAutocomplete(input: string): {
 
     if (parts.length === 2) {
       const partial = parts[1] ?? '';
-      const matches = CHAT_CLEAR_TARGETS.filter((target) => target.startsWith(partial));
-      if (matches.length === 0) return { completion: null, hints: [], completions: [] };
-      const prefix = longestCommonPrefix(matches);
-      const fullCompletion = `${cmd} clear ${prefix}`;
+      const ranked = rankCandidates([...CHAT_CLEAR_TARGETS], partial);
+      if (ranked.length === 0) return { completion: null, hints: [], completions: [] };
+      const hints = ranked.map((match) => match.candidate);
+      const prefixMatches = ranked.filter((match) => match.lower.startsWith(partial.toLowerCase()));
       return {
-        completion: prefix.length > partial.length ? fullCompletion : null,
-        hints: matches,
-        completions: matches.map((target) => `${cmd} clear ${target}`),
+        completion:
+          prefixMatches.length === 1
+            ? `${cmd} clear ${prefixMatches[0]?.candidate ?? ''}`
+            : ranked.length === 1
+              ? `${cmd} clear ${ranked[0]?.candidate ?? ''}`
+              : null,
+        hints,
+        completions: hints.map((target) => `${cmd} clear ${target}`),
       };
     }
 
@@ -217,27 +329,37 @@ export function getAutocomplete(input: string): {
 
     if (first === 'install' && parts.length === 2) {
       const partial = parts[1] ?? '';
-      const matches = BUNDLED_EXAMPLE_SCRIPT_IDS.filter((scriptId) => scriptId.startsWith(partial));
-      if (matches.length === 0) return { completion: null, hints: [], completions: [] };
-      const prefix = longestCommonPrefix(matches);
-      const fullCompletion = `${cmd} install ${prefix}`;
+      const ranked = rankCandidates([...BUNDLED_EXAMPLE_SCRIPT_IDS], partial);
+      if (ranked.length === 0) return { completion: null, hints: [], completions: [] };
+      const hints = ranked.map((match) => match.candidate);
+      const prefixMatches = ranked.filter((match) => match.lower.startsWith(partial.toLowerCase()));
       return {
-        completion: prefix.length > partial.length ? fullCompletion : null,
-        hints: matches,
-        completions: matches.map((scriptId) => `${cmd} install ${scriptId}`),
+        completion:
+          prefixMatches.length === 1
+            ? `${cmd} install ${prefixMatches[0]?.candidate ?? ''}`
+            : ranked.length === 1
+              ? `${cmd} install ${ranked[0]?.candidate ?? ''}`
+              : null,
+        hints,
+        completions: hints.map((scriptId) => `${cmd} install ${scriptId}`),
       };
     }
 
     if (first === 'install' && parts.length === 3) {
       const partial = parts[2] ?? '';
-      const matches = SCRIPTS_INSTALL_ARGS.filter((arg) => arg.startsWith(partial));
-      if (matches.length === 0) return { completion: null, hints: [], completions: [] };
-      const prefix = longestCommonPrefix(matches);
-      const fullCompletion = `${cmd} install ${parts[1]} ${prefix}`;
+      const ranked = rankCandidates([...SCRIPTS_INSTALL_ARGS], partial);
+      if (ranked.length === 0) return { completion: null, hints: [], completions: [] };
+      const hints = ranked.map((match) => match.candidate);
+      const prefixMatches = ranked.filter((match) => match.lower.startsWith(partial.toLowerCase()));
       return {
-        completion: prefix.length > partial.length ? fullCompletion : null,
-        hints: matches,
-        completions: matches.map((arg) => `${cmd} install ${parts[1]} ${arg}`),
+        completion:
+          prefixMatches.length === 1
+            ? `${cmd} install ${parts[1]} ${prefixMatches[0]?.candidate ?? ''}`
+            : ranked.length === 1
+              ? `${cmd} install ${parts[1]} ${ranked[0]?.candidate ?? ''}`
+              : null,
+        hints,
+        completions: hints.map((arg) => `${cmd} install ${parts[1]} ${arg}`),
       };
     }
 
@@ -304,14 +426,19 @@ export function getAutocomplete(input: string): {
     const op = (parts[0] ?? '').toLowerCase();
     if ((op === 'get' || op === 'set') && parts.length === 2) {
       const partial = (parts[1] ?? '').toLowerCase();
-      const matches = SETTINGS_KEYS.filter((k) => k.startsWith(partial));
-      if (matches.length === 0) return { completion: null, hints: matches, completions: [] };
-      const prefix = longestCommonPrefix(matches);
-      const fullCompletion = `${cmd} ${op} ${prefix}`;
+      const ranked = rankCandidates(SETTINGS_KEYS, partial);
+      if (ranked.length === 0) return { completion: null, hints: [], completions: [] };
+      const hints = ranked.map((match) => match.candidate);
+      const prefixMatches = ranked.filter((match) => match.lower.startsWith(partial));
       return {
-        completion: prefix.length > partial.length ? fullCompletion : null,
-        hints: matches,
-        completions: matches.map((k) => `${cmd} ${op} ${k}`),
+        completion:
+          prefixMatches.length === 1
+            ? `${cmd} ${op} ${prefixMatches[0]?.candidate ?? ''}`
+            : ranked.length === 1
+              ? `${cmd} ${op} ${ranked[0]?.candidate ?? ''}`
+              : null,
+        hints,
+        completions: hints.map((k) => `${cmd} ${op} ${k}`),
       };
     }
     return { completion: null, hints: [], completions: [] };
@@ -335,15 +462,7 @@ export function getAutocomplete(input: string): {
     // Sub-case A: completing the action id (rest has no space).
     if (!rest.includes(' ')) {
       const partial = rest; // preserve original case
-      const matches = allIds.filter((id) => id.startsWith(partial));
-      if (matches.length === 0) return { completion: null, hints: [], completions: [] };
-      const prefix = longestCommonPrefix(matches);
-      const fullCompletion = `${cmd} ${prefix}`;
-      return {
-        completion: prefix.length > partial.length ? fullCompletion : null,
-        hints: matches,
-        completions: matches.map((id) => `${cmd} ${id}`),
-      };
+      return buildTokenAutocomplete(cmd, allIds, partial);
     }
 
     // Sub-case B: action id is determined, completing arg names/values.
@@ -374,17 +493,22 @@ export function getAutocomplete(input: string): {
       if (!schema) return { completion: null, hints: [], completions: [] };
 
       if (schema.type === 'enum' && schema.values) {
-        const matches = schema.values.filter((v: string) => v.startsWith(valuePartial));
-        if (matches.length === 0) return { completion: null, hints: [], completions: [] };
-        const prefix = longestCommonPrefix(matches);
-        const builtPrefix = `${cmd} ${actionId} ${previousTokens.join(' ')}${previousTokens.length > 0 ? ' ' : ''}${argName}=${prefix}`;
+        const ranked = rankCandidates(schema.values, valuePartial);
+        if (ranked.length === 0) return { completion: null, hints: [], completions: [] };
+        const hints = ranked.map((match) => match.candidate);
+        const prefixMatches = ranked.filter((match) =>
+          match.lower.startsWith(valuePartial.toLowerCase()),
+        );
+        const base = `${cmd} ${actionId} ${previousTokens.join(' ')}${previousTokens.length > 0 ? ' ' : ''}${argName}=`;
         return {
-          completion: prefix.length > valuePartial.length ? builtPrefix : null,
-          hints: matches,
-          completions: matches.map(
-            (v: string) =>
-              `${cmd} ${actionId} ${previousTokens.join(' ')}${previousTokens.length > 0 ? ' ' : ''}${argName}=${v}`,
-          ),
+          completion:
+            prefixMatches.length === 1
+              ? `${base}${prefixMatches[0]?.candidate ?? ''}`
+              : ranked.length === 1
+                ? `${base}${ranked[0]?.candidate ?? ''}`
+                : null,
+          hints,
+          completions: hints.map((v: string) => `${base}${v}`),
         };
       }
 
@@ -396,13 +520,17 @@ export function getAutocomplete(input: string): {
     // Completing an arg name.
     const remainingArgs = argNames.filter((n) => !usedArgNames.includes(n));
     const partial = lastToken;
-    const matches = remainingArgs.filter((n) => n.startsWith(partial)).map((n) => `${n}=`);
-
+    const matches = rankCandidates(
+      remainingArgs.map((n) => `${n}=`),
+      partial,
+    ).map((match) => match.candidate);
     if (matches.length === 0) return { completion: null, hints: [], completions: [] };
-    const prefix = longestCommonPrefix(matches);
     const base = `${cmd} ${actionId} ${previousTokens.join(' ')}${previousTokens.length > 0 ? ' ' : ''}`;
     return {
-      completion: prefix.length > partial.length ? `${base}${prefix}` : null,
+      completion:
+        matches.length === 1 || matches[0]?.startsWith(partial.toLowerCase())
+          ? `${base}${matches[0] ?? ''}`
+          : null,
       hints: matches,
       completions: matches.map((m) => `${base}${m}`),
     };

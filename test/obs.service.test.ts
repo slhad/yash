@@ -103,6 +103,10 @@ describe('ObsService', () => {
 
     await expect(obsService.getCurrentScene()).resolves.toBe('Scene 1');
     await expect(obsService.getInputSettings('Camera')).resolves.toEqual({});
+    await expect(obsService.getSceneItemList('Scene 1')).resolves.toEqual([
+      { sceneItemId: 7, sourceName: 'Camera', sourceType: 'OBS_SOURCE_TYPE_INPUT' },
+      { sceneItemId: 8, sourceName: 'Overlay', sourceType: 'OBS_SOURCE_TYPE_INPUT' },
+    ]);
     await expect(obsService.getSceneItemEnabled('Scene 1', 7)).resolves.toBe(true);
     await expect(obsService.getSceneItemTransform('Scene 1', 7)).resolves.toMatchObject({
       positionX: 0,
@@ -143,6 +147,28 @@ describe('ObsService', () => {
     expect(sendRequestSpy).toHaveBeenCalledWith('GetSceneItemTransform', {
       sceneName: 'Gameplay',
       sceneItemId: 42,
+    });
+  });
+
+  test('should normalize scene item list responses', async () => {
+    await obsService.connect();
+    const sendRequestSpy = vi.spyOn(obsService, 'sendRequest');
+    sendRequestSpy.mockResolvedValue({
+      sceneItems: [
+        { sceneItemId: 11, sourceName: 'Camera', sourceType: 'OBS_SOURCE_TYPE_INPUT' },
+        { sceneItemId: 12, sourceName: 'Scene Nest' },
+        { sceneItemId: 'bad', sourceName: 'Ignore me' },
+        { sceneItemId: 13 },
+      ],
+    });
+
+    await expect(obsService.getSceneItemList('Gameplay')).resolves.toEqual([
+      { sceneItemId: 11, sourceName: 'Camera', sourceType: 'OBS_SOURCE_TYPE_INPUT' },
+      { sceneItemId: 12, sourceName: 'Scene Nest', sourceType: undefined },
+    ]);
+
+    expect(sendRequestSpy).toHaveBeenCalledWith('GetSceneItemList', {
+      sceneName: 'Gameplay',
     });
   });
 

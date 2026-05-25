@@ -56,6 +56,7 @@ export default function setup(api) {
         sceneList: await api.obs.getSceneList(),
         currentScene: await api.obs.getCurrentScene(),
         inputSettings: await api.obs.getInputSettings('Camera'),
+        sceneItems: await api.obs.getSceneItemList('Gameplay'),
         sceneItemState: await api.obs.getSceneItemState('Gameplay', 'Camera'),
         persistedFlag: api.settings.get('persistedFlag', false),
       },
@@ -86,6 +87,10 @@ export default function setup(api) {
     });
     vi.spyOn(obsService, 'getCurrentScene').mockResolvedValue('Gameplay');
     vi.spyOn(obsService, 'getInputSettings').mockResolvedValue({ device_id: 'cam-1' });
+    vi.spyOn(obsService, 'getSceneItemList').mockResolvedValue([
+      { sceneItemId: 42, sourceName: 'Camera', sourceType: 'OBS_SOURCE_TYPE_INPUT' },
+      { sceneItemId: 43, sourceName: 'Overlay', sourceType: 'OBS_SOURCE_TYPE_INPUT' },
+    ]);
     vi.spyOn(obsService, 'getSceneItemState').mockResolvedValue({
       sceneItemId: 42,
       sceneItemEnabled: true,
@@ -114,6 +119,10 @@ export default function setup(api) {
       },
       currentScene: 'Gameplay',
       inputSettings: { device_id: 'cam-1' },
+      sceneItems: [
+        { sceneItemId: 42, sourceName: 'Camera', sourceType: 'OBS_SOURCE_TYPE_INPUT' },
+        { sceneItemId: 43, sourceName: 'Overlay', sourceType: 'OBS_SOURCE_TYPE_INPUT' },
+      ],
       sceneItemState: {
         sceneItemId: 42,
         sceneItemEnabled: true,
@@ -124,6 +133,7 @@ export default function setup(api) {
 
     const typesDts = await fs.readFile(path.join(scriptDir, 'types.d.ts'), 'utf8');
     expect(typesDts).toContain('getCurrentScene');
+    expect(typesDts).toContain('getSceneItemList');
     expect(typesDts).toContain('getSceneItemState');
     expect(typesDts).toContain('setSceneItemTransform');
     expect(typesDts).toContain('subscribeToSceneChanges');

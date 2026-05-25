@@ -16,6 +16,11 @@ type StoredState = {
   snapshots: Record<string, Record<string, Snapshot>>;
 };
 
+type TargetRef = {
+  sourceName: string;
+  sceneName: string;
+};
+
 const SCRIPT_ID = 'obs-source-recaller';
 const STATE_KEY = 'state';
 const DEFAULT_STATE: StoredState = { paused: false, snapshots: {} };
@@ -74,6 +79,15 @@ function stateHasSnapshot(state: StoredState, sourceName: string, sceneName: str
   return state.snapshots[sourceName]?.[sceneName] !== undefined;
 }
 
+function listSourcesForScene(state: StoredState, sceneName: string): Snapshot[] {
+  const snapshots: Snapshot[] = [];
+  for (const perScene of Object.values(state.snapshots)) {
+    const snapshot = perScene[sceneName];
+    if (snapshot) snapshots.push(snapshot);
+  }
+  return snapshots.sort((a, b) => a.sourceName.localeCompare(b.sourceName));
+}
+
 export default function setup(api: ScriptApi): () => void {
   const startPaused = api.settings.get<boolean>('startPaused', false);
 
@@ -85,8 +99,32 @@ export default function setup(api: ScriptApi): () => void {
     await api.settings.set(STATE_KEY, state);
   }
 
-  async function captureSnapshot(sourceName: string): Promise<Snapshot> {
-    const sceneName = await api.obs.getCurrentScene();
+  async function resolveTargetRef(rawTarget: unknown): Promise<TargetRef> {
+    const target = String(rawTarget ?? '').trim();
+    if (!target) throw new Error('Missing required arg: source');
+
+    const sceneList = await api.obs.getSceneList();
+    const scenes = Array.isArray(sceneList?.scenes) ? sceneList.scenes : [];
+    const explicitMatch = scenes
+      .map((scene) => scene.sceneName)
+      .filter((sceneName) => target.startsWith(`${sceneName}.`) && target.length > sceneName.length + 1)
+      .sort((a, b) => b.length - a.length)[0];
+
+    if (explicitMatch) {
+      return {
+        sceneName: explicitMatch,
+        sourceName: target.slice(explicitMatch.length + 1).trim(),
+      };
+    }
+
+    return {
+      sceneName: await api.obs.getCurrentScene(),
+      sourceName: target,
+    };
+  }
+
+  async function captureSnapshot(target: TargetRef): Promise<Snapshot> {
+    const { sceneName, sourceName } = target;
     const sceneItemId = await api.obs.getSceneItemId(sceneName, sourceName);
     const [inputSettings, sceneItemEnabled, sceneItemTransform] = await Promise.all([
       api.obs.getInputSettings(sourceName),
@@ -102,15 +140,13 @@ export default function setup(api: ScriptApi): () => void {
     };
   }
 
-  async function applySnapshot(snapshot: Snapshot): Promise<void> {
-    const sceneItemId = await api.obs.getSceneItemId(snapshot.sceneName, snapshot.sourceName);
-    await api.obs.setInputSettings(snapshot.sourceName, snapshot.inputSettings);
-    await api.obs.setSceneItemTransform(
-      snapshot.sceneName,
-      sceneItemId,
-      snapshot.sceneItemTransform,
-    );
-    await api.obs.setSceneItemEnabled(snapshot.sceneName, sceneItemId, snapshot.sceneItemEnabled);
+  async function applySnapshot(snapshot: Snapshot, target?: TargetRef): Promise<void> {
+    const sceneName = target?.sceneName ?? snapshot.sceneName;
+    const sourceName = target?.sourceName ?? snapshot.sourceName;
+    const sceneItemId = await api.obs.getSceneItemId(sceneName, sourceName);
+    await api.obs.setInputSettings(sourceName, snapshot.inputSettings);
+    await api.obs.setSceneItemTransform(sceneName, sceneItemId, snapshot.sceneItemTransform);
+    await api.obs.setSceneItemEnabled(sceneName, sceneItemId, snapshot.sceneItemEnabled);
   }
 
   async function autoLoadForScene(sceneName: string): Promise<string[]> {
@@ -160,27 +196,33 @@ export default function setup(api: ScriptApi): () => void {
       args: {
         source: { type: 'string', required: true, minLength: 1, maxLength: 200 },
       },
-      examples: [{ args: { source: 'Camera' }, description: 'Save the current scene snapshot' }],
+      examples: [
+        { args: { source: 'Camera' }, description: 'Save the current scene snapshot' },
+        {
+          args: { source: 'Starting Soon.Camera' },
+          description: 'Save a source snapshot from a specific scene',
+        },
+      ],
       invoke: async (args) => {
         if (!api.obs.isConnected()) throw new Error('OBS is not connected');
-        const sourceName = String(args.source ?? '').trim();
-        if (!sourceName) throw new Error('Missing required arg: source');
+        const target = await resolveTargetRef(args.source);
+        if (!target.sourceName) throw new Error('Missing required arg: source');
 
-        const snapshot = await captureSnapshot(sourceName);
+        const snapshot = await captureSnapshot(target);
         const state = readState();
-        const alreadyExisted = stateHasSnapshot(state, sourceName, snapshot.sceneName);
-        state.snapshots[sourceName] = {
-          ...(state.snapshots[sourceName] ?? {}),
+        const alreadyExisted = stateHasSnapshot(state, target.sourceName, snapshot.sceneName);
+        state.snapshots[target.sourceName] = {
+          ...(state.snapshots[target.sourceName] ?? {}),
           [snapshot.sceneName]: snapshot,
         };
         await writeState(state);
 
         return {
           output: [
-            `[obs-source-recaller] ${alreadyExisted ? 'updated' : 'saved'} "${sourceName}" for scene "${snapshot.sceneName}"`,
+            `[obs-source-recaller] ${alreadyExisted ? 'updated' : 'saved'} "${target.sourceName}" for scene "${snapshot.sceneName}"`,
           ],
           data: {
-            source: sourceName,
+            source: target.sourceName,
             scene: snapshot.sceneName,
             paused: state.paused,
           },
@@ -196,37 +238,120 @@ export default function setup(api: ScriptApi): () => void {
       args: {
         source: { type: 'string', required: true, minLength: 1, maxLength: 200 },
       },
-      examples: [{ args: { source: 'Camera' }, description: 'Restore Camera in the active scene' }],
+      examples: [
+        { args: { source: 'Camera' }, description: 'Restore Camera in the active scene' },
+        {
+          args: { source: 'Starting Soon.Camera' },
+          description: 'Restore Camera in a specific scene',
+        },
+      ],
       invoke: async (args) => {
         if (!api.obs.isConnected()) throw new Error('OBS is not connected');
-        const sourceName = String(args.source ?? '').trim();
-        if (!sourceName) throw new Error('Missing required arg: source');
+        const target = await resolveTargetRef(args.source);
+        if (!target.sourceName) throw new Error('Missing required arg: source');
 
-        const sceneName = await api.obs.getCurrentScene();
         const state = readState();
-        const snapshot = state.snapshots[sourceName]?.[sceneName];
+        const snapshot = state.snapshots[target.sourceName]?.[target.sceneName];
         if (!snapshot) {
           return {
             output: [
-              `[obs-source-recaller] no snapshot saved for "${sourceName}" in scene "${sceneName}"`,
+              `[obs-source-recaller] no snapshot saved for "${target.sourceName}" in scene "${target.sceneName}"`,
             ],
             data: {
-              source: sourceName,
-              scene: sceneName,
+              source: target.sourceName,
+              scene: target.sceneName,
               restored: false,
               paused: state.paused,
             },
           };
         }
 
-        await applySnapshot(snapshot);
+        await applySnapshot(snapshot, target);
         return {
-          output: [`[obs-source-recaller] restored "${sourceName}" for scene "${sceneName}"`],
+          output: [
+            `[obs-source-recaller] restored "${target.sourceName}" for scene "${target.sceneName}"`,
+          ],
           data: {
-            source: sourceName,
-            scene: sceneName,
+            source: target.sourceName,
+            scene: target.sceneName,
             restored: true,
             paused: state.paused,
+          },
+        };
+      },
+    },
+    {
+      id: 'obs.source-recaller.list',
+      title: 'List saved OBS source snapshots for the current scene',
+      description: 'Show saved source snapshots that match the current OBS program scene.',
+      domain: 'obs',
+      readOnly: true,
+      invoke: async () => {
+        if (!api.obs.isConnected()) throw new Error('OBS is not connected');
+        const sceneName = await api.obs.getCurrentScene();
+        const state = readState();
+        const snapshots = listSourcesForScene(state, sceneName);
+        if (snapshots.length === 0) {
+          return {
+            output: [`[obs-source-recaller] no saved snapshots for scene "${sceneName}"`],
+            data: {
+              scene: sceneName,
+              paused: state.paused,
+              snapshots: [],
+            },
+          };
+        }
+
+        return {
+          output: [
+            `[obs-source-recaller] saved snapshots for scene "${sceneName}": ${snapshots.map((snapshot) => snapshot.sourceName).join(', ')}`,
+          ],
+          data: {
+            scene: sceneName,
+            paused: state.paused,
+            snapshots: snapshots.map((snapshot) => ({
+              source: snapshot.sourceName,
+              scene: snapshot.sceneName,
+              sceneItemEnabled: snapshot.sceneItemEnabled,
+              inputSettings: snapshot.inputSettings,
+              sceneItemTransform: snapshot.sceneItemTransform,
+            })),
+          },
+        };
+      },
+    },
+    {
+      id: 'obs.source-recaller.explore',
+      title: 'Explore current-scene OBS sources',
+      description: 'List the sources currently available in the active OBS program scene.',
+      domain: 'obs',
+      readOnly: true,
+      invoke: async () => {
+        if (!api.obs.isConnected()) throw new Error('OBS is not connected');
+        const sceneName = await api.obs.getCurrentScene();
+        const sceneItems = await api.obs.getSceneItemList(sceneName);
+        const sources = [...new Set(sceneItems.map((item) => item.sourceName.trim()).filter(Boolean))];
+        if (sources.length === 0) {
+          return {
+            output: [`[obs-source-recaller] no sources found in scene "${sceneName}"`],
+            data: {
+              scene: sceneName,
+              sources: [],
+            },
+          };
+        }
+
+        return {
+          output: [
+            `[obs-source-recaller] sources in scene "${sceneName}": ${sources.join(', ')}`,
+            `[obs-source-recaller] use /action obs.source-recaller.save source='<source>' or source='${sceneName}.<source>'`,
+          ],
+          data: {
+            scene: sceneName,
+            sources: sources.map((source) => ({
+              source,
+              ref: `${sceneName}.${source}`,
+            })),
           },
         };
       },

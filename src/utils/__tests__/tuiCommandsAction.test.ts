@@ -130,6 +130,12 @@ describe('getAutocomplete /action branch', () => {
       expect(result.hints).toEqual(['obs.shutdown.initiate']);
     });
 
+    test('/action osi → completes to obs.shutdown.initiate via fuzzy subsequence match', () => {
+      const result = getAutocomplete('/action osi');
+      expect(result.completion).toBe('/action obs.shutdown.initiate');
+      expect(result.hints[0]).toBe('obs.shutdown.initiate');
+    });
+
     test('/action obs.shutdown. → hints contain both obs.shutdown.* actions', () => {
       const result = getAutocomplete('/action obs.shutdown.');
       expect(result.hints).toContain('obs.shutdown.initiate');
@@ -155,6 +161,12 @@ describe('getAutocomplete /action branch', () => {
       const result = getAutocomplete('/action obs.shutdown.initiate de');
       expect(result.completion).toBe('/action obs.shutdown.initiate delay=');
       expect(result.hints).toEqual(['delay=']);
+    });
+
+    test('/action obs.shutdown.initiate dly → completes to delay= via fuzzy subsequence match', () => {
+      const result = getAutocomplete('/action obs.shutdown.initiate dly');
+      expect(result.completion).toBe('/action obs.shutdown.initiate delay=');
+      expect(result.hints[0]).toBe('delay=');
     });
 
     test('/action obs.shutdown.initiate delay=30 <space> → hints contain scene= but not delay=', () => {
@@ -188,6 +200,12 @@ describe('getAutocomplete /action branch', () => {
       const result = getAutocomplete('/action chat.send platform=tw');
       expect(result.hints).toEqual(['twitch']);
       expect(result.completion).toBe('/action chat.send platform=twitch');
+    });
+
+    test('/action chat.send platform=yt → completes to youtube via fuzzy subsequence match', () => {
+      const result = getAutocomplete('/action chat.send platform=yt');
+      expect(result.hints[0]).toBe('youtube');
+      expect(result.completion).toBe('/action chat.send platform=youtube');
     });
 
     test('/action chat.send platform=xyz → empty hints (no enum match)', () => {

@@ -107,7 +107,7 @@ bun run cmd /action obs.shutdown.initiate delay=10 scene='[PS] End'
 - `/action <id>` shows help and examples when required args are still missing
 - `/action <id> key=value ...` parses typed args and invokes the action
 
-The TUI autocomplete also understands `/action`, including action ids, `key=` argument names, and enum values.
+The TUI autocomplete also understands `/action`, including action ids, `key=` argument names, and enum values. Matches are fuzzy-ranked: prefix matches win, then substring matches, then subsequence matches.
 
 **Stale socket cleanup:** the server removes any pre-existing socket file at startup, so a leftover socket from a crash does not block a new TUI launch.
 
@@ -203,17 +203,21 @@ The bundled `obs-source-recaller` example remembers one OBS source's settings pe
 
 Actions:
 
-- `obs.source-recaller.save source=<source>`
-- `obs.source-recaller.load source=<source>`
+- `obs.source-recaller.save source=<source|scene.source>`
+- `obs.source-recaller.load source=<source|scene.source>`
+- `obs.source-recaller.list`
+- `obs.source-recaller.explore`
 - `obs.source-recaller.pause`
 - `obs.source-recaller.resume`
 
 Typical flow:
 
 1. Install it with `bun run cmd /scripts install obs-source-recaller`
-2. Adjust a source in one OBS scene and run `/action obs.source-recaller.save source='Camera'`
-3. Switch to another scene, adjust the same source differently, and save again
-4. Leave the watcher active so later scene changes restore the matching snapshot automatically
+2. Run `/action obs.source-recaller.explore` to list source names in the current scene
+3. Adjust a source in one OBS scene and run `/action obs.source-recaller.save source='Camera'`
+4. Switch to another scene, adjust the same source differently, and save again
+5. If needed, target another scene directly with `/action obs.source-recaller.save source='Starting Soon.Camera'`
+6. Leave the watcher active so later scene changes restore the matching snapshot automatically
 
 ## Security
 

@@ -54,6 +54,9 @@ export type ScriptApi = {
     getCurrentScene: () => Promise<string>;
     setCurrentScene: (name: string) => Promise<void>;
     getInputSettings: (inputName: string) => Promise<Record<string, unknown>>;
+    getSceneItemList: (
+      sceneName: string,
+    ) => Promise<Array<{ sceneItemId: number; sourceName: string; sourceType?: string }>>;
     setInputSettings: (inputName: string, inputSettings: Record<string, unknown>) => Promise<void>;
     setInputMute: (inputName: string, muted: boolean) => Promise<void>;
     getSceneItemId: (sceneName: string, sourceName: string) => Promise<number>;

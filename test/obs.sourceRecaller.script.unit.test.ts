@@ -7,6 +7,11 @@ function createMockApi(options?: {
   initialState?: unknown;
   startPaused?: boolean;
   currentScene?: string;
+  scenes?: string[];
+  sceneItems?: Record<
+    string,
+    Array<{ sceneItemId: number; sourceName: string; sourceType?: string }>
+  >;
   sceneItemIds?: Record<string, number>;
   inputSettings?: Record<string, Record<string, unknown>>;
   sceneItemEnabled?: Record<string, boolean>;
@@ -18,6 +23,16 @@ function createMockApi(options?: {
   if (options?.initialState !== undefined) settingsData.set('state', options.initialState);
 
   const currentScene = { value: options?.currentScene ?? 'Scene A' };
+  const sceneItems = new Map(
+    Object.entries(
+      options?.sceneItems ?? {
+        'Scene A': [
+          { sceneItemId: 7, sourceName: 'Camera', sourceType: 'OBS_SOURCE_TYPE_INPUT' },
+          { sceneItemId: 9, sourceName: 'Overlay', sourceType: 'OBS_SOURCE_TYPE_INPUT' },
+        ],
+      },
+    ),
+  );
   const sceneItemIds = new Map(Object.entries(options?.sceneItemIds ?? { 'Scene A::Camera': 7 }));
   const inputSettings = new Map(
     Object.entries(options?.inputSettings ?? { Camera: { zoom: 150, color: 'warm' } }),
@@ -51,7 +66,7 @@ function createMockApi(options?: {
     obs: {
       isConnected: () => true,
       getSceneList: async () => ({
-        scenes: [{ sceneName: currentScene.value }],
+        scenes: (options?.scenes ?? [currentScene.value]).map((sceneName) => ({ sceneName })),
         currentProgramSceneName: currentScene.value,
       }),
       getCurrentScene: async () => currentScene.value,
@@ -61,6 +76,7 @@ function createMockApi(options?: {
         if (!value) throw new Error(`missing input settings for ${inputName}`);
         return value;
       },
+      getSceneItemList: async (sceneName) => sceneItems.get(sceneName) ?? [],
       setInputSettings,
       setInputMute: async () => {},
       getSceneItemId: async (sceneName, sourceName) => {
@@ -225,6 +241,61 @@ describe('obs-source-recaller example script', () => {
     expect(ctx.mocks.setSceneItemEnabled).toHaveBeenCalledWith('Scene A', 7, false);
   });
 
+  test('save and load support explicit <scene>.<source> targets outside the current scene', async () => {
+    const setup = await loadScriptApi();
+    const ctx = createMockApi({
+      currentScene: 'Scene A',
+      scenes: ['Scene A', 'Scene B'],
+      sceneItemIds: {
+        'Scene B::Camera': 8,
+      },
+      inputSettings: {
+        Camera: { zoom: 333, crop: 'tight' },
+      },
+      sceneItemEnabled: {
+        'Scene B::8': false,
+      },
+      sceneItemTransform: {
+        'Scene B::8': { positionX: 64, positionY: 18 },
+      },
+      initialState: {
+        paused: false,
+        snapshots: {
+          Camera: {
+            'Scene B': {
+              sourceName: 'Camera',
+              sceneName: 'Scene B',
+              inputSettings: { zoom: 200 },
+              sceneItemEnabled: true,
+              sceneItemTransform: { positionX: 42 },
+            },
+          },
+        },
+      },
+    });
+    cleanup = setup(ctx.api);
+
+    const saveResult = await getAction(ctx.actions, 'obs.source-recaller.save').invoke({
+      source: 'Scene B.Camera',
+    });
+    expect(saveResult.output).toEqual([
+      '[obs-source-recaller] updated "Camera" for scene "Scene B"',
+    ]);
+
+    const loadResult = await getAction(ctx.actions, 'obs.source-recaller.load').invoke({
+      source: 'Scene B.Camera',
+    });
+    expect(loadResult.output).toEqual([
+      '[obs-source-recaller] restored "Camera" for scene "Scene B"',
+    ]);
+    expect(ctx.mocks.setInputSettings).toHaveBeenCalledWith('Camera', { zoom: 333, crop: 'tight' });
+    expect(ctx.mocks.setSceneItemTransform).toHaveBeenCalledWith('Scene B', 8, {
+      positionX: 64,
+      positionY: 18,
+    });
+    expect(ctx.mocks.setSceneItemEnabled).toHaveBeenCalledWith('Scene B', 8, false);
+  });
+
   test('pause blocks automatic scene-change restores until resume', async () => {
     const setup = await loadScriptApi();
     const ctx = createMockApi({
@@ -339,6 +410,84 @@ describe('obs-source-recaller example script', () => {
     expect(ctx.mocks.loggerInfo).toHaveBeenCalledWith(
       '[obs-source-recaller] auto-loaded Camera, Overlay for scene "Scene B"',
     );
+  });
+
+  test('list reports saved snapshots for the current scene', async () => {
+    const setup = await loadScriptApi();
+    const ctx = createMockApi({
+      currentScene: 'Scene B',
+      initialState: {
+        paused: true,
+        snapshots: {
+          Camera: {
+            'Scene B': {
+              sourceName: 'Camera',
+              sceneName: 'Scene B',
+              inputSettings: { zoom: 80 },
+              sceneItemEnabled: true,
+              sceneItemTransform: { positionX: 5 },
+            },
+          },
+          Overlay: {
+            'Scene A': {
+              sourceName: 'Overlay',
+              sceneName: 'Scene A',
+              inputSettings: { file: 'a.png' },
+              sceneItemEnabled: false,
+              sceneItemTransform: { positionY: 25 },
+            },
+          },
+        },
+      },
+    });
+    cleanup = setup(ctx.api);
+
+    const result = await getAction(ctx.actions, 'obs.source-recaller.list').invoke({});
+
+    expect(result.output).toEqual([
+      '[obs-source-recaller] saved snapshots for scene "Scene B": Camera',
+    ]);
+    expect(result.data).toEqual({
+      scene: 'Scene B',
+      paused: true,
+      snapshots: [
+        {
+          source: 'Camera',
+          scene: 'Scene B',
+          sceneItemEnabled: true,
+          inputSettings: { zoom: 80 },
+          sceneItemTransform: { positionX: 5 },
+        },
+      ],
+    });
+  });
+
+  test('explore lists the current-scene sources and explicit refs', async () => {
+    const setup = await loadScriptApi();
+    const ctx = createMockApi({
+      currentScene: 'Scene B',
+      sceneItems: {
+        'Scene B': [
+          { sceneItemId: 8, sourceName: 'Camera', sourceType: 'OBS_SOURCE_TYPE_INPUT' },
+          { sceneItemId: 9, sourceName: 'Keyed.Cam', sourceType: 'OBS_SOURCE_TYPE_INPUT' },
+        ],
+      },
+    });
+    cleanup = setup(ctx.api);
+
+    const result = await getAction(ctx.actions, 'obs.source-recaller.explore').invoke({});
+
+    expect(result.output).toEqual([
+      '[obs-source-recaller] sources in scene "Scene B": Camera, Keyed.Cam',
+      "[obs-source-recaller] use /action obs.source-recaller.save source='<source>' or source='Scene B.<source>'",
+    ]);
+    expect(result.data).toEqual({
+      scene: 'Scene B',
+      sources: [
+        { source: 'Camera', ref: 'Scene B.Camera' },
+        { source: 'Keyed.Cam', ref: 'Scene B.Keyed.Cam' },
+      ],
+    });
   });
 
   test('cleanup unsubscribes scene-change watcher', async () => {
