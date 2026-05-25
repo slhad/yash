@@ -82,10 +82,13 @@ YASH ships a small catalog of tracked example user scripts under `examples/scrip
 bun run cmd /scripts list
 bun run cmd /scripts install obs-startup
 bun run cmd /scripts install obs-source-recaller
+bun run cmd /scripts install obs-source-recaller repair
 ```
 
 - Install target: `${YASH_DATA_DIR}/scripts/<example-id>/`
 - Existing files are never overwritten; install aborts if any target file already exists
+- Use `repair` (or `force`) to refresh tracked files intentionally for a partial or outdated install
+- Repair merges the shipped `config.jsonc` defaults with your current `config.jsonc`, preserving your existing values and unknown keys
 - Restart YASH after install so the copied script is loaded at startup
 
 ### `/action` command

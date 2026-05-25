@@ -91,7 +91,7 @@ describe('/scripts command helper', () => {
       '[scripts]   obs-source-recaller  — Per-scene OBS source snapshot saver with automatic scene-change restores. [not installed]',
     );
     expect(lines).toContain(
-      '[scripts] Usage: /scripts | /scripts list | /scripts install <example-id>',
+      '[scripts] Usage: /scripts | /scripts list | /scripts install <example-id> [repair|force]',
     );
   });
 
@@ -129,6 +129,49 @@ describe('/scripts command helper', () => {
       '[scripts] Bundled example script "obs-startup" is already installed or has conflicting files',
     );
     expect(lines[1]).toBe(`[scripts]   ${path.join(targetDir, 'index.ts')}`);
+    expect(lines[2]).toBe(
+      '[scripts] Re-run with /scripts install <example-id> repair to refresh files and merge config.',
+    );
     expect(await fs.readFile(path.join(targetDir, 'index.ts'), 'utf8')).toBe('// existing');
+  });
+
+  test('repair command refreshes files and merges config without erasing unknown values', async () => {
+    tempDir = await makeRepoTempDir('yash-scripts-command-repair');
+    const targetDir = path.join(tempDir, 'scripts', 'obs-startup');
+    await fs.mkdir(targetDir, { recursive: true });
+    await fs.writeFile(path.join(targetDir, 'index.ts'), '// existing', 'utf8');
+    await fs.writeFile(
+      path.join(targetDir, 'config.jsonc'),
+      `{
+  "prepareScene": "Custom Prepare",
+  "chatInterval": 5,
+  "unknownSetting": "keep-me"
+}
+`,
+      'utf8',
+    );
+
+    const lines: string[] = [];
+    await handleScriptsCommand(
+      ['/scripts', 'install', 'obs-startup', 'repair'],
+      (line) => lines.push(line),
+      tempDir,
+    );
+
+    expect(lines[0]).toBe(
+      `[scripts] repaired obs-startup into ${path.join(tempDir, 'scripts', 'obs-startup')}`,
+    );
+    expect(
+      lines.some((line) => line.includes('merged config.jsonc with current values preserved')),
+    ).toBe(true);
+    const mergedConfig = JSON.parse(
+      await fs.readFile(path.join(targetDir, 'config.jsonc'), 'utf8'),
+    );
+    expect(mergedConfig.prepareScene).toBe('Custom Prepare');
+    expect(mergedConfig.chatInterval).toBe(5);
+    expect(mergedConfig.unknownSetting).toBe('keep-me');
+    expect(mergedConfig.liveScene).toBeDefined();
+    expect(await pathExists(path.join(targetDir, 'config.jsonc.bak'))).toBe(true);
+    expect(await pathExists(path.join(targetDir, 'config.jsonc.new'))).toBe(true);
   });
 });

@@ -147,9 +147,9 @@ const HELP_ENTRIES: SharedHelpEntry[] = [
   {
     command: '/scripts',
     surfaces: ['tui', 'api'],
-    description: 'List or install bundled example scripts',
-    usage: '/scripts [list|install <example-id>]',
-    example: '/scripts install obs-startup',
+    description: 'List, install, or repair bundled example scripts',
+    usage: '/scripts [list|install <example-id> [repair|force]]',
+    example: '/scripts install obs-startup repair',
   },
   {
     command: '/logs',

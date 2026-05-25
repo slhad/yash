@@ -310,4 +310,16 @@ describe('getAutocomplete', () => {
     expect(result.completion).toBe('/scripts install obs-s');
     expect(result.hints).toEqual(['obs-startup', 'obs-source-recaller']);
   });
+
+  test('/scripts install obs-startup  → hints repair flags', () => {
+    const result = getAutocomplete('/scripts install obs-startup ');
+    expect(result.completion).toBeNull();
+    expect(result.hints).toEqual(['repair', 'force']);
+  });
+
+  test('/scripts install obs-startup r → completes to repair', () => {
+    const result = getAutocomplete('/scripts install obs-startup r');
+    expect(result.completion).toBe('/scripts install obs-startup repair');
+    expect(result.hints).toEqual(['repair']);
+  });
 });

@@ -30,9 +30,10 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
         * Available from both the live TUI and IPC (`bun run cmd`) because it does not open a modal or mutate persisted state; it does not clear the merged "Events & Logs" sidebar
     * Command /msg <all|youtube|twitch|kick> <text> - sends a message to the specified platform(s)
     * Command `/action [action-id] [key=value ...]` - lists public IPC-safe actions, invokes actions directly when all args are optional, and shows help/examples when required args still need values
-    * Command `/scripts | /scripts list | /scripts install <example-id>` - list bundled example scripts and copy one into `YASH_DATA_DIR/scripts/<example-id>` without overwriting existing files
+    * Command `/scripts | /scripts list | /scripts install <example-id> [repair|force]` - list bundled example scripts and copy one into `YASH_DATA_DIR/scripts/<example-id>` without overwriting existing files unless repair/force is requested explicitly
         * Intended for AppImage and packaged installs so users can install tracked example scripts without manually extracting repo files
         * Bundled examples currently include `obs-startup` and `obs-source-recaller`
+        * `repair`/`force` refreshes tracked files and merges shipped `config.jsonc` defaults with the user's current `config.jsonc`, preserving existing values and unknown keys
     * Command /marker [description] [| timestamp] - places a stream marker on all platforms
         * Optional description (chapter label, max 140 chars on Twitch)
         * Optional pipe-delimited timestamp accepts raw seconds, `mm:ss`, or `hh:mm:ss` from stream start (used by YouTube for chapter generation; ignored by Twitch which sets position server-side; Kick does not support markers)
@@ -122,7 +123,7 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
     * Both `/cmd` and `cmd` argument forms are accepted (the leading `/` is inserted automatically if omitted)
     * Prints `yash is not running` to stderr and exits with code 1 when yash is not active (socket absent or connection refused)
     * Commands available over IPC: `/action`, `/marker`, `/markers`, `/settings get <key>`, `/settings set <key> <val>`, `/connect`, `/msg`, `/help`, and most non-modal commands
-    * Example-script management commands are also IPC-safe: `bun run cmd /scripts list` and `bun run cmd /scripts install <example-id>`
+    * Example-script management commands are also IPC-safe: `bun run cmd /scripts list`, `bun run cmd /scripts install <example-id>`, and `bun run cmd /scripts install <example-id> repair`
     * IPC command output is also mirrored into the live TUI chat pane, and the invoked command line is echoed there first, so `bun run cmd /markers` surfaces the same visible context as typing `/markers` in-app
     * Commands blocked over IPC (require the live TUI): `/exit`, `/stream`, `/setup-youtube`, `/history`, bare `/settings`, `/chatter`
 
@@ -500,7 +501,7 @@ interface PlatformProvider {
 - `bun run test` - Full check: repo policy validation → lint → typecheck → tests
 - `bun typecheck` - Type-check only (`bun --bun tsc --noEmit`)
 - `bun run cmd <command> [args...]` - Send a command to the running yash TUI via IPC (e.g. `bun run cmd /marker "Intro | 0"`)
-- `bun run cmd /scripts list | /scripts install <example-id>` - List or install bundled example user scripts into `YASH_DATA_DIR/scripts`
+- `bun run cmd /scripts list | /scripts install <example-id> [repair|force]` - List, install, or repair bundled example user scripts in `YASH_DATA_DIR/scripts`
 - `biome check --write` - Lint and format code
 
 ## Release Automation

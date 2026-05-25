@@ -78,6 +78,7 @@ const SETTINGS_KEYS = [
 const CHAT_ARGS = ['clear'];
 const LOGS_ARGS = ['clear', 'tail', 'visible'];
 const SCRIPTS_ARGS = ['list', 'install'];
+const SCRIPTS_INSTALL_ARGS = ['repair', 'force'];
 const SETTINGS_OPS = ['get', 'set'];
 
 /** Longest common prefix of an array of strings. */
@@ -210,6 +211,10 @@ export function getAutocomplete(input: string): {
       return { completion: null, hints: [...BUNDLED_EXAMPLE_SCRIPT_IDS], completions: [] };
     }
 
+    if (rest.endsWith(' ') && first === 'install' && parts.length === 2) {
+      return { completion: null, hints: [...SCRIPTS_INSTALL_ARGS], completions: [] };
+    }
+
     if (first === 'install' && parts.length === 2) {
       const partial = parts[1] ?? '';
       const matches = BUNDLED_EXAMPLE_SCRIPT_IDS.filter((scriptId) => scriptId.startsWith(partial));
@@ -220,6 +225,19 @@ export function getAutocomplete(input: string): {
         completion: prefix.length > partial.length ? fullCompletion : null,
         hints: matches,
         completions: matches.map((scriptId) => `${cmd} install ${scriptId}`),
+      };
+    }
+
+    if (first === 'install' && parts.length === 3) {
+      const partial = parts[2] ?? '';
+      const matches = SCRIPTS_INSTALL_ARGS.filter((arg) => arg.startsWith(partial));
+      if (matches.length === 0) return { completion: null, hints: [], completions: [] };
+      const prefix = longestCommonPrefix(matches);
+      const fullCompletion = `${cmd} install ${parts[1]} ${prefix}`;
+      return {
+        completion: prefix.length > partial.length ? fullCompletion : null,
+        hints: matches,
+        completions: matches.map((arg) => `${cmd} install ${parts[1]} ${arg}`),
       };
     }
 
