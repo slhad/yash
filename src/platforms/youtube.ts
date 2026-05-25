@@ -184,6 +184,34 @@ function describeError(err: unknown): string {
   }
 }
 
+function normalizeYouTubeLiveChatType(messageType: string | undefined): string {
+  return String(messageType ?? '')
+    .trim()
+    .toLowerCase();
+}
+
+function isYouTubeSubscriptionActivityType(messageType: string | undefined): boolean {
+  const normalized = normalizeYouTubeLiveChatType(messageType);
+  return (
+    normalized === 'newsponsorevent' ||
+    normalized === 'newsubscriberevent' ||
+    normalized === 'subscriberevent' ||
+    normalized === 'newmemberevent'
+  );
+}
+
+function isYouTubeMemberMilestoneActivityType(messageType: string | undefined): boolean {
+  return normalizeYouTubeLiveChatType(messageType) === 'membermilestonechatevent';
+}
+
+function isYouTubeMembershipGiftActivityType(messageType: string | undefined): boolean {
+  return normalizeYouTubeLiveChatType(messageType) === 'membershipgiftingevent';
+}
+
+function isYouTubeGiftMembershipReceivedActivityType(messageType: string | undefined): boolean {
+  return normalizeYouTubeLiveChatType(messageType) === 'giftmembershipreceivedevent';
+}
+
 // ---------------------------------------------------------------------------
 // Stream setup config (stored under settings.platforms.youtube.setup)
 // ---------------------------------------------------------------------------
@@ -571,6 +599,7 @@ export class YouTubeProvider implements PlatformProvider {
     for (const item of items) {
       const snippet = item.snippet;
       const messageType = snippet?.type;
+      const normalizedMessageType = normalizeYouTubeLiveChatType(messageType);
       const displayMessage = snippet?.displayMessage ?? '';
 
       // Skip activity events from pre-session history (same cutoff logic as text messages).
@@ -583,7 +612,7 @@ export class YouTubeProvider implements PlatformProvider {
       // Structured detail fields (superChatDetails, newSponsorDetails, etc.) are populated
       // when items come from the REST API. The gRPC decoder only provides displayMessage,
       // type, and publishedAt, so detail fields may be absent; fall back to displayMessage.
-      if (messageType === 'superChatEvent') {
+      if (normalizedMessageType === 'superchatevent') {
         const who = item.authorDetails?.displayName ?? 'someone';
         const amount = String((snippet as any)?.superChatDetails?.amountDisplayString ?? '');
         const msg = amount
@@ -592,21 +621,21 @@ export class YouTubeProvider implements PlatformProvider {
         this._dispatchActivity('superchat', msg);
         continue;
       }
-      if (messageType === 'newSponsorEvent') {
+      if (isYouTubeSubscriptionActivityType(messageType)) {
         const who = item.authorDetails?.displayName ?? 'someone';
         const level = String((snippet as any)?.newSponsorDetails?.memberLevelName ?? '');
         const msg = displayMessage || `${who} became a member${level ? ` (${level})` : ''}`;
         this._dispatchActivity('member', msg);
         continue;
       }
-      if (messageType === 'memberMilestoneChatEvent') {
+      if (isYouTubeMemberMilestoneActivityType(messageType)) {
         const who = item.authorDetails?.displayName ?? 'someone';
         const level = String((snippet as any)?.memberMilestoneChatDetails?.memberLevelName ?? '');
         const msg = displayMessage || `${who} became a member${level ? ` (${level})` : ''}`;
         this._dispatchActivity('member', msg);
         continue;
       }
-      if (messageType === 'membershipGiftingEvent') {
+      if (isYouTubeMembershipGiftActivityType(messageType)) {
         const who = item.authorDetails?.displayName ?? 'someone';
         const count = Number((snippet as any)?.membershipGiftingDetails?.giftMembershipsCount ?? 0);
         const msg =
@@ -616,13 +645,18 @@ export class YouTubeProvider implements PlatformProvider {
         this._dispatchActivity('gift', msg);
         continue;
       }
-      if (messageType === 'giftMembershipReceivedEvent') {
+      if (isYouTubeGiftMembershipReceivedActivityType(messageType)) {
         this._dispatchActivity('gift', displayMessage || 'Someone received a gifted membership');
         continue;
       }
 
       const isTextMessage =
-        messageType === undefined || messageType === '' || messageType === 'textMessageEvent';
+        normalizedMessageType.length === 0 || normalizedMessageType === 'textmessageevent';
+      if (!isTextMessage && normalizedMessageType.length > 0) {
+        defaultLogger.debug(
+          `[YouTube] unhandled live chat event type "${messageType}" (${displayMessage || 'no display message'})`,
+        );
+      }
       if (!isTextMessage || displayMessage.length === 0) continue;
       if (
         cutoffMs !== null &&
