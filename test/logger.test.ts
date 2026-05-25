@@ -21,6 +21,13 @@ describe('Logger', () => {
     logger.setLevel(LogLevel.ERROR);
   });
 
+  test('isEnabled reflects the current threshold', () => {
+    const logger = new Logger({ level: LogLevel.INFO });
+    expect(logger.isEnabled(LogLevel.DEBUG)).toBe(false);
+    expect(logger.isEnabled(LogLevel.INFO)).toBe(true);
+    expect(logger.isEnabled(LogLevel.ERROR)).toBe(true);
+  });
+
   test('should log at DEBUG level when configured', () => {
     const logger = new Logger({ level: LogLevel.DEBUG, timestamp: false, prefix: '' });
     const spy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);

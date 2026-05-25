@@ -32,26 +32,30 @@ export class Logger {
     this.level = level;
   }
 
+  isEnabled(level: LogLevel): boolean {
+    return this.level <= level;
+  }
+
   debug(message: string, ...args: unknown[]): void {
-    if (this.level <= LogLevel.DEBUG) {
+    if (this.isEnabled(LogLevel.DEBUG)) {
       this.log('DEBUG', message, args);
     }
   }
 
   info(message: string, ...args: unknown[]): void {
-    if (this.level <= LogLevel.INFO) {
+    if (this.isEnabled(LogLevel.INFO)) {
       this.log('INFO', message, args);
     }
   }
 
   warn(message: string, ...args: unknown[]): void {
-    if (this.level <= LogLevel.WARN) {
+    if (this.isEnabled(LogLevel.WARN)) {
       this.log('WARN', message, args);
     }
   }
 
   error(message: string, ...args: unknown[]): void {
-    if (this.level <= LogLevel.ERROR) {
+    if (this.isEnabled(LogLevel.ERROR)) {
       this.log('ERROR', message, args);
     }
   }
