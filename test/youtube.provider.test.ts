@@ -6,7 +6,7 @@ import type { ChatMessage } from '../src/platforms/base';
 import { StreamStatus } from '../src/platforms/base';
 import { YouTubeProvider } from '../src/platforms/youtube';
 import { reloadConfig } from '../src/utils/config';
-import { defaultLogger } from '../src/utils/logger';
+import { defaultLogger, LogLevel } from '../src/utils/logger';
 import { getSettingsPath, settingsStore } from '../src/utils/settings';
 import {
   makeRepoTempDir,
@@ -2499,7 +2499,7 @@ describe('YouTubeProvider — _dispatchStreamItems activity events', () => {
     expect(chatMessages).toHaveLength(1);
   });
 
-  test('unknown messageType is skipped silently (no activity, no chat)', () => {
+  test('unknown messageType is skipped silently without debug logging at INFO level', () => {
     const p = makeProvider() as any;
     const activityEvents: unknown[] = [];
     const chatMessages: unknown[] = [];
@@ -2517,10 +2517,36 @@ describe('YouTubeProvider — _dispatchStreamItems activity events', () => {
 
       expect(activityEvents).toHaveLength(0);
       expect(chatMessages).toHaveLength(0);
+      expect(debugCalls).toHaveLength(0);
+    } finally {
+      (defaultLogger as any).debug = originalDebug;
+    }
+  });
+
+  test('unknown messageType logs a debug breadcrumb when DEBUG is enabled', () => {
+    const p = makeProvider() as any;
+    const activityEvents: unknown[] = [];
+    const chatMessages: unknown[] = [];
+    const debugCalls: string[] = [];
+    const originalDebug = defaultLogger.debug.bind(defaultLogger);
+    (defaultLogger as any).debug = (message: string) => {
+      debugCalls.push(message);
+    };
+    try {
+      defaultLogger.setLevel(LogLevel.DEBUG);
+      p.onActivityEvent((ev: unknown) => activityEvents.push(ev));
+      p.onMessage((msg: unknown) => chatMessages.push(msg));
+
+      const item = makeItem('unknownFutureEventType', { displayMessage: 'some message' });
+      p._dispatchStreamItems([item], true);
+
+      expect(activityEvents).toHaveLength(0);
+      expect(chatMessages).toHaveLength(0);
       expect(debugCalls).toContain(
         '[YouTube] unhandled live chat event type "unknownFutureEventType" (some message)',
       );
     } finally {
+      defaultLogger.setLevel(LogLevel.INFO);
       (defaultLogger as any).debug = originalDebug;
     }
   });

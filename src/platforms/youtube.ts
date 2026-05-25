@@ -36,7 +36,7 @@ import {
   type ServiceDefinition,
 } from '@grpc/grpc-js';
 import { getConfig, reloadConfig } from '../utils/config';
-import { defaultLogger } from '../utils/logger';
+import { defaultLogger, LogLevel } from '../utils/logger';
 import { settingsStore } from '../utils/settings';
 import {
   deserializeYouTubeLiveChatResponse,
@@ -652,7 +652,11 @@ export class YouTubeProvider implements PlatformProvider {
 
       const isTextMessage =
         normalizedMessageType.length === 0 || normalizedMessageType === 'textmessageevent';
-      if (!isTextMessage && normalizedMessageType.length > 0) {
+      if (
+        !isTextMessage &&
+        normalizedMessageType.length > 0 &&
+        defaultLogger.isEnabled(LogLevel.DEBUG)
+      ) {
         defaultLogger.debug(
           `[YouTube] unhandled live chat event type "${messageType}" (${displayMessage || 'no display message'})`,
         );
