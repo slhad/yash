@@ -73,6 +73,7 @@ import { parseMarkerArgs, parseMarkersArgs, parseSettingsValue } from './utils/w
 import './index.ts'; // start Bun.serve web server in the same process
 import { IpcActionError, registry } from './actions/registry';
 import { startIpcServer } from './ipc/server';
+import { handleScriptsCommand } from './scripts/commands';
 import { loadUserScripts } from './scripts/loader';
 import './actions/markers';
 import './actions/chat';
@@ -3204,6 +3205,10 @@ const commandHandlers: Record<
         '[system] Common keys: stream.title, stream.description, chat.maxHistorySize, demo, title.visible, logs.visible, logs.height, logs.tail, viewers.visible, viewers.mode, messages.position, chat.timestamps.visible, tui.emotes.scale, events.visible, events.tail, events.width, platforms.<provider>.showViewers, platforms.youtube.setup.*',
       );
     }
+  },
+
+  '/scripts': async (parts, emit) => {
+    await handleScriptsCommand(parts, emit, getDataDir());
   },
 
   '/chat': async (parts, emit) => {

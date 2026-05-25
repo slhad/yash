@@ -47,10 +47,34 @@ export type ScriptApi = {
   registerAction: (action: UserScriptAction) => void;
   obs: {
     isConnected: () => boolean;
+    getSceneList: () => Promise<{
+      scenes: Array<{ sceneName: string }>;
+      currentProgramSceneName?: string;
+    }>;
+    getCurrentScene: () => Promise<string>;
     setCurrentScene: (name: string) => Promise<void>;
+    getInputSettings: (inputName: string) => Promise<Record<string, unknown>>;
     setInputSettings: (inputName: string, inputSettings: Record<string, unknown>) => Promise<void>;
     setInputMute: (inputName: string, muted: boolean) => Promise<void>;
     getSceneItemId: (sceneName: string, sourceName: string) => Promise<number>;
+    getSceneItemEnabled: (sceneName: string, sceneItemId: number) => Promise<boolean>;
+    getSceneItemTransform: (
+      sceneName: string,
+      sceneItemId: number,
+    ) => Promise<Record<string, unknown>>;
+    getSceneItemState: (
+      sceneName: string,
+      sourceName: string,
+    ) => Promise<{
+      sceneItemId: number;
+      sceneItemEnabled: boolean;
+      sceneItemTransform: Record<string, unknown>;
+    }>;
+    setSceneItemTransform: (
+      sceneName: string,
+      sceneItemId: number,
+      sceneItemTransform: Record<string, unknown>,
+    ) => Promise<void>;
     setSceneItemEnabled: (
       sceneName: string,
       sceneItemId: number,
@@ -60,6 +84,8 @@ export type ScriptApi = {
     startStream: () => Promise<void>;
     /** Returns an unsubscribe function. Also tracked by the loader for cleanup. */
     subscribeToStatusChanges: (cb: (connected: boolean) => void) => () => void;
+    /** Filtered OBS event helper for CurrentProgramSceneChanged. */
+    subscribeToSceneChanges: (cb: (sceneName: string, event: unknown) => void) => () => void;
   };
   chat: {
     /** Send to all platforms (empty array) or specific ones (e.g. ['twitch']). */

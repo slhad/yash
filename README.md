@@ -42,6 +42,8 @@ bun run cmd /settings set demo true
 bun run cmd /connect youtube
 bun run cmd /msg all Hello chat
 bun run cmd /help
+bun run cmd /scripts list
+bun run cmd /scripts install obs-source-recaller
 ```
 
 Both forms are accepted — `bun run cmd marker` and `bun run cmd /marker` are equivalent; the leading `/` is added automatically if omitted.
@@ -71,6 +73,20 @@ Commands invoked over IPC are also echoed into the live TUI chat pane before the
 | `/settings` (bare) | Requires TUI settings modal |
 
 `/settings get <key>` and `/settings set <key> <value>` work normally over IPC.
+
+### Bundled example scripts
+
+YASH ships a small catalog of tracked example user scripts under `examples/scripts/`, and the live TUI/IPC command surface can copy them into your runtime script directory without manual symlinks:
+
+```sh
+bun run cmd /scripts list
+bun run cmd /scripts install obs-startup
+bun run cmd /scripts install obs-source-recaller
+```
+
+- Install target: `${YASH_DATA_DIR}/scripts/<example-id>/`
+- Existing files are never overwritten; install aborts if any target file already exists
+- Restart YASH after install so the copied script is loaded at startup
 
 ### `/action` command
 
@@ -175,6 +191,26 @@ For example, the bundled `obs-shutdown` action can be configured at:
 ```
 
 That lets `/action obs.shutdown.initiate` run with config-backed defaults, optionally keep an OBS text source updated during the countdown, and choose whether the countdown should actually stop the OBS stream when it reaches zero.
+
+Runtime script state written with `api.settings.set(...)` persists separately in `YASH_DATA_DIR/settings.json` under `scripts.<scriptId>.*`. Reads through `api.settings.get(...)` merge `config.jsonc` defaults with that persisted runtime state, so example scripts can keep mutable snapshots or pause flags without rewriting their config file.
+
+## Example script: `obs-source-recaller`
+
+The bundled `obs-source-recaller` example remembers one OBS source's settings per scene and automatically restores them on `CurrentProgramSceneChanged`.
+
+Actions:
+
+- `obs.source-recaller.save source=<source>`
+- `obs.source-recaller.load source=<source>`
+- `obs.source-recaller.pause`
+- `obs.source-recaller.resume`
+
+Typical flow:
+
+1. Install it with `bun run cmd /scripts install obs-source-recaller`
+2. Adjust a source in one OBS scene and run `/action obs.source-recaller.save source='Camera'`
+3. Switch to another scene, adjust the same source differently, and save again
+4. Leave the watcher active so later scene changes restore the matching snapshot automatically
 
 ## Security
 

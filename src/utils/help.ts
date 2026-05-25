@@ -145,6 +145,13 @@ const HELP_ENTRIES: SharedHelpEntry[] = [
     ],
   },
   {
+    command: '/scripts',
+    surfaces: ['tui', 'api'],
+    description: 'List or install bundled example scripts',
+    usage: '/scripts [list|install <example-id>]',
+    example: '/scripts install obs-startup',
+  },
+  {
     command: '/logs',
     surfaces: ['tui'],
     description: 'Manage logs',

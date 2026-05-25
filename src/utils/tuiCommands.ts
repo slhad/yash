@@ -1,4 +1,5 @@
 import type { ActionRegistry } from '../actions/registry';
+import { BUNDLED_EXAMPLE_SCRIPT_IDS } from '../scripts/examples';
 import { CHAT_CLEAR_TARGETS } from './chatClear';
 
 /**
@@ -22,6 +23,7 @@ export const TUI_COMMANDS = [
   '/marker',
   '/markers',
   '/msg',
+  '/scripts',
   '/settings',
   '/setup-youtube',
   '/stream',
@@ -75,6 +77,7 @@ const SETTINGS_KEYS = [
 ];
 const CHAT_ARGS = ['clear'];
 const LOGS_ARGS = ['clear', 'tail', 'visible'];
+const SCRIPTS_ARGS = ['list', 'install'];
 const SETTINGS_OPS = ['get', 'set'];
 
 /** Longest common prefix of an array of strings. */
@@ -193,6 +196,34 @@ export function getAutocomplete(input: string): {
 
   if (cmd === '/logs') {
     return completeToken(LOGS_ARGS, restLower);
+  }
+
+  if (cmd === '/scripts') {
+    if (!rest.includes(' ')) {
+      return completeToken(SCRIPTS_ARGS, restLower);
+    }
+
+    const parts = restLower.split(/\s+/).filter(Boolean);
+    const first = parts[0] ?? '';
+
+    if (rest.endsWith(' ') && first === 'install' && parts.length === 1) {
+      return { completion: null, hints: [...BUNDLED_EXAMPLE_SCRIPT_IDS], completions: [] };
+    }
+
+    if (first === 'install' && parts.length === 2) {
+      const partial = parts[1] ?? '';
+      const matches = BUNDLED_EXAMPLE_SCRIPT_IDS.filter((scriptId) => scriptId.startsWith(partial));
+      if (matches.length === 0) return { completion: null, hints: [], completions: [] };
+      const prefix = longestCommonPrefix(matches);
+      const fullCompletion = `${cmd} install ${prefix}`;
+      return {
+        completion: prefix.length > partial.length ? fullCompletion : null,
+        hints: matches,
+        completions: matches.map((scriptId) => `${cmd} install ${scriptId}`),
+      };
+    }
+
+    return { completion: null, hints: [], completions: [] };
   }
 
   if (cmd === '/markers') {

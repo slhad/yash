@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from 'bun:test';
+import { beforeEach, describe, expect, test, vi } from 'bun:test';
 import { ObsService } from '../src/services/obs.service';
 
 describe('ObsService', () => {
@@ -96,6 +96,79 @@ describe('ObsService', () => {
     expect(messageReceived).toBeNull();
 
     unsubscribe();
+  });
+
+  test('should expose current scene and scene item state helpers', async () => {
+    await obsService.connect();
+
+    await expect(obsService.getCurrentScene()).resolves.toBe('Scene 1');
+    await expect(obsService.getInputSettings('Camera')).resolves.toEqual({});
+    await expect(obsService.getSceneItemEnabled('Scene 1', 7)).resolves.toBe(true);
+    await expect(obsService.getSceneItemTransform('Scene 1', 7)).resolves.toMatchObject({
+      positionX: 0,
+      positionY: 0,
+      scaleX: 1,
+      scaleY: 1,
+    });
+    await obsService.setSceneItemTransform('Scene 1', 7, { positionX: 25, positionY: 30 });
+  });
+
+  test('should resolve scene item state by source name', async () => {
+    await obsService.connect();
+    const sendRequestSpy = vi.spyOn(obsService, 'sendRequest');
+
+    sendRequestSpy.mockImplementation(async (requestType, requestData) => {
+      if (requestType === 'GetSceneItemId') return { sceneItemId: 42 };
+      if (requestType === 'GetSceneItemEnabled') return { sceneItemEnabled: false };
+      if (requestType === 'GetSceneItemTransform') {
+        return { sceneItemTransform: { positionX: 12, positionY: 34 } };
+      }
+      return {};
+    });
+
+    await expect(obsService.getSceneItemState('Gameplay', 'Camera')).resolves.toEqual({
+      sceneItemId: 42,
+      sceneItemEnabled: false,
+      sceneItemTransform: { positionX: 12, positionY: 34 },
+    });
+
+    expect(sendRequestSpy).toHaveBeenCalledWith('GetSceneItemId', {
+      sceneName: 'Gameplay',
+      sourceName: 'Camera',
+    });
+    expect(sendRequestSpy).toHaveBeenCalledWith('GetSceneItemEnabled', {
+      sceneName: 'Gameplay',
+      sceneItemId: 42,
+    });
+    expect(sendRequestSpy).toHaveBeenCalledWith('GetSceneItemTransform', {
+      sceneName: 'Gameplay',
+      sceneItemId: 42,
+    });
+  });
+
+  test('should filter current scene change subscriptions', () => {
+    const scenes: string[] = [];
+    const unsubscribe = obsService.subscribeToCurrentSceneChanges((sceneName) => {
+      scenes.push(sceneName);
+    });
+
+    (obsService as any).notifyMessages({ eventType: 'StreamStateChanged', eventData: {} });
+    (obsService as any).notifyMessages({
+      eventType: 'CurrentProgramSceneChanged',
+      eventData: { sceneName: 'BRB' },
+    });
+    (obsService as any).notifyMessages({
+      eventType: 'CurrentProgramSceneChanged',
+      eventData: { sceneName: 'Gameplay' },
+    });
+
+    unsubscribe();
+    (obsService as any).notifyMessages({
+      eventType: 'CurrentProgramSceneChanged',
+      eventData: { sceneName: 'Ignored' },
+    });
+
+    expect(scenes).toEqual(['BRB', 'Gameplay']);
   });
 
   test('should unsubscribe from status changes', async () => {

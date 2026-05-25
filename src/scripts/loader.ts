@@ -5,6 +5,7 @@ import { IPC_ERROR_CODES, type YashActionDefinition } from '../actions/types';
 import { chatService, obsService, settingsStore } from '../services';
 import { defaultLogger } from '../utils/logger';
 import { getValueAtPath, loadScriptConfig } from '../utils/scriptConfig';
+import { deepMerge } from '../utils/settings';
 
 // ─── Types (mirrored in ~/.config/yash/scripts/types.d.ts for user IDE support) ──
 
@@ -36,10 +37,34 @@ export type ScriptApi = {
   registerAction: (action: UserScriptAction) => void;
   obs: {
     isConnected: () => boolean;
+    getSceneList: () => Promise<{
+      scenes: Array<{ sceneName: string }>;
+      currentProgramSceneName?: string;
+    }>;
+    getCurrentScene: () => Promise<string>;
     setCurrentScene: (name: string) => Promise<void>;
+    getInputSettings: (inputName: string) => Promise<Record<string, unknown>>;
     setInputSettings: (inputName: string, inputSettings: Record<string, unknown>) => Promise<void>;
     setInputMute: (inputName: string, muted: boolean) => Promise<void>;
     getSceneItemId: (sceneName: string, sourceName: string) => Promise<number>;
+    getSceneItemEnabled: (sceneName: string, sceneItemId: number) => Promise<boolean>;
+    getSceneItemTransform: (
+      sceneName: string,
+      sceneItemId: number,
+    ) => Promise<Record<string, unknown>>;
+    getSceneItemState: (
+      sceneName: string,
+      sourceName: string,
+    ) => Promise<{
+      sceneItemId: number;
+      sceneItemEnabled: boolean;
+      sceneItemTransform: Record<string, unknown>;
+    }>;
+    setSceneItemTransform: (
+      sceneName: string,
+      sceneItemId: number,
+      sceneItemTransform: Record<string, unknown>,
+    ) => Promise<void>;
     setSceneItemEnabled: (
       sceneName: string,
       sceneItemId: number,
@@ -48,6 +73,7 @@ export type ScriptApi = {
     stopStream: () => Promise<void>;
     startStream: () => Promise<void>;
     subscribeToStatusChanges: (cb: (connected: boolean) => void) => () => void;
+    subscribeToSceneChanges: (cb: (sceneName: string, event: unknown) => void) => () => void;
   };
   chat: {
     sendMessage: (msg: string, platforms?: string[]) => Promise<void>;
@@ -131,17 +157,33 @@ function createScriptApi(scriptId: string, cleanupFns: (() => void)[], dataDir: 
 
     obs: {
       isConnected: () => obsService.isConnected(),
+      getSceneList: () => obsService.getSceneList(),
+      getCurrentScene: () => obsService.getCurrentScene(),
       setCurrentScene: (name) => obsService.setCurrentScene(name),
+      getInputSettings: (inputName) => obsService.getInputSettings(inputName),
       setInputSettings: (inputName, inputSettings) =>
         obsService.setInputSettings(inputName, inputSettings),
       setInputMute: (inputName, muted) => obsService.setInputMute(inputName, muted),
       getSceneItemId: (sceneName, sourceName) => obsService.getSceneItemId(sceneName, sourceName),
+      getSceneItemEnabled: (sceneName, sceneItemId) =>
+        obsService.getSceneItemEnabled(sceneName, sceneItemId),
+      getSceneItemTransform: (sceneName, sceneItemId) =>
+        obsService.getSceneItemTransform(sceneName, sceneItemId),
+      getSceneItemState: (sceneName, sourceName) =>
+        obsService.getSceneItemState(sceneName, sourceName),
+      setSceneItemTransform: (sceneName, sceneItemId, sceneItemTransform) =>
+        obsService.setSceneItemTransform(sceneName, sceneItemId, sceneItemTransform),
       setSceneItemEnabled: (sceneName, sceneItemId, enabled) =>
         obsService.setSceneItemEnabled(sceneName, sceneItemId, enabled),
       stopStream: () => obsService.stopStream(),
       startStream: () => obsService.startStream(),
       subscribeToStatusChanges: (cb) => {
         const unsub = obsService.subscribeToStatusChanges(cb);
+        cleanupFns.push(unsub);
+        return unsub;
+      },
+      subscribeToSceneChanges: (cb) => {
+        const unsub = obsService.subscribeToCurrentSceneChanges(cb);
         cleanupFns.push(unsub);
         return unsub;
       },
@@ -152,8 +194,20 @@ function createScriptApi(scriptId: string, cleanupFns: (() => void)[], dataDir: 
     },
 
     settings: {
-      get: <T>(key: string, defaultVal: T): T =>
-        (getValueAtPath(scriptConfig(), key, defaultVal) as T) ?? defaultVal,
+      get: <T>(key: string, defaultVal: T): T => {
+        const configValue = getValueAtPath(scriptConfig(), key, undefined);
+        const persistedValue = settingsStore.get(`scripts.${scriptId}.${key}`, undefined);
+        const mergedValue =
+          configValue &&
+          typeof configValue === 'object' &&
+          !Array.isArray(configValue) &&
+          persistedValue &&
+          typeof persistedValue === 'object' &&
+          !Array.isArray(persistedValue)
+            ? deepMerge(configValue, persistedValue)
+            : (persistedValue ?? configValue);
+        return (mergedValue as T | undefined) ?? defaultVal;
+      },
       set: (key, value) => settingsStore.set(`scripts.${scriptId}.${key}`, value),
     },
 
@@ -199,9 +253,9 @@ export default function setup(api) {
 ## Available API (passed as first argument to setup)
 
 - \`api.registerAction(action)\` — register an IPC-accessible action
-- \`api.obs\` — isConnected(), setCurrentScene(name), stopStream(), startStream(), subscribeToStatusChanges(cb)
+- \`api.obs\` — scene queries, input/source state helpers, scene-item transform/enabled helpers, scene-change subscription, plus stream controls
 - \`api.chat\` — sendMessage(text, platforms?)
-- \`api.settings\` — get(key, default), set(key, value)  [namespaced to scripts.<filename>.*]
+- \`api.settings\` — get(key, default), set(key, value)  [reads config.jsonc defaults merged with namespaced runtime state under scripts.<filename>.*]
 - \`api.logger\` — info/warn/error  [prefixed with [script:<filename>]]
 
 ## Cleanup
@@ -228,6 +282,8 @@ Create the file (JSONC = JSON with // and /* */ comments):
 \`\`\`
 
 Read it in your script with \`api.settings.get('myKey', defaultValue)\`.
+Values written later with \`api.settings.set('myKey', value)\` persist in \`settings.json\`
+under \`scripts.<scriptId>.*\` and override the config defaults on subsequent reads.
 
 ## Notes
 
@@ -304,14 +360,22 @@ export type ScriptApi = {
   registerAction: (action: UserScriptAction) => void;
   obs: {
     isConnected: () => boolean;
+    getSceneList: () => Promise<{ scenes: Array<{ sceneName: string }>; currentProgramSceneName?: string }>;
+    getCurrentScene: () => Promise<string>;
     setCurrentScene: (name: string) => Promise<void>;
+    getInputSettings: (inputName: string) => Promise<Record<string, unknown>>;
     setInputSettings: (inputName: string, inputSettings: Record<string, unknown>) => Promise<void>;
     setInputMute: (inputName: string, muted: boolean) => Promise<void>;
     getSceneItemId: (sceneName: string, sourceName: string) => Promise<number>;
+    getSceneItemEnabled: (sceneName: string, sceneItemId: number) => Promise<boolean>;
+    getSceneItemTransform: (sceneName: string, sceneItemId: number) => Promise<Record<string, unknown>>;
+    getSceneItemState: (sceneName: string, sourceName: string) => Promise<{ sceneItemId: number; sceneItemEnabled: boolean; sceneItemTransform: Record<string, unknown> }>;
+    setSceneItemTransform: (sceneName: string, sceneItemId: number, sceneItemTransform: Record<string, unknown>) => Promise<void>;
     setSceneItemEnabled: (sceneName: string, sceneItemId: number, enabled: boolean) => Promise<void>;
     stopStream: () => Promise<void>;
     startStream: () => Promise<void>;
     subscribeToStatusChanges: (cb: (connected: boolean) => void) => () => void;
+    subscribeToSceneChanges: (cb: (sceneName: string, event: unknown) => void) => () => void;
   };
   chat: {
     sendMessage: (msg: string, platforms?: string[]) => Promise<void>;

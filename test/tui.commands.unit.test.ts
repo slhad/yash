@@ -25,6 +25,7 @@ describe('TUI_COMMANDS', () => {
       '/marker',
       '/markers',
       '/msg',
+      '/scripts',
       '/settings',
     ];
     for (const cmd of expected) {
@@ -189,6 +190,12 @@ describe('getAutocomplete', () => {
     expect(hints).toEqual(['/settings']);
   });
 
+  test('/scr → completes to /scripts', () => {
+    const result = getAutocomplete('/scr');
+    expect(result.completion).toBe('/scripts');
+    expect(result.hints).toEqual(['/scripts']);
+  });
+
   test('/chat  → hints clear', () => {
     const result = getAutocomplete('/chat ');
     expect(result.hints).toEqual(['clear']);
@@ -279,5 +286,28 @@ describe('getAutocomplete', () => {
     const result = getAutocomplete('/markers all ');
     expect(result.completion).toBeNull();
     expect(result.hints).toEqual(['<limit>']);
+  });
+
+  test('/scripts  → hints list and install', () => {
+    const result = getAutocomplete('/scripts ');
+    expect(result.hints).toEqual(['list', 'install']);
+  });
+
+  test('/scripts i → completes to /scripts install', () => {
+    const result = getAutocomplete('/scripts i');
+    expect(result.completion).toBe('/scripts install');
+    expect(result.hints).toEqual(['install']);
+  });
+
+  test('/scripts install  → hints bundled example ids', () => {
+    const result = getAutocomplete('/scripts install ');
+    expect(result.completion).toBeNull();
+    expect(result.hints).toEqual(['obs-startup', 'obs-source-recaller']);
+  });
+
+  test('/scripts install obs → completes to obs-startup', () => {
+    const result = getAutocomplete('/scripts install obs');
+    expect(result.completion).toBe('/scripts install obs-s');
+    expect(result.hints).toEqual(['obs-startup', 'obs-source-recaller']);
   });
 });

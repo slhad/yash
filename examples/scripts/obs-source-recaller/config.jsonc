@@ -1,0 +1,4 @@
+{
+  // Start with automatic scene recalls paused until you explicitly resume them.
+  "startPaused": false
+}
