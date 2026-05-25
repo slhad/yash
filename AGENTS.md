@@ -58,7 +58,7 @@ Never commit binary files (images, GIFs, fonts, archives, compiled artifacts, et
 - Keep PR/demo source artifacts there too: VHS tapes, recording helper scripts,
   Playwright videos, converted GIFs, and screenshots all belong under
   `[tmp]/...`, not in tracked repo folders.
-- For demo GIFs or screenshots that need to be publicly hosted (e.g. inlined in a PR), upload them to the dedicated **`screenshots` release** — a permanent prerelease used exclusively as an asset store:
+- For demo GIFs or screenshots that need a stable public download URL, upload them to the dedicated **`screenshots` release** — a permanent prerelease used exclusively as an asset store:
   ```bash
   gh release upload screenshots tmp/my-demo.gif --clobber
   # URL will be: https://github.com/slhad/yash/releases/download/screenshots/my-demo.gif
@@ -73,6 +73,12 @@ Never commit binary files (images, GIFs, fonts, archives, compiled artifacts, et
   ```
 - Never create a `docs/`, `assets/`, or similar directory just to store binaries in git.
 - Never add new files under `demo/` for PR artifacts; use `tmp/` plus hosted release assets instead.
+- For PR-body inline videos, do **not** use release asset URLs as the primary embed target. GitHub treats those as downloads and does not inline them reliably. Instead, use the repo-local Playwright uploader:
+  ```bash
+  bun ~/.agents/skills/github-pr-attachments/scripts/upload_pr_attachment.ts --pr <number> --file tmp/<feature>.mp4
+  ```
+  That workflow uploads through GitHub's PR conversation editor, produces a `https://github.com/user-attachments/assets/...` URL, and can optionally patch the PR body in place with `--mode apply --placeholder <token>`.
+  The global skill script keeps its persistent profile at `~/.cache/codex/github-pr-attachments/playwright-profile`, so one GitHub sign-in can be reused across repositories.
 
 ## Protobuf / Long integer shim (YouTube gRPC decoder)
 
@@ -111,14 +117,15 @@ For steps that are **not applicable** to the current change (e.g. no TUI changes
 5. **Live TUI check** — verify the feature in the running yash tmux session (window `yash:all`); use the `/test-live` skill
 6. **Live Web UI check** — verify the feature in the web UI
 7. **VHS recording** — create tapes, helper scripts, and generated GIFs under `tmp/` only; generate the TUI demo GIF last, once all checks above pass; host it via the `screenshots` release and link it in the Demo section
-8. **Playwright recording** — generate the Web UI demo GIF last, once all checks above pass:
+8. **Playwright recording** — generate the Web UI demo MP4 last, once all checks above pass:
    ```bash
-   RECORD_VIDEO=1 npx playwright test --project=chromium
+   RECORD_VIDEO=1 bunx playwright test --project=chromium
    # videos land in tmp/playwright-output/<test-name>/video.webm
-   ffmpeg -i tmp/playwright-output/<test-name>/video.webm -vf "fps=10,scale=800:-1:flags=lanczos" tmp/<feature>-web.gif
-   gh release upload screenshots tmp/<feature>-web.gif --clobber
+   ffmpeg -i tmp/playwright-output/<test-name>/video.webm -pix_fmt yuv420p -movflags +faststart tmp/<feature>-web.mp4
+   bun ~/.agents/skills/github-pr-attachments/scripts/upload_pr_attachment.ts --pr <number> --file tmp/<feature>-web.mp4
    ```
-   Keep any helper scripts, converted media, and staging files under `tmp/`, and link the resulting hosted URL in the Demo section alongside the VHS GIF.
+   Keep any helper scripts, converted media, and staging files under `tmp/`. Use the emitted `github.com/user-attachments/assets/...` URL on its own line in the PR body so GitHub renders the video inline. If the PR body is templated with a placeholder, use `--mode apply --placeholder <token>` to patch it directly.
+   For demos that show external emotes or images, mock those assets locally (for example with `data:` URLs in Playwright API mocks) and wait for the rendered `<img>` elements to report `complete` before ending the recording; otherwise the captured video can show transient broken-image frames.
 
 9. **Docs update** — before opening the PR, update `SPECS.md` to reflect any new or changed commands, settings, API routes, env vars, or behavior; update `README.md` if setup steps, IPC behavior, or architecture changed.
 

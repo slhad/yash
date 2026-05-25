@@ -132,6 +132,11 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
 * Screenshots of webviews made with playwright
 * Gif of TUI made with VHS
 * All temporary demo assets used to produce those deliverables must live under `[tmp]/...`; only hosted URLs belong in PRs/docs, not repo-committed binaries or ad hoc `demo/` files
+* PR-body inline videos must use GitHub `user-attachments` URLs generated through the shared GitHub PR attachment helper (`bun ~/.agents/skills/github-pr-attachments/scripts/upload_pr_attachment.ts ...`); release asset URLs are acceptable as downloads but are not the authoritative inline-video path
+
+## Development Commands
+- `bun ~/.agents/skills/github-pr-attachments/scripts/upload_pr_attachment.ts --file tmp/<artifact>.mp4 [--pr <number|url>] [--mode upload|apply]` — upload a local artifact through GitHub's PR editor to mint a `github.com/user-attachments/assets/...` URL. In `apply` mode, the script can replace a placeholder in the current PR body (or a provided body file) and save it through `gh pr edit`.
+  - Default Playwright profile: `~/.cache/codex/github-pr-attachments/playwright-profile`
 
 ## Documentation Requirements
 - `README.md` must contain a Mermaid diagram describing the `/stream` command validation and execution flow end to end
@@ -147,6 +152,7 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
 
 ### Runtime and Testing
 - Must use [Bun](https://bun.sh) as the runtime and test runner (`bun run`, `bun test`)
+- Playwright-based repo helpers that interact with GitHub must use a persistent browser profile so the user can sign in once and reuse the saved session for later PR attachment uploads
 
 ### Linting and Formatting
 - Must use [Biome](https://biomejs.dev) for linting and formatting (`biome check --write`)
