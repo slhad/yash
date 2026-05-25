@@ -14,7 +14,7 @@ export type SharedTwitchEmoteDefinition = FfzEmoteDefinition & {
   staticUrl?: string;
 };
 
-export type SharedTwitchEmoteSourcePayload = {
+export type SharedEmoteSourcePayload = {
   channel: string | null;
   count: number;
   emotes: Record<string, SharedTwitchEmoteDefinition>;
@@ -24,8 +24,8 @@ export type FfzEmoteApiPayload = {
   channel: string | null;
   emotes: Record<string, SharedTwitchEmoteDefinition>;
   sources: {
-    ffz: SharedTwitchEmoteSourcePayload;
-    twitch: SharedTwitchEmoteSourcePayload;
+    ffz: SharedEmoteSourcePayload;
+    native: SharedEmoteSourcePayload;
   };
 };
 
@@ -164,7 +164,7 @@ export async function getFfzEmotePayload(
       emotes: {},
       sources: {
         ffz: { channel: null, count: 0, emotes: {} },
-        twitch: { channel: null, count: 0, emotes: {} },
+        native: { channel: null, count: 0, emotes: {} },
       },
     };
   }
@@ -208,7 +208,7 @@ export async function getFfzEmotePayload(
         count: Object.keys(ffzEmotes).length,
         emotes: ffzEmotes,
       },
-      twitch: {
+      native: {
         channel,
         count: Object.keys(twitchEmotes).length,
         emotes: twitchEmotes,
