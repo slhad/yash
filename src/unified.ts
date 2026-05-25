@@ -33,6 +33,8 @@ type StatusInfo = {
 const STORAGE_KEY = 'yash_msgbox_position';
 const POSITIONS = ['bottom', 'top', 'hide'] as const;
 const VALID_PLATFORMS = ['all', 'youtube', 'twitch', 'kick'] as const;
+const FFZ_RETRY_INTERVAL_MS = 5_000;
+const FFZ_REFRESH_INTERVAL_MS = 5 * 60_000;
 
 const messagesEl = byId<HTMLDivElement>('messages');
 const msgboxEl = byId<HTMLDivElement>('msgbox');
@@ -299,6 +301,13 @@ void loadFfzEmotes();
 setInterval(() => {
   void fetchHistory();
 }, 2000);
+setInterval(() => {
+  if (Object.keys(ffzEmotes).length > 0) return;
+  void loadFfzEmotes();
+}, FFZ_RETRY_INTERVAL_MS);
+setInterval(() => {
+  void loadFfzEmotes();
+}, FFZ_REFRESH_INTERVAL_MS);
 
 void fetchStatus();
 setInterval(() => {

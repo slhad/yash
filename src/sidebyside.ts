@@ -25,6 +25,8 @@ const STORAGE_KEYS: Record<Platform, string> = {
 };
 const STORAGE_KEY_POS = 'yash_sbs_msgbox_position';
 const POSITIONS = ['bottom', 'top', 'hide'] as const;
+const FFZ_RETRY_INTERVAL_MS = 5_000;
+const FFZ_REFRESH_INTERVAL_MS = 5 * 60_000;
 
 const qs = new URLSearchParams(location.search);
 const qsPosition = qs.get('position');
@@ -293,3 +295,10 @@ void loadFfzEmotes();
 setInterval(() => {
   void fetchHistory();
 }, 2000);
+setInterval(() => {
+  if (Object.keys(ffzEmotes).length > 0) return;
+  void loadFfzEmotes();
+}, FFZ_RETRY_INTERVAL_MS);
+setInterval(() => {
+  void loadFfzEmotes();
+}, FFZ_REFRESH_INTERVAL_MS);
