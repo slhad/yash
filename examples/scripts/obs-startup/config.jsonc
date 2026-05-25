@@ -15,9 +15,13 @@
   // Leave false to start the stream manually or via a separate yash command
   "startStream": false,
 
+  // Optional safety wait before calling OBS startStream (default: 0 = no wait)
+  // Gives you a short cancel window after prepare has already been applied
+  "preStartDelay": 15,
+
   // ─── Countdown ────────────────────────────────────────────────────────────────
   // Seconds to count down before switching to the live scene (default: 0 = skip)
-  "countdownDelay": 60,
+  "countdownDelay": 180,
 
   // OBS text input source to update with remaining time on each tick (optional)
   // Leave empty to disable source updates
@@ -31,10 +35,10 @@
   "countdownMessage": "Stream starting in {remaining}s!",
 
   // How often (in seconds) to post a countdown message to chat (default: 10)
-  "chatInterval": 10,
+  "chatInterval": 30,
 
   // Switch to a 1s chat interval when this many seconds remain (0 = disabled)
-  "finalCountdownAt": 5,
+  "finalCountdownAt": 15,
 
   // ─── Go-live phase ────────────────────────────────────────────────────────────
   // OBS scene to switch to when going live (required)

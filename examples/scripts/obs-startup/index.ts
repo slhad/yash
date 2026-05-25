@@ -2,7 +2,7 @@ import type { ScriptApi } from './types';
 
 // ─── State machine types ───────────────────────────────────────────────────────
 
-type StartupPhase = 'prepare' | 'stream-start' | 'countdown' | 'go-live';
+type StartupPhase = 'prepare' | 'pre-start-wait' | 'stream-start' | 'countdown' | 'go-live';
 
 type ResolvedConfig = {
   prepareScene: string;
@@ -11,6 +11,7 @@ type ResolvedConfig = {
   showSources: string[];
   muteSources: string[];
   unmuteSources: string[];
+  preStartDelaySec: number;
   countdownSec: number;
   startStream: boolean;
   countdownSource: string;
@@ -101,6 +102,27 @@ export default function setup(api: ScriptApi): void {
       } catch {
         api.logger.warn(`[obs-startup] could not mute "${inputName}"`);
       }
+    }
+
+    if (!state.active) return;
+
+    // Phase: pre-start-wait
+    if (cfg.startStream && cfg.preStartDelaySec > 0) {
+      s.phase = 'pre-start-wait';
+      s.remaining = cfg.preStartDelaySec;
+
+      await new Promise<void>((resolve) => {
+        function tick(): void {
+          if (!state.active) { resolve(); return; }
+          s.remaining -= 1;
+          if (s.remaining <= 0) {
+            resolve();
+          } else {
+            s.tickTimer = setTimeout(tick, 1000);
+          }
+        }
+        s.tickTimer = setTimeout(tick, 1000);
+      });
     }
 
     if (!state.active) return;
@@ -209,6 +231,7 @@ export default function setup(api: ScriptApi): void {
     args: {
       prepareScene:    { type: 'string',  required: false, maxLength: 200 },
       liveScene:       { type: 'string',  required: false, maxLength: 200 },
+      preStartDelay:   { type: 'number',  required: false, min: 0, max: 3600 },
       delay:           { type: 'number',  required: false, min: 0, max: 3600 },
       startStream:     { type: 'boolean', required: false },
       countdownSource: { type: 'string',  required: false, maxLength: 200 },
@@ -219,6 +242,7 @@ export default function setup(api: ScriptApi): void {
     },
     examples: [
       { args: {},                     description: 'Run startup with config defaults' },
+      { args: { preStartDelay: 5 },  description: 'Wait 5s before starting the OBS stream' },
       { args: { delay: 30 },         description: 'Count down 30s before going live' },
       { args: { startStream: true }, description: 'Also start the OBS stream' },
       { args: { delay: 0 },         description: 'Skip countdown, go live immediately' },
@@ -250,6 +274,7 @@ export default function setup(api: ScriptApi): void {
         showSources:      api.settings.get<string[]>('showSources', []),
         muteSources:      api.settings.get<string[]>('muteSources', []),
         unmuteSources:    api.settings.get<string[]>('unmuteSources', []),
+        preStartDelaySec: (args.preStartDelay as number | undefined)   ?? api.settings.get<number>('preStartDelay', 0),
         countdownSec:     (args.delay as number | undefined)           ?? api.settings.get<number>('countdownDelay', 0),
         startStream:      (args.startStream as boolean | undefined)    ?? api.settings.get<boolean>('startStream', false),
         countdownSource:  (args.countdownSource as string | undefined) ?? api.settings.get<string>('countdownSource', ''),
@@ -286,6 +311,7 @@ export default function setup(api: ScriptApi): void {
         `[obs-startup] countdown → ${cfg.countdownSec}s`,
       ];
       if (cfg.startStream)                                output.push('[obs-startup] start stream → yes');
+      if (cfg.startStream && cfg.preStartDelaySec > 0)   output.push(`[obs-startup] pre-start wait → ${cfg.preStartDelaySec}s`);
       if (cfg.countdownSource)                            output.push(`[obs-startup] countdown source → ${cfg.countdownSource}`);
       if (cfg.countdownMessage && cfg.chatInterval > 0)  output.push(`[obs-startup] chat every ${cfg.chatInterval}s → ${cfg.countdownMessage}`);
       if (cfg.finalCountdownAt > 0)                      output.push(`[obs-startup] final countdown every 1s from ${cfg.finalCountdownAt}s`);
@@ -299,6 +325,7 @@ export default function setup(api: ScriptApi): void {
         data: {
           prepareScene:     cfg.prepareScene,
           liveScene:        cfg.liveScene,
+          preStartDelaySec: cfg.preStartDelaySec || null,
           countdownSec:     cfg.countdownSec,
           startStream:      cfg.startStream,
           chatInterval:     cfg.chatInterval || null,
@@ -329,7 +356,8 @@ export default function setup(api: ScriptApi): void {
         return { output: ['[obs-startup] no active sequence to cancel'] };
       }
       const cancelledPhase = state.phase;
-      const countdownRemaining = state.phase === 'countdown' ? state.remaining : null;
+      const remaining =
+        state.phase === 'countdown' || state.phase === 'pre-start-wait' ? state.remaining : null;
       if (state.tickTimer !== null) clearTimeout(state.tickTimer);
       state.unsubObs();
       const source = state.cfg.countdownSource;
@@ -337,7 +365,7 @@ export default function setup(api: ScriptApi): void {
       await clearCountdownSource(source);
       return {
         output: [`[obs-startup] sequence cancelled (was in phase: ${cancelledPhase})`],
-        data: { cancelledPhase, countdownRemaining },
+        data: { cancelledPhase, remaining },
       };
     },
   });
@@ -360,9 +388,10 @@ export default function setup(api: ScriptApi): void {
           data: { active: false, phase: null, remaining: null },
         };
       }
-      const remaining = state.phase === 'countdown' ? state.remaining : null;
+      const remaining =
+        state.phase === 'countdown' || state.phase === 'pre-start-wait' ? state.remaining : null;
       const phaseStr =
-        state.phase === 'countdown'
+        state.phase === 'countdown' || state.phase === 'pre-start-wait'
           ? `${state.phase} (${state.remaining}s remaining)`
           : state.phase;
       return {
