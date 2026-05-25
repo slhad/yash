@@ -1,5 +1,6 @@
 /** @jsxImportSource react */
 import React from 'react';
+import { type FfzEmoteDefinition, parseMessageWithFfzEmotes } from '../utils/ffz';
 
 interface ChatDisplayProps {
   messages: Array<{
@@ -9,10 +10,15 @@ interface ChatDisplayProps {
     message: string;
     timestamp: number;
   }>;
+  ffzEmotes?: Record<string, FfzEmoteDefinition>;
   showTimestamps?: boolean;
 }
 
-export const ChatDisplay: React.FC<ChatDisplayProps> = ({ messages, showTimestamps = true }) => {
+export const ChatDisplay: React.FC<ChatDisplayProps> = ({
+  messages,
+  ffzEmotes = {},
+  showTimestamps = true,
+}) => {
   const formatTime = (timestamp: number) => {
     return new Date(timestamp).toLocaleTimeString();
   };
@@ -28,6 +34,39 @@ export const ChatDisplay: React.FC<ChatDisplayProps> = ({ messages, showTimestam
       default:
         return '#ffffff';
     }
+  };
+
+  const renderMessage = (platform: string, message: string) => {
+    if (platform !== 'twitch') {
+      return message;
+    }
+
+    let cursor = 0;
+    return parseMessageWithFfzEmotes(message, ffzEmotes).map((part) => {
+      const keyBase =
+        part.type === 'text'
+          ? `text-${cursor}-${part.content}`
+          : `emote-${cursor}-${part.emote.name}-${part.emote.url}`;
+
+      if (part.type === 'text') {
+        cursor += part.content.length;
+        return <React.Fragment key={keyBase}>{part.content}</React.Fragment>;
+      }
+      cursor += part.emote.name.length;
+      return (
+        <img
+          key={keyBase}
+          className="emote-inline emote-inline-ffz"
+          alt={part.emote.name}
+          title={part.emote.name}
+          loading="lazy"
+          decoding="async"
+          src={part.emote.url}
+          width={part.emote.width}
+          height={part.emote.height}
+        />
+      );
+    });
   };
 
   return (
@@ -53,7 +92,8 @@ export const ChatDisplay: React.FC<ChatDisplayProps> = ({ messages, showTimestam
                 <span style={{ color: getPlatformColor(msg.platform), fontWeight: 'bold' }}>
                   [{msg.platform}]
                 </span>{' '}
-                <span style={{ color: '#06b6d4' }}>{msg.username}:</span> {msg.message}
+                <span style={{ color: '#06b6d4' }}>{msg.username}:</span>{' '}
+                {renderMessage(msg.platform, msg.message)}
               </span>
             </div>
           ))

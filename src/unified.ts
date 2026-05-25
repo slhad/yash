@@ -1,3 +1,4 @@
+import { type FfzEmoteDefinition, renderMessageWithFfzEmotes } from './utils/ffz';
 import { getWebAutocomplete, handleWebCommand } from './utils/webCommands';
 
 function byId<T extends HTMLElement>(id: string): T {
@@ -6,14 +7,6 @@ function byId<T extends HTMLElement>(id: string): T {
     throw new Error(`Missing element: ${id}`);
   }
   return el as T;
-}
-
-function escapeHtml(str: unknown): string {
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
 }
 
 function formatElapsed(isoStart: string): string {
@@ -54,6 +47,7 @@ const inputHistory: string[] = [];
 let historyIdx = -1;
 const knownIds = new Set<string>();
 let isAtBottom = true;
+let ffzEmotes: Record<string, FfzEmoteDefinition> = {};
 
 const qs = new URLSearchParams(location.search);
 const qsPosition = qs.get('position');
@@ -96,13 +90,38 @@ function platformTag(platform: string): string {
   return `<span class="platform-tag ${cls}">${platform}</span>`;
 }
 
+function createMessageText(message: string, platform: string): HTMLSpanElement {
+  const text = document.createElement('span');
+  text.className = 'text';
+  text.dataset.message = message;
+  if (platform === 'twitch') {
+    renderMessageWithFfzEmotes(text, message, ffzEmotes);
+  } else {
+    text.textContent = message;
+  }
+  return text;
+}
+
+function rerenderTwitchMessages(): void {
+  for (const text of messagesEl.querySelectorAll<HTMLSpanElement>(
+    '.msg[data-platform="twitch"] .text',
+  )) {
+    const message = text.dataset.message ?? text.textContent ?? '';
+    renderMessageWithFfzEmotes(text, message, ffzEmotes);
+  }
+}
+
 function renderMessage(msg: ChatMessage): HTMLDivElement {
   const div = document.createElement('div');
   div.className = 'msg';
-  div.innerHTML =
-    platformTag(msg.platform) +
-    `<span class="username">${escapeHtml(msg.username)}:</span>` +
-    `<span class="text">${escapeHtml(msg.message)}</span>`;
+  div.dataset.platform = msg.platform;
+  div.innerHTML = platformTag(msg.platform);
+
+  const username = document.createElement('span');
+  username.className = 'username';
+  username.textContent = `${msg.username}:`;
+  div.appendChild(username);
+  div.appendChild(createMessageText(msg.message, msg.platform));
   return div;
 }
 
@@ -142,11 +161,9 @@ async function fetchStatus(): Promise<void> {
         let detail = '';
         if (streamStartTime) detail += formatElapsed(streamStartTime);
         if (viewerCount != null) detail += `${detail ? ' / ' : ''}${viewerCount} viewers`;
-        parts.push(
-          `<span class="online">${escapeHtml(label)}: ONLINE${detail ? ` (${escapeHtml(detail)})` : ''}</span>`,
-        );
+        parts.push(`<span class="online">${label}: ONLINE${detail ? ` (${detail})` : ''}</span>`);
       } else {
-        parts.push(`<span class="offline">${escapeHtml(label)}: offline</span>`);
+        parts.push(`<span class="offline">${label}: offline</span>`);
       }
     }
     statusPlatformsEl.innerHTML =
@@ -157,9 +174,24 @@ async function fetchStatus(): Promise<void> {
 function appendSystem(label: string, text: string): void {
   const div = document.createElement('div');
   div.className = 'msg';
-  div.innerHTML = `<span class="platform-tag tag-unknown">${escapeHtml(label)}</span><span class="text">${escapeHtml(text)}</span>`;
+  div.innerHTML = `<span class="platform-tag tag-unknown"></span>`;
+  const tag = div.querySelector<HTMLSpanElement>('.platform-tag');
+  if (tag) {
+    tag.textContent = label;
+  }
+  div.appendChild(createMessageText(text, 'system'));
   messagesEl.appendChild(div);
   if (isAtBottom) messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+async function loadFfzEmotes(): Promise<void> {
+  try {
+    const res = await fetch('/api/twitch/ffz-emotes');
+    if (!res.ok) return;
+    const data = (await res.json()) as { emotes?: Record<string, FfzEmoteDefinition> };
+    ffzEmotes = data.emotes ?? {};
+    rerenderTwitchMessages();
+  } catch {}
 }
 
 async function sendMessage(): Promise<void> {
@@ -263,6 +295,7 @@ syncUrl();
 platformSelect.addEventListener('change', syncUrl);
 
 void fetchHistory();
+void loadFfzEmotes();
 setInterval(() => {
   void fetchHistory();
 }, 2000);

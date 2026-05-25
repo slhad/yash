@@ -1,6 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import { type PlatformProvider, type StreamMarker, StreamStatus } from '../src/platforms/base';
-import { buildStreamMarkerPayload } from '../src/utils/streamMarkerRoute';
+import {
+  buildStreamMarkerPayload,
+  parseRestoreMarkersRequest,
+} from '../src/utils/streamMarkerRoute';
 
 function makeProvider(options?: {
   authenticated?: boolean;
@@ -100,5 +103,26 @@ describe('buildStreamMarkerPayload', () => {
 
     expect(called).toBe(false);
     expect(payload).toEqual([{ platform: 'kick', marker: null, skipped: 'unsupported' }]);
+  });
+});
+
+describe('parseRestoreMarkersRequest', () => {
+  test('rejects unsupported restore sources', () => {
+    expect(parseRestoreMarkersRequest({ source: 'youtube' })).toEqual({
+      error: 'unsupported restore source',
+    });
+  });
+
+  test('accepts twitch and clamps positive integer limits to 100', () => {
+    expect(parseRestoreMarkersRequest({ source: 'twitch', limit: 500 })).toEqual({
+      source: 'twitch',
+      limit: 100,
+    });
+  });
+
+  test('ignores invalid limits when restore source is omitted', () => {
+    expect(parseRestoreMarkersRequest({ limit: 0 })).toEqual({});
+    expect(parseRestoreMarkersRequest({ limit: 3.5 })).toEqual({});
+    expect(parseRestoreMarkersRequest(null)).toEqual({});
   });
 });

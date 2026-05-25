@@ -1,5 +1,6 @@
 /** @jsxImportSource react */
 import React, { useEffect, useState } from 'react';
+import type { FfzEmoteDefinition } from '../utils/ffz';
 import { ChatDisplay } from './ChatDisplay';
 import { MessageInput } from './MessageInput';
 import { StatusBar } from './StatusBar';
@@ -94,6 +95,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   >([]);
   const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>([]);
   const [sendToAll, setSendToAll] = useState(true);
+  const [ffzEmotes, setFfzEmotes] = useState<Record<string, FfzEmoteDefinition>>({});
 
   useEffect(() => {
     // Initialize status objects with the correct types for each state
@@ -165,6 +167,31 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
     return () => clearInterval(interval);
   }, [getChatMessages]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadFfzEmotes = async () => {
+      try {
+        const res = await fetch('/api/twitch/ffz-emotes');
+        if (!res.ok) return;
+        const data = (await res.json()) as {
+          emotes?: Record<string, FfzEmoteDefinition>;
+        };
+        if (!cancelled) {
+          setFfzEmotes(data.emotes ?? {});
+        }
+      } catch {}
+    };
+
+    void loadFfzEmotes();
+    const interval = setInterval(loadFfzEmotes, 5 * 60_000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, []);
 
   const handleUpdateMetadata = async (metadata: StreamMetadata) => {
     await onUpdateMetadata(selectedPlatforms, metadata);
@@ -309,7 +336,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
             <div style={{ marginBottom: '8px' }}>
               <span style={{ fontWeight: 'bold' }}>Unified Chat</span>
             </div>
-            <ChatDisplay messages={messages} showTimestamps={showChatTimestamps} />
+            <ChatDisplay
+              messages={messages}
+              ffzEmotes={ffzEmotes}
+              showTimestamps={showChatTimestamps}
+            />
           </div>
 
           <MessageInput

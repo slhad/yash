@@ -1,3 +1,4 @@
+import { type FfzEmoteDefinition, renderMessageWithFfzEmotes } from './utils/ffz';
 import { getWebAutocomplete, handleWebCommand } from './utils/webCommands';
 
 function byId<T extends HTMLElement>(id: string): T {
@@ -6,14 +7,6 @@ function byId<T extends HTMLElement>(id: string): T {
     throw new Error(`Missing element: ${id}`);
   }
   return el as T;
-}
-
-function escapeHtml(str: unknown): string {
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
 }
 
 type Platform = 'youtube' | 'twitch' | 'kick';
@@ -64,6 +57,26 @@ let currentPosition = (
     ? qsPosition
     : localStorage.getItem(STORAGE_KEY_POS) || 'bottom'
 ) as (typeof POSITIONS)[number] | string;
+let ffzEmotes: Record<string, FfzEmoteDefinition> = {};
+
+function createMessageText(message: string, platform: Platform): HTMLSpanElement {
+  const text = document.createElement('span');
+  text.className = 'text';
+  text.dataset.message = message;
+  if (platform === 'twitch') {
+    renderMessageWithFfzEmotes(text, message, ffzEmotes);
+  } else {
+    text.textContent = message;
+  }
+  return text;
+}
+
+function rerenderTwitchMessages(): void {
+  for (const text of document.querySelectorAll<HTMLSpanElement>('#msgs-twitch .text')) {
+    const message = text.dataset.message ?? text.textContent ?? '';
+    renderMessageWithFfzEmotes(text, message, ffzEmotes);
+  }
+}
 
 function loadEnabled(platform: Platform): boolean {
   if (qsPlatformsParam !== null) {
@@ -105,9 +118,12 @@ function appendMessages(msgs: ChatMessage[]): void {
       knownIds[platform].add(msg.id);
       const div = document.createElement('div');
       div.className = 'msg';
-      div.innerHTML =
-        `<span class="username">${escapeHtml(msg.username)}:</span>` +
-        `<span class="text">${escapeHtml(msg.message)}</span>`;
+      div.dataset.platform = msg.platform;
+      const username = document.createElement('span');
+      username.className = 'username';
+      username.textContent = `${msg.username}:`;
+      div.appendChild(username);
+      div.appendChild(createMessageText(msg.message, msg.platform));
       el.appendChild(div);
       added = true;
     }
@@ -151,6 +167,16 @@ function appendSys(label: string, text: string): void {
   line.textContent = `[${label}] ${text}`;
   systemFeedEl.appendChild(line);
   systemFeedEl.scrollTop = systemFeedEl.scrollHeight;
+}
+
+async function loadFfzEmotes(): Promise<void> {
+  try {
+    const res = await fetch('/api/twitch/ffz-emotes');
+    if (!res.ok) return;
+    const data = (await res.json()) as { emotes?: Record<string, FfzEmoteDefinition> };
+    ffzEmotes = data.emotes ?? {};
+    rerenderTwitchMessages();
+  } catch {}
 }
 
 async function sendMessage(): Promise<void> {
@@ -263,6 +289,7 @@ applyPosition(
 );
 
 void fetchHistory();
+void loadFfzEmotes();
 setInterval(() => {
   void fetchHistory();
 }, 2000);

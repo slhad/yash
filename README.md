@@ -185,6 +185,10 @@ That lets `/action obs.shutdown.initiate` run with config-backed defaults, optio
 
 The `/stream` modal (TUI) and stream form (WebUI) have per-platform category fields. Twitch and Kick fields autocomplete live as you type (300 ms debounce); YouTube uses a static dropdown. All three are sent as separate metadata fields (`twitchGame`, `kickCategory`, `youtubeCategory`).
 
+## HTML chat emotes
+
+The WebUI chat surfaces at `/`, `/unified`, and `/sidebyside` render Twitch FrankerFaceZ emotes inline when YASH knows the authenticated Twitch channel login. The browser fetches a cached emote map from `GET /api/twitch/ffz-emotes`; persisted chat messages remain plain text, and only the WebUI rendering layer swaps matching Twitch tokens for emote images.
+
 ## YouTube `/stream` targeting notes
 
 - `/stream` may only update mutable YouTube broadcasts: `created`, `ready`, `testing`, or `live`
