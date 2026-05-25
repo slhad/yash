@@ -43,6 +43,8 @@ import {
   getChatterSessionStats,
 } from './utils/chatterInfoSession';
 import { getDataDir, isDemoMode, saveConfig } from './utils/config';
+import type { FfzEmoteDefinition } from './utils/ffz';
+import { getFfzEmotePayload } from './utils/ffz-fetch';
 import { renderTuiHelpLines } from './utils/help';
 import { runIpcCommand } from './utils/ipcCommandRunner';
 import logCollector from './utils/logCollector';
@@ -50,6 +52,12 @@ import { defaultLogger } from './utils/logger';
 import { buildTargetedStreamMetadataUpdate } from './utils/streamMetadata';
 import { getAutocomplete, initTuiCommands, setActionRegistry } from './utils/tuiCommands';
 import { installTuiErrorCapture } from './utils/tuiErrorCapture';
+import {
+  buildTuiFfzMessageParts,
+  buildTuiFfzUploadSequences,
+  parsePngDimensions,
+  supportsTuiFfzClientTerm,
+} from './utils/tuiFfz';
 import { type MessageTarget } from './utils/tuiMessageInput';
 import {
   buildTuiSettingsEntries,
@@ -3003,6 +3011,9 @@ const commandHandlers: Record<
         const res = await provider.authenticate();
         if (res?.success) {
           emit(`[system] ${platform} authentication succeeded`);
+          if (platform === 'twitch') {
+            void refreshTuiFfzEmotes('twitch-authentication');
+          }
           updateUI(lastMessages);
           if (platform === 'youtube' && !youtube.getStreamKey()) {
             openYouTubeStreamPickerModal();
@@ -4331,7 +4342,15 @@ function openChatterInfoModal(msg: ChatMessage): void {
   function makeMessageRow(m: ChatMessage): BoxRenderable {
     const row = new BoxRenderable(renderer, { flexDirection: 'row' });
     row.add(new TextRenderable(renderer, { content: fmtTimestamp(m.timestamp), fg: '#888888' }));
-    row.add(new TextRenderable(renderer, { content: m.message, fg: 'white' }));
+    for (const part of buildTuiFfzMessageParts(
+      m.platform,
+      m.message,
+      'white',
+      tuiFfzEmotes,
+      tuiFfzImageIdsByName,
+    )) {
+      row.add(new TextRenderable(renderer, { content: part.content, fg: part.fg }));
+    }
     return row;
   }
 
@@ -4353,13 +4372,29 @@ function openChatterInfoModal(msg: ChatMessage): void {
           fg: m.color ?? platColor(m.platform),
         }),
       );
-      row.add(new TextRenderable(renderer, { content: m.message, fg: 'white' }));
+      for (const part of buildTuiFfzMessageParts(
+        m.platform,
+        m.message,
+        'white',
+        tuiFfzEmotes,
+        tuiFfzImageIdsByName,
+      )) {
+        row.add(new TextRenderable(renderer, { content: part.content, fg: part.fg }));
+      }
     } else {
       row.add(
         new TextRenderable(renderer, { content: `[${m.platform}] `, fg: platColor(m.platform) }),
       );
       row.add(new TextRenderable(renderer, { content: `${m.username}: `, fg: '#888888' }));
-      row.add(new TextRenderable(renderer, { content: m.message, fg: '#aaaaaa' }));
+      for (const part of buildTuiFfzMessageParts(
+        m.platform,
+        m.message,
+        '#aaaaaa',
+        tuiFfzEmotes,
+        tuiFfzImageIdsByName,
+      )) {
+        row.add(new TextRenderable(renderer, { content: part.content, fg: part.fg }));
+      }
     }
     return row;
   }
@@ -4917,7 +4952,15 @@ function openHistoryModal(opts?: { query?: string }): void {
             fg: m.color ?? platColor(m.platform),
           }),
         );
-        row.add(new TextRenderable(renderer, { content: m.message, fg: 'white' }));
+        for (const part of buildTuiFfzMessageParts(
+          m.platform,
+          m.message,
+          'white',
+          tuiFfzEmotes,
+          tuiFfzImageIdsByName,
+        )) {
+          row.add(new TextRenderable(renderer, { content: part.content, fg: part.fg }));
+        }
         contentScroll.add(row, idx++);
       }
 
@@ -4970,7 +5013,15 @@ function openHistoryModal(opts?: { query?: string }): void {
           fg: m.color ?? platColor(m.platform),
         }),
       );
-      row.add(new TextRenderable(renderer, { content: m.message, fg: 'white' }));
+      for (const part of buildTuiFfzMessageParts(
+        m.platform,
+        m.message,
+        'white',
+        tuiFfzEmotes,
+        tuiFfzImageIdsByName,
+      )) {
+        row.add(new TextRenderable(renderer, { content: part.content, fg: part.fg }));
+      }
       contentScroll.add(row);
     }
 
@@ -5139,11 +5190,137 @@ let browseModeActive = false;
 let browseSelectedIdx: number | null = null; // index into lastMessages
 const lastRawMessages: ChatMessage[] = []; // parallel to lastMessages (only chat platform messages)
 
+const tuiFfzEmotes: Record<string, FfzEmoteDefinition> = {};
+const tuiFfzImageIdsByName: Record<string, number> = {};
+const tuiFfzImageIdsByUrl = new Map<string, number>();
+let nextTuiFfzImageId = 1;
+let tuiFfzRefreshPromise: Promise<void> | null = null;
+let tuiFfzSupported: boolean | null = null;
+let tuiFfzLastChannel: string | null = null;
+
 function platformColor(platform: string): string {
   if (platform === 'youtube') return 'red';
   if (platform === 'twitch') return '#9146FF';
   if (platform === 'kick') return 'green';
   return 'white';
+}
+
+function getTuiFfzPassthroughMode(): 'none' | 'tmux' {
+  return process.env.TMUX ? 'tmux' : 'none';
+}
+
+function detectTuiFfzSupport(): boolean {
+  if (tuiFfzSupported !== null) return tuiFfzSupported;
+
+  const termName = (() => {
+    if (!process.env.TMUX) return process.env.TERM ?? null;
+    try {
+      const proc = Bun.spawnSync(['tmux', 'display-message', '-p', '#{client_termname}']);
+      const name = proc.stdout.toString().trim();
+      return name.length > 0 ? name : null;
+    } catch {
+      return null;
+    }
+  })();
+
+  const passthroughEnabled = (() => {
+    if (!process.env.TMUX) return true;
+    try {
+      const proc = Bun.spawnSync(['tmux', 'show-options', '-gsv', 'allow-passthrough']);
+      return proc.stdout.toString().trim() === 'on';
+    } catch {
+      return false;
+    }
+  })();
+
+  tuiFfzSupported = passthroughEnabled && supportsTuiFfzClientTerm(termName);
+  return tuiFfzSupported;
+}
+
+function clearTuiFfzState(): void {
+  tuiFfzLastChannel = null;
+  for (const key of Object.keys(tuiFfzEmotes)) delete tuiFfzEmotes[key];
+  for (const key of Object.keys(tuiFfzImageIdsByName)) delete tuiFfzImageIdsByName[key];
+  tuiFfzImageIdsByUrl.clear();
+}
+
+async function uploadTuiFfzImage(emote: FfzEmoteDefinition, imageId: number): Promise<void> {
+  const response = await fetch(emote.url);
+  if (!response.ok) {
+    throw new Error(`FFZ image fetch returned ${response.status} for ${emote.name}`);
+  }
+
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  const parsed = parsePngDimensions(bytes);
+  const width = emote.width ?? parsed.width;
+  const height = emote.height ?? parsed.height;
+
+  for (const sequence of buildTuiFfzUploadSequences({
+    imageId,
+    pngBytes: bytes,
+    width,
+    height,
+    passthrough: getTuiFfzPassthroughMode(),
+  })) {
+    process.stdout.write(sequence);
+  }
+}
+
+function rerenderRawChatLines(): void {
+  let changed = false;
+  for (let i = 0; i < lastMessages.length; i++) {
+    const line = lastMessages[i];
+    if (typeof line === 'string' || !line?.rawMsg) continue;
+    lastMessages[i] = transformMessage(line.rawMsg);
+    changed = true;
+  }
+  if (changed && uiNodes) updateUI(lastMessages);
+}
+
+async function refreshTuiFfzEmotes(reason: string): Promise<void> {
+  if (!detectTuiFfzSupport()) return;
+  if (tuiFfzRefreshPromise) return tuiFfzRefreshPromise;
+
+  const twitchWithUserLogin = twitch as typeof twitch & { getUserLogin?: () => string | null };
+  const channel =
+    typeof twitchWithUserLogin.getUserLogin === 'function'
+      ? twitchWithUserLogin.getUserLogin()
+      : null;
+
+  if (!channel) {
+    clearTuiFfzState();
+    return;
+  }
+
+  tuiFfzRefreshPromise = (async () => {
+    try {
+      const payload = await getFfzEmotePayload(channel);
+      if (payload.channel !== channel) return;
+      if (payload.channel !== tuiFfzLastChannel) {
+        clearTuiFfzState();
+      }
+      tuiFfzLastChannel = payload.channel;
+
+      for (const [name, emote] of Object.entries(payload.emotes)) {
+        tuiFfzEmotes[name] = emote;
+        let imageId = tuiFfzImageIdsByUrl.get(emote.url);
+        if (!imageId) {
+          imageId = nextTuiFfzImageId++;
+          await uploadTuiFfzImage(emote, imageId);
+          tuiFfzImageIdsByUrl.set(emote.url, imageId);
+        }
+        tuiFfzImageIdsByName[name] = imageId;
+      }
+
+      rerenderRawChatLines();
+    } catch (error) {
+      defaultLogger.warn(`[FFZ:TUI] ${reason}: ${String(error)}`);
+    } finally {
+      tuiFfzRefreshPromise = null;
+    }
+  })();
+
+  return tuiFfzRefreshPromise;
 }
 
 function transformMessage(msg: ChatMessage): ChatLine {
@@ -5158,18 +5335,22 @@ function transformMessage(msg: ChatMessage): ChatLine {
     const ss = String(d.getSeconds()).padStart(2, '0');
     tsStr = ` ${hh}:${mi}:${ss}`;
   }
-  if (userColor === platColor) {
-    return {
-      content: `[${msg.platform}]${tsStr} ${msg.username}: ${msg.message}`,
-      fg: platColor,
-      rawMsg: msg,
-    };
-  }
+
+  const parts: ChatLinePart[] = [];
+  parts.push({ content: `[${msg.platform}]${tsStr} `, fg: platColor });
+  parts.push({ content: `${msg.username}: `, fg: userColor });
+  parts.push(
+    ...buildTuiFfzMessageParts(
+      msg.platform,
+      msg.message,
+      userColor === platColor ? platColor : 'white',
+      tuiFfzEmotes,
+      tuiFfzImageIdsByName,
+    ),
+  );
+
   return {
-    parts: [
-      { content: `[${msg.platform}]${tsStr} `, fg: platColor },
-      { content: `${msg.username}: ${msg.message}`, fg: userColor },
-    ],
+    parts,
     rawMsg: msg,
   };
 }
@@ -5571,6 +5752,9 @@ async function main() {
     lastMessages.push(transformMessage(msg));
     lastRawMessages.push(msg);
     activeChatterInfoModal?.refreshForMessage(msg);
+    if (msg.platform === 'twitch' && Object.keys(tuiFfzEmotes).length === 0) {
+      void refreshTuiFfzEmotes('incoming-twitch-message');
+    }
     if (uiNodes) updateUI(lastMessages);
   });
 
@@ -5654,6 +5838,7 @@ async function main() {
 
   // Build UI tree once — no flicker on periodic updates
   uiNodes = initUI(renderer, lastMessages);
+  void refreshTuiFfzEmotes('startup');
 
   // Focus input and wire ENTER + INPUT handlers once
   ensureMainInputFocus();
@@ -5665,7 +5850,13 @@ async function main() {
   uiNodes.inputEl.on(InputRenderableEvents.ENTER, async () => {
     // Browse mode: Enter opens chatter info for the selected message
     if (browseModeActive && browseSelectedIdx !== null) {
-      const rawMsg = lastRawMessages[browseSelectedIdx];
+      const selectedLine = lastMessages[browseSelectedIdx];
+      const rawMsg =
+        typeof selectedLine === 'string'
+          ? undefined
+          : 'rawMsg' in selectedLine
+            ? selectedLine.rawMsg
+            : undefined;
       if (rawMsg !== undefined) {
         openChatterInfoModal(rawMsg);
       }
