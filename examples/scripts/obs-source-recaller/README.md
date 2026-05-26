@@ -24,7 +24,45 @@ Typical flow:
 State model:
 
 - Static defaults live in `config.jsonc`
-- Saved snapshots and pause/resume state persist under `settings.json` at `scripts.obs-source-recaller.state`
+- Saved snapshots and pause/resume state persist in `~/.config/yash/scripts/obs-source-recaller/state.json`
+- Runtime snapshot data is stored scene-first:
+
+```json
+{
+  "state": {
+    "paused": false,
+    "scenes": {
+      "Gameplay": {
+        "entries": [
+          {
+            "sourceName": "Overlay",
+            "inputSettings": { "...": "..." },
+            "sceneItemEnabled": true,
+            "sceneItemTransform": { "...": "..." }
+          },
+          {
+            "sourceName": "Camera",
+            "inputSettings": { "...": "..." },
+            "sceneItemEnabled": true,
+            "sceneItemTransform": { "...": "..." }
+          }
+        ]
+      }
+    }
+  }
+}
+```
+
+Ordering rules:
+
+- Each scene keeps an ordered `entries` array; saving a new source appends it, saving an existing source updates it in place without changing its position
+- Scene recalls do not apply one source as a single blob anymore
+- Instead, recall expands each saved source into staged operations and runs all sources in deterministic priority order:
+  1. `inputSettings`
+  2. `sceneItemTransform`
+  3. `sceneItemEnabled`
+- Within the same stage, sources run in the saved `entries` order
+- Older source-first saved state is still accepted and normalized at runtime
 
 Notes:
 

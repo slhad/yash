@@ -1,20 +1,26 @@
-import type { ScriptApi } from './types';
+import type { ScriptApi, UserScriptAction } from './types';
 
 // ─── State machine types ───────────────────────────────────────────────────────
 
 type StartupPhase = 'prepare' | 'pre-start-wait' | 'stream-start' | 'countdown' | 'go-live';
 
+type SceneSourceRef = {
+  raw: string;
+  sceneName: string;
+  sourceName: string;
+};
+
 type ResolvedConfig = {
   prepareScene: string;
   liveScene: string;
-  hideSources: string[];
-  showSources: string[];
+  hideSources: SceneSourceRef[];
+  showSources: SceneSourceRef[];
   muteSources: string[];
   unmuteSources: string[];
   preStartDelaySec: number;
   countdownSec: number;
   startStream: boolean;
-  countdownSource: string;
+  countdownSource: SceneSourceRef | null;
   sourceTemplate: string;
   countdownMessage: string;
   chatInterval: number;
@@ -40,22 +46,54 @@ let state: StartupState = { active: false };
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
 export default function setup(api: ScriptApi): void {
+  function getLongestScenePrefixMatch(target: string, sceneNames: string[]): string | null {
+    const trimmedTarget = target.trim();
+    const explicitScene = sceneNames
+      .filter(
+        (sceneName) =>
+          trimmedTarget.startsWith(`${sceneName}.`) && trimmedTarget.length > sceneName.length + 1,
+      )
+      .sort((a, b) => b.length - a.length)[0];
+    return explicitScene ?? null;
+  }
+
+  function resolveSceneSourceRef(
+    rawTarget: string,
+    sceneNames: string[],
+    fallbackScene: string,
+  ): SceneSourceRef {
+    const trimmedTarget = rawTarget.trim();
+    const explicitScene = getLongestScenePrefixMatch(trimmedTarget, sceneNames);
+    if (explicitScene) {
+      return {
+        raw: trimmedTarget,
+        sceneName: explicitScene,
+        sourceName: trimmedTarget.slice(explicitScene.length + 1).trim(),
+      };
+    }
+    return {
+      raw: trimmedTarget,
+      sceneName: fallbackScene,
+      sourceName: trimmedTarget,
+    };
+  }
+
   async function updateCountdownSource(remaining: number): Promise<void> {
     if (!state.active) return;
     const { countdownSource, sourceTemplate } = state.cfg;
     if (!countdownSource || !api.obs.isConnected()) return;
     const text = sourceTemplate.replace(/\{remaining\}/g, String(remaining));
     try {
-      await api.obs.setInputSettings(countdownSource, { text });
+      await api.obs.setInputSettings(countdownSource.sourceName, { text });
     } catch {
       // best-effort
     }
   }
 
-  async function clearCountdownSource(source: string): Promise<void> {
+  async function clearCountdownSource(source: SceneSourceRef | null): Promise<void> {
     if (!source || !api.obs.isConnected()) return;
     try {
-      await api.obs.setInputSettings(source, { text: '' });
+      await api.obs.setInputSettings(source.sourceName, { text: '' });
     } catch {
       // best-effort
     }
@@ -87,12 +125,12 @@ export default function setup(api: ScriptApi): void {
       return;
     }
 
-    for (const sourceName of cfg.hideSources) {
+    for (const target of cfg.hideSources) {
       try {
-        const id = await api.obs.getSceneItemId(cfg.prepareScene, sourceName);
-        await api.obs.setSceneItemEnabled(cfg.prepareScene, id, false);
+        const id = await api.obs.getSceneItemId(target.sceneName, target.sourceName);
+        await api.obs.setSceneItemEnabled(target.sceneName, id, false);
       } catch {
-        api.logger.warn(`[obs-startup] could not hide "${sourceName}" in "${cfg.prepareScene}"`);
+        api.logger.warn(`[obs-startup] could not hide "${target.sourceName}" in "${target.sceneName}"`);
       }
     }
 
@@ -189,12 +227,12 @@ export default function setup(api: ScriptApi): void {
       api.logger.warn(`[obs-startup] could not switch to live scene: ${String(err)}`);
     }
 
-    for (const sourceName of cfg.showSources) {
+    for (const target of cfg.showSources) {
       try {
-        const id = await api.obs.getSceneItemId(cfg.liveScene, sourceName);
-        await api.obs.setSceneItemEnabled(cfg.liveScene, id, true);
+        const id = await api.obs.getSceneItemId(target.sceneName, target.sourceName);
+        await api.obs.setSceneItemEnabled(target.sceneName, id, true);
       } catch {
-        api.logger.warn(`[obs-startup] could not show "${sourceName}" in "${cfg.liveScene}"`);
+        api.logger.warn(`[obs-startup] could not show "${target.sourceName}" in "${target.sceneName}"`);
       }
     }
 
@@ -247,7 +285,7 @@ export default function setup(api: ScriptApi): void {
       { args: { startStream: true }, description: 'Also start the OBS stream' },
       { args: { delay: 0 },         description: 'Skip countdown, go live immediately' },
     ],
-    invoke: async (args) => {
+    invoke: async (args: Parameters<UserScriptAction['invoke']>[0]) => {
       if (state.active) {
         throw new Error(`Startup already active in phase \`${state.phase}\` — cancel first`);
       }
@@ -267,17 +305,40 @@ export default function setup(api: ScriptApi): void {
         throw new Error('No live scene configured — set "liveScene" in config.jsonc or pass liveScene= as an argument');
       }
 
+      const sceneList = await api.obs.getSceneList();
+      const sceneNames = Array.isArray(sceneList?.scenes)
+        ? sceneList.scenes
+            .map((scene: { sceneName?: string }) =>
+              typeof scene?.sceneName === 'string' ? scene.sceneName.trim() : '',
+            )
+            .filter(Boolean)
+        : [];
+
+      const hideSources = api.settings
+        .get<string[]>('hideSources', [])
+        .map((target: string) => resolveSceneSourceRef(String(target ?? ''), sceneNames, prepareScene))
+        .filter((target: SceneSourceRef) => target.sourceName);
+      const showSources = api.settings
+        .get<string[]>('showSources', [])
+        .map((target: string) => resolveSceneSourceRef(String(target ?? ''), sceneNames, liveScene))
+        .filter((target: SceneSourceRef) => target.sourceName);
+      const countdownSourceRaw =
+        (args.countdownSource as string | undefined) ?? api.settings.get<string>('countdownSource', '');
+      const countdownSource = countdownSourceRaw.trim()
+        ? resolveSceneSourceRef(countdownSourceRaw, sceneNames, prepareScene)
+        : null;
+
       const cfg: ResolvedConfig = {
         prepareScene,
         liveScene,
-        hideSources:      api.settings.get<string[]>('hideSources', []),
-        showSources:      api.settings.get<string[]>('showSources', []),
+        hideSources,
+        showSources,
         muteSources:      api.settings.get<string[]>('muteSources', []),
         unmuteSources:    api.settings.get<string[]>('unmuteSources', []),
         preStartDelaySec: (args.preStartDelay as number | undefined)   ?? api.settings.get<number>('preStartDelay', 0),
         countdownSec:     (args.delay as number | undefined)           ?? api.settings.get<number>('countdownDelay', 0),
         startStream:      (args.startStream as boolean | undefined)    ?? api.settings.get<boolean>('startStream', false),
-        countdownSource:  (args.countdownSource as string | undefined) ?? api.settings.get<string>('countdownSource', ''),
+        countdownSource,
         sourceTemplate:   (args.sourceText as string | undefined)      ?? api.settings.get<string>('countdownSourceText', '{remaining}s'),
         countdownMessage: (args.message as string | undefined)         ?? api.settings.get<string>('countdownMessage', ''),
         chatInterval:     (args.chatInterval as number | undefined)    ?? api.settings.get<number>('chatInterval', 0),
@@ -285,7 +346,7 @@ export default function setup(api: ScriptApi): void {
         chatMessage:      (args.chatMessage as string | undefined)     ?? api.settings.get<string>('liveMessage', ''),
       };
 
-      const unsubObs = api.obs.subscribeToStatusChanges((connected) => {
+      const unsubObs = api.obs.subscribeToStatusChanges((connected: boolean) => {
         if (!connected && state.active) {
           if (state.tickTimer !== null) clearTimeout(state.tickTimer);
           state.unsubObs();
@@ -312,11 +373,11 @@ export default function setup(api: ScriptApi): void {
       ];
       if (cfg.startStream)                                output.push('[obs-startup] start stream → yes');
       if (cfg.startStream && cfg.preStartDelaySec > 0)   output.push(`[obs-startup] pre-start wait → ${cfg.preStartDelaySec}s`);
-      if (cfg.countdownSource)                            output.push(`[obs-startup] countdown source → ${cfg.countdownSource}`);
+      if (cfg.countdownSource)                            output.push(`[obs-startup] countdown source → ${cfg.countdownSource.raw}`);
       if (cfg.countdownMessage && cfg.chatInterval > 0)  output.push(`[obs-startup] chat every ${cfg.chatInterval}s → ${cfg.countdownMessage}`);
       if (cfg.finalCountdownAt > 0)                      output.push(`[obs-startup] final countdown every 1s from ${cfg.finalCountdownAt}s`);
-      if (cfg.hideSources.length > 0)                    output.push(`[obs-startup] hide → ${cfg.hideSources.join(', ')}`);
-      if (cfg.showSources.length > 0)                    output.push(`[obs-startup] show → ${cfg.showSources.join(', ')}`);
+      if (cfg.hideSources.length > 0)                    output.push(`[obs-startup] hide → ${cfg.hideSources.map((target) => target.raw).join(', ')}`);
+      if (cfg.showSources.length > 0)                    output.push(`[obs-startup] show → ${cfg.showSources.map((target) => target.raw).join(', ')}`);
       if (cfg.muteSources.length > 0)                    output.push(`[obs-startup] mute → ${cfg.muteSources.join(', ')}`);
       if (cfg.unmuteSources.length > 0)                  output.push(`[obs-startup] unmute → ${cfg.unmuteSources.join(', ')}`);
 
@@ -330,9 +391,9 @@ export default function setup(api: ScriptApi): void {
           startStream:      cfg.startStream,
           chatInterval:     cfg.chatInterval || null,
           finalCountdownAt: cfg.finalCountdownAt || null,
-          countdownSource:  cfg.countdownSource || null,
-          hideSources:      cfg.hideSources,
-          showSources:      cfg.showSources,
+          countdownSource:  cfg.countdownSource?.raw ?? null,
+          hideSources:      cfg.hideSources.map((target) => target.raw),
+          showSources:      cfg.showSources.map((target) => target.raw),
           muteSources:      cfg.muteSources,
           unmuteSources:    cfg.unmuteSources,
         },

@@ -56,6 +56,14 @@ When beginning work in this repository:
     - If you are directly starting implementation, copy the selected item into `[tmp]/ONGOING.md` and work from there even if no GitHub issue exists yet
 11. **Once work is active, keep it in `[tmp]/ONGOING.md`** even if a matching GitHub issue also exists
 
+## Script Config Ownership In Docs
+
+- Treat `YASH_DATA_DIR/config.json` and `YASH_DATA_DIR/settings.json` as YASH-owned only
+- Document user scripts as owning `YASH_DATA_DIR/scripts/<scriptId>/` for both `config.jsonc` and script-local `state.json` plus any other script-private runtime artifacts/state files
+- Do not describe user script runtime state as part of YASH's top-level settings surface
+- Until YASH reaches v1, do not add or preserve migration logic for user/app data unless the task explicitly asks for it
+- Prefer current-state correctness and simple resets over compatibility shims for old script/app data during pre-v1 work
+
 ## No Binary Files Policy
 
 Never commit binary files (images, GIFs, fonts, archives, compiled artifacts, etc.) to the repository.

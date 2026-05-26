@@ -172,11 +172,20 @@ On startup, YASH performs a one-time migration from the legacy repository-root `
    ```
 3. If you already have a legacy repo-root `config.json`, YASH will migrate it once automatically the first time it starts without an existing runtime config file.
 
-`config.json` holds rarely edited bootstrap data such as OBS, server, and provider credentials/setup fields. `settings.json` holds mutable runtime state such as `stream.*`, `platforms.youtube.setup`, chat/UI preferences, demo mode, and per-platform viewer display settings.
+`config.json` holds rarely edited bootstrap data such as OBS, server, and provider credentials/setup fields. `settings.json` holds mutable YASH-owned runtime state such as `stream.*`, `platforms.youtube.setup`, chat/UI preferences, demo mode, and per-platform viewer display settings.
+
+Ownership boundary:
+
+- `YASH_DATA_DIR/config.json`, `YASH_DATA_DIR/settings.json`, tokens, logs, the message DB, and the IPC socket are YASH-owned files
+- User scripts own `YASH_DATA_DIR/scripts/<scriptId>/`
+- A script's editable config lives at `YASH_DATA_DIR/scripts/<scriptId>/config.jsonc`
+- A script's private runtime state should live beside that config inside the same script folder, typically as `state.json`, not in YASH's top-level `settings.json`
 
 ## Script configuration
 
-Bundled and user scripts read JSONC config from `~/.config/yash/scripts/<scriptId>/config.jsonc`.
+Bundled and user scripts use a dedicated per-script folder at `~/.config/yash/scripts/<scriptId>/`.
+
+The standard editable config file is `config.jsonc` inside that folder:
 
 For example, the bundled `obs-shutdown` action can be configured at:
 
@@ -189,17 +198,26 @@ For example, the bundled `obs-shutdown` action can be configured at:
   "scene": "[PS] End",
   "message": "Stream ending in {remaining}s!",
   "source": "[TXT] Countdown",
-  "sourceText": "{remaining}s"
+  "sourceText": "{remaining}s",
+  "hideSources": ["Gameplay.Camera"],
+  "muteSources": ["Mic/Aux"]
 }
 ```
 
 That lets `/action obs.shutdown.initiate` run with config-backed defaults, optionally keep an OBS text source updated during the countdown, and choose whether the countdown should actually stop the OBS stream when it reaches zero.
 
-Runtime script state written with `api.settings.set(...)` persists separately in `YASH_DATA_DIR/settings.json` under `scripts.<scriptId>.*`. Reads through `api.settings.get(...)` merge `config.jsonc` defaults with that persisted runtime state, so example scripts can keep mutable snapshots or pause flags without rewriting their config file.
+`source` accepts either `<source>` or `<scene>.<source>`. The scene qualifier is only used to resolve the intended source name before OBS text updates, because the text update itself still applies to the underlying source globally. `hideSources` accepts the same two forms: plain `<source>` searches every scene, while explicit `<scene>.<source>` only hides and restores that one scene item.
+
+Keep any script-private runtime data, caches, or snapshots inside the same `YASH_DATA_DIR/scripts/<scriptId>/` folder so ownership stays local to that script and YASH's own `config.json` / `settings.json` remain reserved for the app itself. The standard mutable runtime file for scripts is `YASH_DATA_DIR/scripts/<scriptId>/state.json`.
+
+Pre-v1 note:
+
+- YASH does not guarantee migration of old user-script runtime state layouts
+- Script/runtime data format changes may require reinstalling or resetting a script's local `state.json`
 
 ## Example script: `obs-source-recaller`
 
-The bundled `obs-source-recaller` example remembers one OBS source's settings per scene and automatically restores them on `CurrentProgramSceneChanged`.
+The bundled `obs-source-recaller` example remembers one OBS source's settings per scene and automatically restores matching snapshots on `CurrentProgramSceneChanged`.
 
 Actions:
 
@@ -217,7 +235,15 @@ Typical flow:
 3. Adjust a source in one OBS scene and run `/action obs.source-recaller.save source='Camera'`
 4. Switch to another scene, adjust the same source differently, and save again
 5. If needed, target another scene directly with `/action obs.source-recaller.save source='Starting Soon.Camera'`
-6. Leave the watcher active so later scene changes restore the matching snapshot automatically
+6. Use `/action obs.source-recaller.list` to see which saved sources match the current OBS program scene
+7. Leave the watcher active so later scene changes restore the matching snapshot automatically
+
+Notes:
+
+- `load` restores the saved snapshot for the current OBS program scene unless you pass an explicit `scene.source` reference
+- `pause` disables automatic scene-change recalls without deleting saved snapshots
+- `resume` re-enables recalls and, when OBS is connected, immediately reapplies any matching snapshots for the current scene
+- The shipped `config.jsonc` currently exposes `startPaused`; any runtime files the script needs should stay under `YASH_DATA_DIR/scripts/obs-source-recaller/`
 
 ## Security
 

@@ -95,7 +95,7 @@ export type ScriptApi = {
     sendMessage: (msg: string, platforms?: string[]) => Promise<void>;
   };
   settings: {
-    /** Key is relative to this script's namespace: scripts.<scriptId>.<key> */
+    /** Key is relative to this script's local state.json file in YASH_DATA_DIR/scripts/<scriptId>/. */
     get: <T>(key: string, defaultVal: T) => T;
     set: (key: string, value: unknown) => Promise<void>;
   };

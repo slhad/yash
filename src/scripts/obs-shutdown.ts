@@ -28,15 +28,60 @@ type ShutdownState = { active: false } | ActiveShutdown;
 
 let state: ShutdownState = { active: false };
 
+type SourceTargetRef = {
+  sceneName: string | null;
+  sourceName: string;
+};
+
+function resolveSourceTargetRefFromSceneNames(
+  rawTarget: string,
+  sceneNames: string[],
+): SourceTargetRef {
+  const target = rawTarget.trim();
+  if (!target) return { sceneName: null, sourceName: '' };
+
+  const explicitMatch = sceneNames
+    .filter(
+      (sceneName) => target.startsWith(`${sceneName}.`) && target.length > sceneName.length + 1,
+    )
+    .sort((a, b) => b.length - a.length)[0];
+
+  if (explicitMatch) {
+    return {
+      sceneName: explicitMatch,
+      sourceName: target.slice(explicitMatch.length + 1).trim(),
+    };
+  }
+
+  return { sceneName: null, sourceName: target };
+}
+
+async function resolveSourceTargetRef(rawTarget: string): Promise<SourceTargetRef> {
+  const target = rawTarget.trim();
+  if (!target) return { sceneName: null, sourceName: '' };
+
+  try {
+    const sceneList = await obsService.getSceneList();
+    const sceneNames = Array.isArray(sceneList?.scenes)
+      ? sceneList.scenes.map((scene: { sceneName: string }) => scene.sceneName)
+      : [];
+    return resolveSourceTargetRefFromSceneNames(target, sceneNames);
+  } catch {
+    return { sceneName: null, sourceName: target };
+  }
+}
+
 async function updateSource(
   sourceName: string,
   template: string,
   remaining: number,
 ): Promise<void> {
   if (!sourceName || !obsService.isConnected()) return;
+  const { sourceName: resolvedSourceName } = await resolveSourceTargetRef(sourceName);
+  if (!resolvedSourceName) return;
   const text = template.replace(/\{remaining\}/g, String(remaining));
   try {
-    await obsService.setInputSettings(sourceName, { text });
+    await obsService.setInputSettings(resolvedSourceName, { text });
   } catch {
     // best-effort
   }
@@ -44,8 +89,10 @@ async function updateSource(
 
 async function clearSource(sourceName: string): Promise<void> {
   if (!sourceName || !obsService.isConnected()) return;
+  const { sourceName: resolvedSourceName } = await resolveSourceTargetRef(sourceName);
+  if (!resolvedSourceName) return;
   try {
-    await obsService.setInputSettings(sourceName, { text: '' });
+    await obsService.setInputSettings(resolvedSourceName, { text: '' });
   } catch {
     // best-effort
   }
@@ -59,8 +106,13 @@ async function setSourcesVisible(sources: string[], visible: boolean): Promise<v
   } catch {
     return;
   }
-  for (const sourceName of sources) {
-    for (const sceneName of allScenes) {
+  for (const rawTarget of sources) {
+    const { sceneName: explicitSceneName, sourceName } = resolveSourceTargetRefFromSceneNames(
+      rawTarget,
+      allScenes,
+    );
+    const targetScenes = explicitSceneName ? [explicitSceneName] : allScenes;
+    for (const sceneName of targetScenes) {
       try {
         const id = await obsService.getSceneItemId(sceneName, sourceName);
         await obsService.setSceneItemEnabled(sceneName, id, visible);

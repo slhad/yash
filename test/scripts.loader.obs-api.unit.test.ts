@@ -31,12 +31,14 @@ describe('user script OBS recaller surface', () => {
     tempDir = undefined;
   });
 
-  test('loader exposes OBS query/state helpers and scene-change subscription to scripts', async () => {
+  test('loader exposes OBS query/state helpers and script-local settings to scripts', async () => {
     tempDir = await makeRepoTempDir('yash-script-obs-api');
     process.env.YASH_DATA_DIR = tempDir;
 
     const scriptDir = path.join(tempDir, 'scripts');
+    const scriptStateDir = path.join(scriptDir, 'obs-api-probe');
     await fs.mkdir(scriptDir, { recursive: true });
+    await fs.mkdir(scriptStateDir, { recursive: true });
     await fs.writeFile(
       path.join(scriptDir, 'obs-api-probe.js'),
       `
@@ -97,8 +99,8 @@ export default function setup(api) {
       sceneItemTransform: { positionX: 320, positionY: 180, scaleX: 1, scaleY: 1 },
     });
     await fs.writeFile(
-      path.join(tempDir, 'settings.json'),
-      JSON.stringify({ scripts: { 'obs-api-probe': { persistedFlag: true } } }, null, 2),
+      path.join(scriptStateDir, 'state.json'),
+      JSON.stringify({ persistedFlag: true }, null, 2),
       'utf8',
     );
 

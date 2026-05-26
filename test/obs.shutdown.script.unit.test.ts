@@ -202,6 +202,75 @@ describe('obs.shutdown bundled script', () => {
     expect(setInputMuteSpy).toHaveBeenCalledWith('Mic/Aux', true);
   });
 
+  test('initiate accepts explicit <scene>.<source> hide targets and scene-qualified countdown source', async () => {
+    const dataDir = await makeRepoTempDir('yash-obs-shutdown-script');
+    tempDir = dataDir;
+    process.env.YASH_DATA_DIR = dataDir;
+    const scriptDir = path.join(dataDir, 'scripts', 'obs-shutdown');
+    await fs.mkdir(scriptDir, { recursive: true });
+    await fs.writeFile(
+      path.join(scriptDir, 'config.jsonc'),
+      `{
+  "scene": "[PS] End",
+  "message": "Stream ending in {remaining}s!",
+  "chatInterval": 10,
+  "stopStream": false,
+  "source": "[PS] End.Nested.[TXT] Countdown.Main",
+  "sourceText": "{remaining}s",
+  "hideSources": ["[SS] Cam.Nested.[SC] Brio.NB"]
+}
+`,
+      'utf8',
+    );
+    clearObsShutdownActions();
+    await import(`../src/scripts/obs-shutdown.ts?case=qualified-${Date.now()}`);
+
+    const sendMessage = mock(async () => {});
+    const ctx: ActionContext = {
+      chatService: { sendMessage } as unknown as ActionContext['chatService'],
+      providers: {},
+    };
+
+    const unsub = mock(() => {});
+    vi.spyOn(obsService, 'isConnected').mockReturnValue(true);
+    vi.spyOn(obsService, 'setCurrentScene').mockResolvedValue(undefined);
+    const setInputSettingsSpy = vi
+      .spyOn(obsService, 'setInputSettings')
+      .mockResolvedValue(undefined);
+    vi.spyOn(obsService, 'stopStream').mockResolvedValue(undefined);
+    vi.spyOn(obsService, 'subscribeToStatusChanges').mockReturnValue(unsub);
+    vi.spyOn(obsService, 'getSceneList').mockResolvedValue({
+      scenes: [
+        { sceneName: '[SS] Cam' },
+        { sceneName: '[SS] Cam.Nested' },
+        { sceneName: '[PS] End' },
+        { sceneName: '[PS] End.Nested' },
+      ],
+    });
+    const getSceneItemIdSpy = vi
+      .spyOn(obsService, 'getSceneItemId')
+      .mockImplementation(async (scene, source) => {
+        if (scene === '[SS] Cam.Nested' && source === '[SC] Brio.NB') return 3;
+        throw new Error('not found');
+      });
+    const setSceneItemEnabledSpy = vi
+      .spyOn(obsService, 'setSceneItemEnabled')
+      .mockResolvedValue(undefined);
+
+    const initiate = getAction('obs.shutdown.initiate');
+    const result = await initiate.invoke({ delay: 120 }, ctx);
+
+    expect(result.output).toContain('[obs-shutdown] source → [PS] End.Nested.[TXT] Countdown.Main');
+    expect(result.output).toContain('[obs-shutdown] hide sources → [SS] Cam.Nested.[SC] Brio.NB');
+
+    await Bun.sleep(50);
+
+    expect(setInputSettingsSpy).toHaveBeenCalledWith('[TXT] Countdown.Main', { text: '120s' });
+    expect(getSceneItemIdSpy).toHaveBeenCalledWith('[SS] Cam.Nested', '[SC] Brio.NB');
+    expect(getSceneItemIdSpy).not.toHaveBeenCalledWith('[SS] Cam', '[SC] Brio.NB');
+    expect(setSceneItemEnabledSpy).toHaveBeenCalledWith('[SS] Cam.Nested', 3, false);
+  });
+
   test('cancel restores hidden sources and unmutes inputs', async () => {
     tempDir = await loadObsShutdownScript({
       hideSources: ['[SC] Brio NB'],

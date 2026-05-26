@@ -43,15 +43,20 @@ function createMockApi(options?: {
   const sceneItemTransform = new Map(
     Object.entries(options?.sceneItemTransform ?? { 'Scene A::7': { positionX: 10, scaleX: 1.2 } }),
   );
+  const operationLog: string[] = [];
 
-  const setInputSettings = mock(
-    async (_inputName: string, _settings: Record<string, unknown>) => {},
-  );
+  const setInputSettings = mock(async (inputName: string, _settings: Record<string, unknown>) => {
+    operationLog.push(`input:${inputName}`);
+  });
   const setSceneItemTransform = mock(
-    async (_sceneName: string, _sceneItemId: number, _transform: Record<string, unknown>) => {},
+    async (sceneName: string, sceneItemId: number, _transform: Record<string, unknown>) => {
+      operationLog.push(`transform:${sceneName}::${sceneItemId}`);
+    },
   );
   const setSceneItemEnabled = mock(
-    async (_sceneName: string, _sceneItemId: number, _enabled: boolean) => {},
+    async (sceneName: string, sceneItemId: number, _enabled: boolean) => {
+      operationLog.push(`enabled:${sceneName}::${sceneItemId}`);
+    },
   );
   const loggerInfo = mock((_msg: string) => {});
   const loggerWarn = mock((_msg: string) => {});
@@ -149,6 +154,7 @@ function createMockApi(options?: {
       await Bun.sleep(0);
     },
     getStoredState: () => settingsData.get('state'),
+    operationLog,
     mocks: {
       setInputSettings,
       setSceneItemTransform,
@@ -184,7 +190,7 @@ describe('obs-source-recaller example script', () => {
     cleanup = undefined;
   });
 
-  test('save captures current scene snapshot and persists it', async () => {
+  test('save captures current scene snapshot and persists it in scene-first order', async () => {
     const setup = await loadScriptApi();
     const ctx = createMockApi();
     cleanup = setup(ctx.api);
@@ -197,34 +203,36 @@ describe('obs-source-recaller example script', () => {
     expect(result.data).toEqual({ source: 'Camera', scene: 'Scene A', paused: false });
     expect(ctx.getStoredState()).toEqual({
       paused: false,
-      snapshots: {
-        Camera: {
-          'Scene A': {
-            sourceName: 'Camera',
-            sceneName: 'Scene A',
-            inputSettings: { zoom: 150, color: 'warm' },
-            sceneItemEnabled: true,
-            sceneItemTransform: { positionX: 10, scaleX: 1.2 },
-          },
+      scenes: {
+        'Scene A': {
+          entries: [
+            {
+              sourceName: 'Camera',
+              inputSettings: { zoom: 150, color: 'warm' },
+              sceneItemEnabled: true,
+              sceneItemTransform: { positionX: 10, scaleX: 1.2 },
+            },
+          ],
         },
       },
     });
   });
 
-  test('load restores saved snapshot for the active scene', async () => {
+  test('load restores saved snapshot for the active scene in staged order', async () => {
     const setup = await loadScriptApi();
     const ctx = createMockApi({
       initialState: {
         paused: false,
-        snapshots: {
-          Camera: {
-            'Scene A': {
-              sourceName: 'Camera',
-              sceneName: 'Scene A',
-              inputSettings: { zoom: 200 },
-              sceneItemEnabled: false,
-              sceneItemTransform: { positionX: 42 },
-            },
+        scenes: {
+          'Scene A': {
+            entries: [
+              {
+                sourceName: 'Camera',
+                inputSettings: { zoom: 200 },
+                sceneItemEnabled: false,
+                sceneItemTransform: { positionX: 42 },
+              },
+            ],
           },
         },
       },
@@ -239,6 +247,11 @@ describe('obs-source-recaller example script', () => {
     expect(ctx.mocks.setInputSettings).toHaveBeenCalledWith('Camera', { zoom: 200 });
     expect(ctx.mocks.setSceneItemTransform).toHaveBeenCalledWith('Scene A', 7, { positionX: 42 });
     expect(ctx.mocks.setSceneItemEnabled).toHaveBeenCalledWith('Scene A', 7, false);
+    expect(ctx.operationLog).toEqual([
+      'input:Camera',
+      'transform:Scene A::7',
+      'enabled:Scene A::7',
+    ]);
   });
 
   test('save and load support explicit <scene>.<source> targets outside the current scene', async () => {
@@ -260,15 +273,16 @@ describe('obs-source-recaller example script', () => {
       },
       initialState: {
         paused: false,
-        snapshots: {
-          Camera: {
-            'Scene B': {
-              sourceName: 'Camera',
-              sceneName: 'Scene B',
-              inputSettings: { zoom: 200 },
-              sceneItemEnabled: true,
-              sceneItemTransform: { positionX: 42 },
-            },
+        scenes: {
+          'Scene B': {
+            entries: [
+              {
+                sourceName: 'Camera',
+                inputSettings: { zoom: 200 },
+                sceneItemEnabled: true,
+                sceneItemTransform: { positionX: 42 },
+              },
+            ],
           },
         },
       },
@@ -306,15 +320,16 @@ describe('obs-source-recaller example script', () => {
       },
       initialState: {
         paused: false,
-        snapshots: {
-          Camera: {
-            'Scene B': {
-              sourceName: 'Camera',
-              sceneName: 'Scene B',
-              inputSettings: { zoom: 80 },
-              sceneItemEnabled: true,
-              sceneItemTransform: { positionX: 5 },
-            },
+        scenes: {
+          'Scene B': {
+            entries: [
+              {
+                sourceName: 'Camera',
+                inputSettings: { zoom: 80 },
+                sceneItemEnabled: true,
+                sceneItemTransform: { positionX: 5 },
+              },
+            ],
           },
         },
       },
@@ -343,21 +358,22 @@ describe('obs-source-recaller example script', () => {
     expect(ctx.mocks.setInputSettings).toHaveBeenCalledWith('Camera', { zoom: 80 });
     expect(ctx.getStoredState()).toEqual({
       paused: false,
-      snapshots: {
-        Camera: {
-          'Scene B': {
-            sourceName: 'Camera',
-            sceneName: 'Scene B',
-            inputSettings: { zoom: 80 },
-            sceneItemEnabled: true,
-            sceneItemTransform: { positionX: 5 },
-          },
+      scenes: {
+        'Scene B': {
+          entries: [
+            {
+              sourceName: 'Camera',
+              inputSettings: { zoom: 80 },
+              sceneItemEnabled: true,
+              sceneItemTransform: { positionX: 5 },
+            },
+          ],
         },
       },
     });
   });
 
-  test('scene-change watcher auto-loads matching saved sources', async () => {
+  test('scene-change watcher applies all entries by stage priority then saved source order', async () => {
     const setup = await loadScriptApi();
     const ctx = createMockApi({
       currentScene: 'Scene A',
@@ -367,24 +383,22 @@ describe('obs-source-recaller example script', () => {
       },
       initialState: {
         paused: false,
-        snapshots: {
-          Camera: {
-            'Scene B': {
-              sourceName: 'Camera',
-              sceneName: 'Scene B',
-              inputSettings: { zoom: 80 },
-              sceneItemEnabled: true,
-              sceneItemTransform: { positionX: 5 },
-            },
-          },
-          Overlay: {
-            'Scene B': {
-              sourceName: 'Overlay',
-              sceneName: 'Scene B',
-              inputSettings: { file: 'b.png' },
-              sceneItemEnabled: false,
-              sceneItemTransform: { positionY: 25 },
-            },
+        scenes: {
+          'Scene B': {
+            entries: [
+              {
+                sourceName: 'Overlay',
+                inputSettings: { file: 'b.png' },
+                sceneItemEnabled: false,
+                sceneItemTransform: { positionY: 25 },
+              },
+              {
+                sourceName: 'Camera',
+                inputSettings: { zoom: 80 },
+                sceneItemEnabled: true,
+                sceneItemTransform: { positionX: 5 },
+              },
+            ],
           },
         },
       },
@@ -405,37 +419,45 @@ describe('obs-source-recaller example script', () => {
 
     await ctx.emitSceneChange('Scene B');
 
-    expect(ctx.mocks.setInputSettings).toHaveBeenCalledWith('Camera', { zoom: 80 });
-    expect(ctx.mocks.setInputSettings).toHaveBeenCalledWith('Overlay', { file: 'b.png' });
+    expect(ctx.operationLog).toEqual([
+      'input:Overlay',
+      'input:Camera',
+      'transform:Scene B::9',
+      'transform:Scene B::8',
+      'enabled:Scene B::9',
+      'enabled:Scene B::8',
+    ]);
     expect(ctx.mocks.loggerInfo).toHaveBeenCalledWith(
-      '[obs-source-recaller] auto-loaded Camera, Overlay for scene "Scene B"',
+      '[obs-source-recaller] auto-loaded Overlay, Camera for scene "Scene B"',
     );
   });
 
-  test('list reports saved snapshots for the current scene', async () => {
+  test('list reports saved snapshots for the current scene in saved order', async () => {
     const setup = await loadScriptApi();
     const ctx = createMockApi({
       currentScene: 'Scene B',
       initialState: {
         paused: true,
-        snapshots: {
-          Camera: {
-            'Scene B': {
-              sourceName: 'Camera',
-              sceneName: 'Scene B',
-              inputSettings: { zoom: 80 },
-              sceneItemEnabled: true,
-              sceneItemTransform: { positionX: 5 },
-            },
+        scenes: {
+          'Scene B': {
+            entries: [
+              {
+                sourceName: 'Camera',
+                inputSettings: { zoom: 80 },
+                sceneItemEnabled: true,
+                sceneItemTransform: { positionX: 5 },
+              },
+            ],
           },
-          Overlay: {
-            'Scene A': {
-              sourceName: 'Overlay',
-              sceneName: 'Scene A',
-              inputSettings: { file: 'a.png' },
-              sceneItemEnabled: false,
-              sceneItemTransform: { positionY: 25 },
-            },
+          'Scene A': {
+            entries: [
+              {
+                sourceName: 'Overlay',
+                inputSettings: { file: 'a.png' },
+                sceneItemEnabled: false,
+                sceneItemTransform: { positionY: 25 },
+              },
+            ],
           },
         },
       },
@@ -454,12 +476,61 @@ describe('obs-source-recaller example script', () => {
         {
           source: 'Camera',
           scene: 'Scene B',
+          order: 0,
           sceneItemEnabled: true,
           inputSettings: { zoom: 80 },
           sceneItemTransform: { positionX: 5 },
         },
       ],
     });
+  });
+
+  test('legacy source-first state still loads and lists correctly', async () => {
+    const setup = await loadScriptApi();
+    const ctx = createMockApi({
+      currentScene: 'Scene B',
+      sceneItemIds: {
+        'Scene B::Camera': 8,
+      },
+      sceneItemEnabled: {
+        'Scene B::8': false,
+      },
+      sceneItemTransform: {
+        'Scene B::8': { positionX: 7 },
+      },
+      initialState: {
+        paused: false,
+        snapshots: {
+          Camera: {
+            'Scene B': {
+              sourceName: 'Camera',
+              sceneName: 'Scene B',
+              inputSettings: { zoom: 91 },
+              sceneItemEnabled: false,
+              sceneItemTransform: { positionX: 7 },
+            },
+          },
+        },
+      },
+    });
+    cleanup = setup(ctx.api);
+
+    const listResult = await getAction(ctx.actions, 'obs.source-recaller.list').invoke({});
+    expect(listResult.output).toEqual([
+      '[obs-source-recaller] saved snapshots for scene "Scene B": Camera',
+    ]);
+
+    const loadResult = await getAction(ctx.actions, 'obs.source-recaller.load').invoke({
+      source: 'Camera',
+    });
+    expect(loadResult.output).toEqual([
+      '[obs-source-recaller] restored "Camera" for scene "Scene B"',
+    ]);
+    expect(ctx.operationLog).toEqual([
+      'input:Camera',
+      'transform:Scene B::8',
+      'enabled:Scene B::8',
+    ]);
   });
 
   test('explore lists the current-scene sources and explicit refs', async () => {
@@ -507,7 +578,7 @@ describe('obs-source-recaller example script', () => {
       startPaused: true,
       initialState: {
         paused: false,
-        snapshots: {},
+        scenes: {},
       },
     });
     cleanup = setup(ctx.api);

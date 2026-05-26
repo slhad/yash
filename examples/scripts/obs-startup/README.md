@@ -30,7 +30,7 @@ Edit `config.jsonc` (or the symlinked copy in `~/.config/yash/scripts/obs-startu
 | Key | Default | Description |
 |---|---|---|
 | `prepareScene` | `"Starting Soon"` | OBS scene to switch to immediately on startup (required) |
-| `hideSources` | `[]` | Sources to disable in the prepare scene |
+| `hideSources` | `[]` | Scene items to disable. Each entry can be either `<source>` for the prepare scene or `<scene>.<source>` to target a different scene explicitly |
 | `muteSources` | `[]` | Audio inputs to mute during prepare |
 
 ### Stream start phase
@@ -45,7 +45,7 @@ Edit `config.jsonc` (or the symlinked copy in `~/.config/yash/scripts/obs-startu
 | Key | Default | Description |
 |---|---|---|
 | `countdownDelay` | `0` | Seconds to wait before switching to the live scene. `0` skips the countdown entirely |
-| `countdownSource` | `""` | OBS text input source to update with remaining time on each tick. Leave empty to disable |
+| `countdownSource` | `""` | OBS text input source to update with remaining time on each tick. Accepts either `<source>` or `<scene>.<source>`; the scene prefix is only used to resolve the intended source name. Leave empty to disable |
 | `countdownSourceText` | `"{remaining}s"` | Template written to the text source — `{remaining}` is replaced with the seconds left |
 
 ### Go-live phase
@@ -53,7 +53,7 @@ Edit `config.jsonc` (or the symlinked copy in `~/.config/yash/scripts/obs-startu
 | Key | Default | Description |
 |---|---|---|
 | `liveScene` | `"Live"` | OBS scene to switch to when going live (required) |
-| `showSources` | `[]` | Sources to enable in the live scene |
+| `showSources` | `[]` | Scene items to enable. Each entry can be either `<source>` for the live scene or `<scene>.<source>` to target a different scene explicitly |
 | `unmuteSources` | `[]` | Audio inputs to unmute when going live |
 | `liveMessage` | `"We're live!"` | Chat message sent when going live. Set to `""` to disable |
 
@@ -79,6 +79,8 @@ Kicks off the startup sequence. Returns immediately after the prepare phase begi
 ### `obs.startup.cancel`
 
 Cancels the in-progress sequence at whatever phase it is currently in. The prepare scene switch is **not** rolled back — cancelling does not restore the previous scene or re-mute sources.
+
+`hideSources`, `showSources`, and `countdownSource` support explicit `scene.source` references. `muteSources` and `unmuteSources` do not — they still expect plain OBS input names because muting is not scene-specific.
 
 ### `obs.startup.status`
 

@@ -34,8 +34,10 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
     * Command `/scripts | /scripts list | /scripts install <example-id> [repair|force]` - list bundled example scripts and copy one into `YASH_DATA_DIR/scripts/<example-id>` without overwriting existing files unless repair/force is requested explicitly
         * Intended for AppImage and packaged installs so users can install tracked example scripts without manually extracting repo files
         * Bundled examples currently include `obs-startup` and `obs-source-recaller`
+        * `YASH_DATA_DIR/scripts/<example-id>/` is owned by that script; keep both editable config and script-local `state.json` plus any other script-private runtime artifacts inside that folder
         * `repair`/`force` refreshes tracked files and merges shipped `config.jsonc` defaults with the user's current `config.jsonc`, preserving existing values and unknown keys
         * `obs-source-recaller` actions: `save source=<source|scene.source>`, `load source=<source|scene.source>`, `list`, `explore`, `pause`, and `resume`
+        * `obs-source-recaller` saves per-source, per-scene snapshots; `resume` reapplies matching snapshots for the current scene when OBS is connected
     * Command /marker [description] [| timestamp] - places a stream marker on all platforms
         * Optional description (chapter label, max 140 chars on Twitch)
         * Optional pipe-delimited timestamp accepts raw seconds, `mm:ss`, or `hh:mm:ss` from stream start (used by YouTube for chapter generation; ignored by Twitch which sets position server-side; Kick does not support markers)
@@ -240,7 +242,7 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
     * `handleWebhookEvent(payload)` — dispatches incoming Kick chat webhook events into the chat stream
 
 ### Configuration
-Bootstrap config is stored in `YASH_DATA_DIR/config.json` (default `~/.config/yash/config.json`). Mutable runtime state is stored in `YASH_DATA_DIR/settings.json`. If the runtime config file does not exist yet and a legacy `[root]/config.json` is present, YASH migrates that legacy file once on startup and then moves mutable settings into `settings.json`. Environment variables take precedence over config file values.
+Bootstrap config is stored in `YASH_DATA_DIR/config.json` (default `~/.config/yash/config.json`). Mutable YASH-owned runtime state is stored in `YASH_DATA_DIR/settings.json`. If the runtime config file does not exist yet and a legacy `[root]/config.json` is present, YASH migrates that legacy file once on startup and then moves mutable settings into `settings.json`. Environment variables take precedence over config file values.
 
 ```json
 {
@@ -282,6 +284,10 @@ Bootstrap config is stored in `YASH_DATA_DIR/config.json` (default `~/.config/ya
 ```
 
 Mutable settings live in `settings.json`, including `demo`, `chat.*`, `stream.*`, `platforms.youtube.setup`, `platforms.<provider>.showViewers`, and TUI/WebUI display preferences.
+
+`config.json` and `settings.json` are reserved for YASH itself. User scripts own `YASH_DATA_DIR/scripts/<scriptId>/`; their editable config belongs in `config.jsonc` there, and mutable script runtime state belongs in `state.json` there, with any other script-private runtime files also staying inside that same script folder rather than being documented as part of YASH's top-level settings surface.
+
+Pre-v1 rule: do not add migration/compatibility behavior for old user-script or app-data layouts unless a task explicitly requires it; format changes may require resetting script-local `state.json`.
 
 **Environment variable overrides:**
 

@@ -2,9 +2,14 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { IpcActionError, registry } from '../actions/registry';
 import { IPC_ERROR_CODES, type YashActionDefinition } from '../actions/types';
-import { chatService, obsService, settingsStore } from '../services';
+import { chatService, obsService } from '../services';
 import { defaultLogger } from '../utils/logger';
-import { getValueAtPath, loadScriptConfig } from '../utils/scriptConfig';
+import {
+  getValueAtPath,
+  loadScriptConfig,
+  loadScriptSettings,
+  writeScriptSettings,
+} from '../utils/scriptConfig';
 import { deepMerge } from '../utils/settings';
 
 // ─── Types (mirrored in ~/.config/yash/scripts/types.d.ts for user IDE support) ──
@@ -112,9 +117,14 @@ function forceRegister(def: YashActionDefinition): void {
 
 function createScriptApi(scriptId: string, cleanupFns: (() => void)[], dataDir: string): ScriptApi {
   let cachedConfig: Record<string, unknown> | null = null;
+  let cachedSettings: Record<string, unknown> | null = null;
   function scriptConfig(): Record<string, unknown> {
     if (!cachedConfig) cachedConfig = loadScriptConfig(scriptId, dataDir);
     return cachedConfig;
+  }
+  function scriptSettings(): Record<string, unknown> {
+    if (!cachedSettings) cachedSettings = loadScriptSettings(scriptId, dataDir);
+    return cachedSettings;
   }
   return {
     registerAction(action: UserScriptAction): void {
@@ -200,7 +210,7 @@ function createScriptApi(scriptId: string, cleanupFns: (() => void)[], dataDir: 
     settings: {
       get: <T>(key: string, defaultVal: T): T => {
         const configValue = getValueAtPath(scriptConfig(), key, undefined);
-        const persistedValue = settingsStore.get(`scripts.${scriptId}.${key}`, undefined);
+        const persistedValue = getValueAtPath(scriptSettings(), key, undefined);
         const mergedValue =
           configValue &&
           typeof configValue === 'object' &&
@@ -212,7 +222,31 @@ function createScriptApi(scriptId: string, cleanupFns: (() => void)[], dataDir: 
             : (persistedValue ?? configValue);
         return (mergedValue as T | undefined) ?? defaultVal;
       },
-      set: (key, value) => settingsStore.set(`scripts.${scriptId}.${key}`, value),
+      set: async (key, value) => {
+        const nextSettings = JSON.parse(JSON.stringify(scriptSettings())) as Record<
+          string,
+          unknown
+        >;
+        const segments = key
+          .split('.')
+          .map((segment) => segment.trim())
+          .filter(Boolean);
+        if (segments.length === 0) {
+          throw new Error('settings key required');
+        }
+
+        let current: Record<string, unknown> = nextSettings;
+        for (const segment of segments.slice(0, -1)) {
+          const next = current[segment];
+          if (!next || typeof next !== 'object' || Array.isArray(next)) {
+            current[segment] = {};
+          }
+          current = current[segment] as Record<string, unknown>;
+        }
+        current[segments[segments.length - 1] as string] = JSON.parse(JSON.stringify(value));
+        writeScriptSettings(scriptId, dataDir, nextSettings);
+        cachedSettings = nextSettings;
+      },
     },
 
     logger: {
@@ -259,7 +293,7 @@ export default function setup(api) {
 - \`api.registerAction(action)\` — register an IPC-accessible action
 - \`api.obs\` — scene queries, input/source state helpers, scene-item transform/enabled helpers, scene-change subscription, plus stream controls
 - \`api.chat\` — sendMessage(text, platforms?)
-- \`api.settings\` — get(key, default), set(key, value)  [reads config.jsonc defaults merged with namespaced runtime state under scripts.<filename>.*]
+- \`api.settings\` — get(key, default), set(key, value)  [reads config.jsonc defaults merged with script-local runtime state from state.json in the same script folder]
 - \`api.logger\` — info/warn/error  [prefixed with [script:<filename>]]
 
 ## Cleanup
@@ -286,8 +320,9 @@ Create the file (JSONC = JSON with // and /* */ comments):
 \`\`\`
 
 Read it in your script with \`api.settings.get('myKey', defaultValue)\`.
-Values written later with \`api.settings.set('myKey', value)\` persist in \`settings.json\`
-under \`scripts.<scriptId>.*\` and override the config defaults on subsequent reads.
+Values written later with \`api.settings.set('myKey', value)\` persist in
+\`~/.config/yash/scripts/<scriptId>/state.json\` and override the config defaults on
+subsequent reads.
 
 ## Notes
 
@@ -316,9 +351,15 @@ Configure in \`~/.config/yash/scripts/obs-shutdown/config.jsonc\`:
   // Whether to stop the OBS stream when the countdown reaches zero
   "stopStream": true,
   // OBS text source to update with remaining time on each tick (optional)
+  // Accepts either "<source>" or "<scene>.<source>" when the source name needs scene-based disambiguation
   "source": "CountdownText",
   // Text source template — {remaining} is replaced by seconds left
-  "sourceText": "{remaining}s"
+  "sourceText": "{remaining}s",
+  // Optional source refs to hide during the countdown
+  // Plain "<source>" searches all scenes; explicit "<scene>.<source>" only touches that scene item
+  "hideSources": ["Gameplay.Camera"],
+  // Optional OBS inputs to mute during the countdown
+  "muteSources": ["Mic/Aux"]
 }
 \`\`\`
 
@@ -327,8 +368,10 @@ Configure in \`~/.config/yash/scripts/obs-shutdown/config.jsonc\`:
 - \`message\` — chat message template; \`{remaining}\` is replaced by seconds left (default: "Stream ending in {remaining}s!")
 - \`chatInterval\` — how often to post a countdown message, in seconds (default: 10)
 - \`stopStream\` — whether to stop the OBS stream when the countdown reaches zero (default: true)
-- \`source\` — OBS text source name to update with the remaining time on each tick (optional; leave empty to disable)
+- \`source\` — OBS text source name to update with the remaining time on each tick (optional; accepts \`<source>\` or \`<scene>.<source>\`; the scene qualifier only resolves the intended source name)
 - \`sourceText\` — text source template; \`{remaining}\` is replaced by seconds left (default: "{remaining}")
+- \`hideSources\` — optional source refs to hide during the countdown; plain \`<source>\` searches every scene, explicit \`<scene>.<source>\` targets one scene item
+- \`muteSources\` — optional OBS inputs to mute during the countdown
 
 All settings can also be overridden per-call via action args (e.g. \`obs.shutdown.initiate scene="BRB" delay=60\`).
 `;
@@ -397,8 +440,14 @@ export type ScriptApi = {
 };
 `;
 
-function writeFileIfMissing(filePath: string, content: string): void {
-  if (fs.existsSync(filePath)) return;
+function writeGeneratedFile(filePath: string, content: string): void {
+  if (fs.existsSync(filePath)) {
+    try {
+      if (fs.readFileSync(filePath, 'utf8') === content) return;
+    } catch {
+      // fall through and rewrite
+    }
+  }
   try {
     fs.writeFileSync(filePath, content, 'utf8');
   } catch {
@@ -412,8 +461,8 @@ export async function loadUserScripts(dataDir: string): Promise<void> {
   const dir = path.join(dataDir, 'scripts');
 
   fs.mkdirSync(dir, { recursive: true });
-  writeFileIfMissing(path.join(dir, 'README.md'), README_CONTENT);
-  writeFileIfMissing(path.join(dir, 'types.d.ts'), TYPES_DTS_CONTENT);
+  writeGeneratedFile(path.join(dir, 'README.md'), README_CONTENT);
+  writeGeneratedFile(path.join(dir, 'types.d.ts'), TYPES_DTS_CONTENT);
 
   let entries: fs.Dirent[];
   try {

@@ -3,17 +3,25 @@ import type { ScriptApi, UserScriptAction } from './types';
 type SceneItemTransform = Record<string, unknown>;
 type InputSettings = Record<string, unknown>;
 
-type Snapshot = {
+type SourceSnapshotEntry = {
   sourceName: string;
-  sceneName: string;
   inputSettings: InputSettings;
   sceneItemEnabled: boolean;
   sceneItemTransform: SceneItemTransform;
 };
 
+type SceneSnapshotState = {
+  entries: SourceSnapshotEntry[];
+};
+
 type StoredState = {
   paused: boolean;
-  snapshots: Record<string, Record<string, Snapshot>>;
+  scenes: Record<string, SceneSnapshotState>;
+};
+
+type LegacyStoredState = {
+  paused?: boolean;
+  snapshots?: Record<string, Record<string, unknown>>;
 };
 
 type TargetRef = {
@@ -21,9 +29,74 @@ type TargetRef = {
   sceneName: string;
 };
 
-const SCRIPT_ID = 'obs-source-recaller';
+type ApplyStageKey = 'inputSettings' | 'sceneItemTransform' | 'sceneItemEnabled';
+
+type ApplyOperation = {
+  sceneName: string;
+  sourceName: string;
+  sceneItemId: number;
+  stage: ApplyStageKey;
+  priority: number;
+  apply: () => Promise<void>;
+};
+
 const STATE_KEY = 'state';
-const DEFAULT_STATE: StoredState = { paused: false, snapshots: {} };
+const DEFAULT_STATE: StoredState = { paused: false, scenes: {} };
+
+const APPLY_STAGE_ORDER: Array<{
+  key: ApplyStageKey;
+  priority: number;
+  build: (
+    api: ScriptApi,
+    sceneName: string,
+    sourceName: string,
+    sceneItemId: number,
+    entry: SourceSnapshotEntry,
+  ) => ApplyOperation;
+}> = [
+  {
+    key: 'inputSettings',
+    priority: 10,
+    build: (api, sceneName, sourceName, sceneItemId, entry) => ({
+      sceneName,
+      sourceName,
+      sceneItemId,
+      stage: 'inputSettings',
+      priority: 10,
+      apply: async () => {
+        await api.obs.setInputSettings(sourceName, entry.inputSettings);
+      },
+    }),
+  },
+  {
+    key: 'sceneItemTransform',
+    priority: 20,
+    build: (api, sceneName, sourceName, sceneItemId, entry) => ({
+      sceneName,
+      sourceName,
+      sceneItemId,
+      stage: 'sceneItemTransform',
+      priority: 20,
+      apply: async () => {
+        await api.obs.setSceneItemTransform(sceneName, sceneItemId, entry.sceneItemTransform);
+      },
+    }),
+  },
+  {
+    key: 'sceneItemEnabled',
+    priority: 30,
+    build: (api, sceneName, sourceName, sceneItemId, entry) => ({
+      sceneName,
+      sourceName,
+      sceneItemId,
+      stage: 'sceneItemEnabled',
+      priority: 30,
+      apply: async () => {
+        await api.obs.setSceneItemEnabled(sceneName, sceneItemId, entry.sceneItemEnabled);
+      },
+    }),
+  },
+];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -33,7 +106,7 @@ function cloneRecord(value: Record<string, unknown>): Record<string, unknown> {
   return JSON.parse(JSON.stringify(value)) as Record<string, unknown>;
 }
 
-function normalizeSnapshot(sourceName: string, sceneName: string, value: unknown): Snapshot | null {
+function normalizeEntry(sourceName: string, value: unknown): SourceSnapshotEntry | null {
   if (!isRecord(value)) return null;
   const inputSettings = isRecord(value.inputSettings) ? cloneRecord(value.inputSettings) : null;
   const sceneItemTransform = isRecord(value.sceneItemTransform)
@@ -44,48 +117,103 @@ function normalizeSnapshot(sourceName: string, sceneName: string, value: unknown
   }
   return {
     sourceName,
-    sceneName,
     inputSettings,
     sceneItemEnabled: value.sceneItemEnabled,
     sceneItemTransform,
   };
 }
 
-function normalizeState(value: unknown, fallbackPaused: boolean): StoredState {
-  if (!isRecord(value)) {
-    return { paused: fallbackPaused, snapshots: {} };
+function normalizeSceneState(value: unknown): SceneSnapshotState | null {
+  if (!isRecord(value) || !Array.isArray(value.entries)) return null;
+  const entries: SourceSnapshotEntry[] = [];
+  for (const rawEntry of value.entries) {
+    if (!isRecord(rawEntry) || typeof rawEntry.sourceName !== 'string') continue;
+    const entry = normalizeEntry(rawEntry.sourceName, rawEntry);
+    if (entry) entries.push(entry);
+  }
+  return entries.length > 0 ? { entries } : null;
+}
+
+function normalizeLegacyState(value: LegacyStoredState): Record<string, SceneSnapshotState> {
+  const scenes: Record<string, SceneSnapshotState> = {};
+  if (!isRecord(value.snapshots)) return scenes;
+
+  const sceneSourcePairs: Array<{ sceneName: string; sourceName: string; entry: SourceSnapshotEntry }> =
+    [];
+
+  for (const [sourceName, perScene] of Object.entries(value.snapshots)) {
+    if (!isRecord(perScene)) continue;
+    for (const [sceneName, rawSnapshot] of Object.entries(perScene)) {
+      const entry = normalizeEntry(sourceName, rawSnapshot);
+      if (entry) sceneSourcePairs.push({ sceneName, sourceName, entry });
+    }
   }
 
-  const snapshots: StoredState['snapshots'] = {};
-  if (isRecord(value.snapshots)) {
-    for (const [sourceName, perScene] of Object.entries(value.snapshots)) {
-      if (!isRecord(perScene)) continue;
-      const normalizedPerScene: Record<string, Snapshot> = {};
-      for (const [sceneName, rawSnapshot] of Object.entries(perScene)) {
-        const normalized = normalizeSnapshot(sourceName, sceneName, rawSnapshot);
-        if (normalized) normalizedPerScene[sceneName] = normalized;
-      }
-      if (Object.keys(normalizedPerScene).length > 0) snapshots[sourceName] = normalizedPerScene;
+  sceneSourcePairs.sort((a, b) => {
+    const sceneComparison = a.sceneName.localeCompare(b.sceneName);
+    if (sceneComparison !== 0) return sceneComparison;
+    return a.sourceName.localeCompare(b.sourceName);
+  });
+
+  for (const { sceneName, entry } of sceneSourcePairs) {
+    const sceneState = scenes[sceneName] ?? { entries: [] };
+    sceneState.entries.push(entry);
+    scenes[sceneName] = sceneState;
+  }
+
+  return scenes;
+}
+
+function normalizeState(value: unknown, fallbackPaused: boolean): StoredState {
+  if (!isRecord(value)) {
+    return { paused: fallbackPaused, scenes: {} };
+  }
+
+  const scenes: Record<string, SceneSnapshotState> = {};
+  if (isRecord(value.scenes)) {
+    for (const [sceneName, rawSceneState] of Object.entries(value.scenes)) {
+      const normalized = normalizeSceneState(rawSceneState);
+      if (normalized) scenes[sceneName] = normalized;
     }
+  }
+
+  if (Object.keys(scenes).length === 0) {
+    Object.assign(scenes, normalizeLegacyState(value as LegacyStoredState));
   }
 
   return {
     paused: typeof value.paused === 'boolean' ? value.paused : fallbackPaused,
-    snapshots,
+    scenes,
   };
 }
 
-function stateHasSnapshot(state: StoredState, sourceName: string, sceneName: string): boolean {
-  return state.snapshots[sourceName]?.[sceneName] !== undefined;
+function findSceneEntry(state: StoredState, sceneName: string, sourceName: string): SourceSnapshotEntry | null {
+  return state.scenes[sceneName]?.entries.find((entry) => entry.sourceName === sourceName) ?? null;
 }
 
-function listSourcesForScene(state: StoredState, sceneName: string): Snapshot[] {
-  const snapshots: Snapshot[] = [];
-  for (const perScene of Object.values(state.snapshots)) {
-    const snapshot = perScene[sceneName];
-    if (snapshot) snapshots.push(snapshot);
+function listEntriesForScene(state: StoredState, sceneName: string): SourceSnapshotEntry[] {
+  return [...(state.scenes[sceneName]?.entries ?? [])];
+}
+
+function upsertSceneEntry(
+  state: StoredState,
+  sceneName: string,
+  entry: SourceSnapshotEntry,
+): { alreadyExisted: boolean } {
+  const sceneState = state.scenes[sceneName] ?? { entries: [] };
+  const existingIndex = sceneState.entries.findIndex((candidate) => candidate.sourceName === entry.sourceName);
+  const alreadyExisted = existingIndex >= 0;
+  if (alreadyExisted) {
+    sceneState.entries[existingIndex] = entry;
+  } else {
+    sceneState.entries.push(entry);
   }
-  return snapshots.sort((a, b) => a.sourceName.localeCompare(b.sourceName));
+  state.scenes[sceneName] = sceneState;
+  return { alreadyExisted };
+}
+
+function describeSceneEntries(entries: SourceSnapshotEntry[]): string[] {
+  return entries.map((entry) => entry.sourceName);
 }
 
 export default function setup(api: ScriptApi): () => void {
@@ -123,7 +251,7 @@ export default function setup(api: ScriptApi): () => void {
     };
   }
 
-  async function captureSnapshot(target: TargetRef): Promise<Snapshot> {
+  async function captureSnapshot(target: TargetRef): Promise<SourceSnapshotEntry> {
     const { sceneName, sourceName } = target;
     const sceneItemId = await api.obs.getSceneItemId(sceneName, sourceName);
     const [inputSettings, sceneItemEnabled, sceneItemTransform] = await Promise.all([
@@ -133,40 +261,80 @@ export default function setup(api: ScriptApi): () => void {
     ]);
     return {
       sourceName,
-      sceneName,
       inputSettings,
       sceneItemEnabled,
       sceneItemTransform,
     };
   }
 
-  async function applySnapshot(snapshot: Snapshot, target?: TargetRef): Promise<void> {
-    const sceneName = target?.sceneName ?? snapshot.sceneName;
-    const sourceName = target?.sourceName ?? snapshot.sourceName;
-    const sceneItemId = await api.obs.getSceneItemId(sceneName, sourceName);
-    await api.obs.setInputSettings(sourceName, snapshot.inputSettings);
-    await api.obs.setSceneItemTransform(sceneName, sceneItemId, snapshot.sceneItemTransform);
-    await api.obs.setSceneItemEnabled(sceneName, sceneItemId, snapshot.sceneItemEnabled);
+  async function buildApplyOperations(
+    sceneName: string,
+    entries: Array<{ sourceName: string; entry: SourceSnapshotEntry }>,
+  ): Promise<ApplyOperation[]> {
+    const operationsWithOrder = await Promise.all(
+      entries.map(async ({ sourceName, entry }, sourceOrder) => {
+        const sceneItemId = await api.obs.getSceneItemId(sceneName, sourceName);
+        return APPLY_STAGE_ORDER.map((stage, stageOrder) => ({
+          sourceOrder,
+          stageOrder,
+          operation: stage.build(api, sceneName, sourceName, sceneItemId, entry),
+        }));
+      }),
+    );
+
+    return operationsWithOrder
+      .flat()
+      .sort((a, b) => {
+        const priorityComparison = a.operation.priority - b.operation.priority;
+        if (priorityComparison !== 0) return priorityComparison;
+        const sourceComparison = a.sourceOrder - b.sourceOrder;
+        if (sourceComparison !== 0) return sourceComparison;
+        return a.stageOrder - b.stageOrder;
+      })
+      .map(({ operation }) => operation);
+  }
+
+  async function applyEntry(sceneName: string, entry: SourceSnapshotEntry, target?: TargetRef): Promise<void> {
+    const sourceName = target?.sourceName ?? entry.sourceName;
+    const targetScene = target?.sceneName ?? sceneName;
+    const operations = await buildApplyOperations(targetScene, [{ sourceName, entry }]);
+    for (const operation of operations) {
+      await operation.apply();
+    }
   }
 
   async function autoLoadForScene(sceneName: string): Promise<string[]> {
     const state = readState();
     if (state.paused) return [];
 
-    const applied: string[] = [];
-    for (const [sourceName, perScene] of Object.entries(state.snapshots)) {
-      const snapshot = perScene[sceneName];
-      if (!snapshot) continue;
+    const entries = listEntriesForScene(state, sceneName);
+    if (entries.length === 0) return [];
+
+    let operations: ApplyOperation[];
+    try {
+      operations = await buildApplyOperations(
+        sceneName,
+        entries.map((entry) => ({ sourceName: entry.sourceName, entry })),
+      );
+    } catch (err) {
+      api.logger.warn(
+        `[obs-source-recaller] failed to prepare auto-load for "${sceneName}": ${String(err)}`,
+      );
+      return [];
+    }
+
+    for (const operation of operations) {
       try {
-        await applySnapshot(snapshot);
-        applied.push(sourceName);
+        await operation.apply();
       } catch (err) {
         api.logger.warn(
-          `[obs-source-recaller] failed to auto-load "${sourceName}" for "${sceneName}": ${String(err)}`,
+          `[obs-source-recaller] failed to auto-load stage "${operation.stage}" for "${operation.sourceName}" in "${sceneName}": ${String(err)}`,
         );
+        return [];
       }
     }
 
+    const applied = describeSceneEntries(entries);
     if (applied.length > 0) {
       api.logger.info(
         `[obs-source-recaller] auto-loaded ${applied.join(', ')} for scene "${sceneName}"`,
@@ -210,20 +378,16 @@ export default function setup(api: ScriptApi): () => void {
 
         const snapshot = await captureSnapshot(target);
         const state = readState();
-        const alreadyExisted = stateHasSnapshot(state, target.sourceName, snapshot.sceneName);
-        state.snapshots[target.sourceName] = {
-          ...(state.snapshots[target.sourceName] ?? {}),
-          [snapshot.sceneName]: snapshot,
-        };
+        const { alreadyExisted } = upsertSceneEntry(state, target.sceneName, snapshot);
         await writeState(state);
 
         return {
           output: [
-            `[obs-source-recaller] ${alreadyExisted ? 'updated' : 'saved'} "${target.sourceName}" for scene "${snapshot.sceneName}"`,
+            `[obs-source-recaller] ${alreadyExisted ? 'updated' : 'saved'} "${target.sourceName}" for scene "${target.sceneName}"`,
           ],
           data: {
             source: target.sourceName,
-            scene: snapshot.sceneName,
+            scene: target.sceneName,
             paused: state.paused,
           },
         };
@@ -251,7 +415,7 @@ export default function setup(api: ScriptApi): () => void {
         if (!target.sourceName) throw new Error('Missing required arg: source');
 
         const state = readState();
-        const snapshot = state.snapshots[target.sourceName]?.[target.sceneName];
+        const snapshot = findSceneEntry(state, target.sceneName, target.sourceName);
         if (!snapshot) {
           return {
             output: [
@@ -266,7 +430,7 @@ export default function setup(api: ScriptApi): () => void {
           };
         }
 
-        await applySnapshot(snapshot, target);
+        await applyEntry(target.sceneName, snapshot, target);
         return {
           output: [
             `[obs-source-recaller] restored "${target.sourceName}" for scene "${target.sceneName}"`,
@@ -290,8 +454,8 @@ export default function setup(api: ScriptApi): () => void {
         if (!api.obs.isConnected()) throw new Error('OBS is not connected');
         const sceneName = await api.obs.getCurrentScene();
         const state = readState();
-        const snapshots = listSourcesForScene(state, sceneName);
-        if (snapshots.length === 0) {
+        const entries = listEntriesForScene(state, sceneName);
+        if (entries.length === 0) {
           return {
             output: [`[obs-source-recaller] no saved snapshots for scene "${sceneName}"`],
             data: {
@@ -304,17 +468,18 @@ export default function setup(api: ScriptApi): () => void {
 
         return {
           output: [
-            `[obs-source-recaller] saved snapshots for scene "${sceneName}": ${snapshots.map((snapshot) => snapshot.sourceName).join(', ')}`,
+            `[obs-source-recaller] saved snapshots for scene "${sceneName}": ${describeSceneEntries(entries).join(', ')}`,
           ],
           data: {
             scene: sceneName,
             paused: state.paused,
-            snapshots: snapshots.map((snapshot) => ({
-              source: snapshot.sourceName,
-              scene: snapshot.sceneName,
-              sceneItemEnabled: snapshot.sceneItemEnabled,
-              inputSettings: snapshot.inputSettings,
-              sceneItemTransform: snapshot.sceneItemTransform,
+            snapshots: entries.map((entry, order) => ({
+              source: entry.sourceName,
+              scene: sceneName,
+              order,
+              sceneItemEnabled: entry.sceneItemEnabled,
+              inputSettings: entry.inputSettings,
+              sceneItemTransform: entry.sceneItemTransform,
             })),
           },
         };
