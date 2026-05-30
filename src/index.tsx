@@ -76,7 +76,6 @@ import {
   SETTINGS_WIDTH_OPTIONS,
   validateTuiSettingsDraft,
 } from './utils/tuiSettings';
-import { getValueAtPath, setValueAtPath } from './utils/settings';
 import { parseMarkerArgs, parseMarkersArgs, parseSettingsValue } from './utils/webCommands';
 import './index.ts'; // start Bun.serve web server in the same process
 import { IpcActionError, registry } from './actions/registry';
@@ -4649,11 +4648,7 @@ function openScriptConfigModal(spec: ScriptConfigModalSpec): void {
       key: String(lastSegment ?? ''),
       path: pathKey(segments),
       index: typeof lastSegment === 'number' ? lastSegment : '',
-      type: Array.isArray(value)
-        ? 'array'
-        : isRecord(value)
-          ? 'object'
-          : inferValueType(value),
+      type: Array.isArray(value) ? 'array' : isRecord(value) ? 'object' : inferValueType(value),
       length: Array.isArray(value) ? value.length : isRecord(value) ? Object.keys(value).length : 0,
     };
     if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
@@ -4661,11 +4656,7 @@ function openScriptConfigModal(spec: ScriptConfigModalSpec): void {
     }
     if (isRecord(value)) {
       for (const [key, child] of Object.entries(value)) {
-        if (
-          typeof child === 'string' ||
-          typeof child === 'number' ||
-          typeof child === 'boolean'
-        ) {
+        if (typeof child === 'string' || typeof child === 'number' || typeof child === 'boolean') {
           context[key] = child;
         }
       }
@@ -4808,7 +4799,9 @@ function openScriptConfigModal(spec: ScriptConfigModalSpec): void {
     const resolveMeta = (segments: PathSegment[]) => {
       const exact = schema[pathKey(segments)];
       if (exact) return exact;
-      return schemaEntries.find(([schemaPath]) => matchesSchemaPath(schemaPath, segments))?.[1] ?? {};
+      return (
+        schemaEntries.find(([schemaPath]) => matchesSchemaPath(schemaPath, segments))?.[1] ?? {}
+      );
     };
     const pushScalarField = (
       segments: PathSegment[],
@@ -5067,7 +5060,9 @@ function openScriptConfigModal(spec: ScriptConfigModalSpec): void {
       return;
     }
     if (focusPath) {
-      const matchedIndex = items.findIndex((item) => pathKey(item.field.pathSegments) === focusPath);
+      const matchedIndex = items.findIndex(
+        (item) => pathKey(item.field.pathSegments) === focusPath,
+      );
       focusIdx = matchedIndex >= 0 ? matchedIndex : Math.min(focusIdx, items.length - 1);
     } else {
       focusIdx = Math.min(focusIdx, items.length - 1);
@@ -5085,8 +5080,7 @@ function openScriptConfigModal(spec: ScriptConfigModalSpec): void {
     if (current.kind === 'input') {
       current.node.blur();
       current.prefixNode.fg = scalarColor(current.field.valueType);
-    }
-    else if (current.kind === 'toggle') renderToggle(current, false);
+    } else if (current.kind === 'toggle') renderToggle(current, false);
     else renderSection(current, false);
   }
 

@@ -1,9 +1,5 @@
 import { getDataDir } from './config';
-import {
-  getScriptConfigPath,
-  loadScriptConfig,
-  writeScriptConfig,
-} from './scriptConfig';
+import { getScriptConfigPath, loadScriptConfig, writeScriptConfig } from './scriptConfig';
 import { deepMerge, setValueAtPath } from './settings';
 
 export const OBS_SHUTDOWN_SCRIPT_ID = 'obs-shutdown';

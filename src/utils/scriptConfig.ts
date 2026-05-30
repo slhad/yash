@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
-import { deepMerge, getValueAtPath } from './settings';
+import { getValueAtPath } from './settings';
 
 export { getValueAtPath };
 

@@ -391,13 +391,13 @@ registry.registerAction({
     }
 
     return {
-        output:
-          result.changedKeys.length > 0
-            ? [
-                `[obs-shutdown] updated overrides: ${result.changedKeys.join(', ')}`,
-                `[obs-shutdown] config path → ${getObsShutdownConfigPath()}`,
-              ]
-            : ['[obs-shutdown] no changes'],
+      output:
+        result.changedKeys.length > 0
+          ? [
+              `[obs-shutdown] updated overrides: ${result.changedKeys.join(', ')}`,
+              `[obs-shutdown] config path → ${getObsShutdownConfigPath()}`,
+            ]
+          : ['[obs-shutdown] no changes'],
       warnings: state.active
         ? ['A countdown is already running; saved defaults apply on the next start.']
         : undefined,

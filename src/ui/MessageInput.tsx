@@ -90,8 +90,7 @@ export const MessageInput: React.FC<MessageInputProps> = ({
       if (historyIdxRef.current === -1) {
         draftBeforeHistoryRef.current = message;
         historyIdxRef.current = history.length - 1;
-      }
-      else if (historyIdxRef.current > 0) historyIdxRef.current--;
+      } else if (historyIdxRef.current > 0) historyIdxRef.current--;
       setMessage(history[historyIdxRef.current] ?? '');
       return;
     }

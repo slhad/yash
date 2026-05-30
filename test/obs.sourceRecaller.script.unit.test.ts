@@ -262,8 +262,18 @@ describe('obs-source-recaller example script', () => {
         paused: false,
         triggers: {
           'Scene A': [
-            { sourceRef: 'Scene A.Camera', stage: 'inputSettings', priority: 10, data: { zoom: 80 } },
-            { sourceRef: 'Scene A.Camera', stage: 'sceneItemTransform', priority: 20, data: { positionX: 5 } },
+            {
+              sourceRef: 'Scene A.Camera',
+              stage: 'inputSettings',
+              priority: 10,
+              data: { zoom: 80 },
+            },
+            {
+              sourceRef: 'Scene A.Camera',
+              stage: 'sceneItemTransform',
+              priority: 20,
+              data: { positionX: 5 },
+            },
             { sourceRef: 'Scene A.Camera', stage: 'sceneItemEnabled', priority: 30, data: false },
           ],
         },
@@ -322,8 +332,18 @@ describe('obs-source-recaller example script', () => {
         paused: true,
         triggers: {
           'Scene A': [
-            { sourceRef: 'Scene A.Camera', stage: 'inputSettings', priority: 10, data: { zoom: 80 } },
-            { sourceRef: 'Scene A.Camera', stage: 'sceneItemTransform', priority: 20, data: { positionX: 5 } },
+            {
+              sourceRef: 'Scene A.Camera',
+              stage: 'inputSettings',
+              priority: 10,
+              data: { zoom: 80 },
+            },
+            {
+              sourceRef: 'Scene A.Camera',
+              stage: 'sceneItemTransform',
+              priority: 20,
+              data: { positionX: 5 },
+            },
             { sourceRef: 'Scene A.Camera', stage: 'sceneItemEnabled', priority: 30, data: true },
           ],
         },
@@ -392,7 +412,12 @@ describe('obs-source-recaller example script', () => {
         paused: true,
         triggers: {
           'Scene A': [
-            { sourceRef: 'Scene A.Camera', stage: 'inputSettings', priority: 10, data: { zoom: 80 } },
+            {
+              sourceRef: 'Scene A.Camera',
+              stage: 'inputSettings',
+              priority: 10,
+              data: { zoom: 80 },
+            },
           ],
         },
       },
@@ -414,7 +439,14 @@ describe('obs-source-recaller example script', () => {
         startPaused: true,
         paused: true,
         triggers: {
-          'Scene A': [{ sourceRef: 'Scene A.Camera', stage: 'inputSettings', priority: 10, data: { zoom: 80 } }],
+          'Scene A': [
+            {
+              sourceRef: 'Scene A.Camera',
+              stage: 'inputSettings',
+              priority: 10,
+              data: { zoom: 80 },
+            },
+          ],
         },
         $ui: {
           startPaused: expect.any(Object),
@@ -443,15 +475,27 @@ describe('obs-source-recaller example script', () => {
     );
 
     const spec = openScriptConfigModal.mock.calls[0]?.[0] as {
-      onSaveConfig: (config: Record<string, unknown>) => Promise<{ changedKeys: string[]; errors?: string[] }>;
+      onSaveConfig: (
+        config: Record<string, unknown>,
+      ) => Promise<{ changedKeys: string[]; errors?: string[] }>;
     };
     const saveResult = await spec.onSaveConfig({
       startPaused: true,
       paused: true,
       triggers: {
         'Scene A': [
-          { sourceRef: 'Scene B.Camera', stage: 'inputSettings', priority: 10, data: { zoom: 222 } },
-          { sourceRef: 'Scene B.Camera', stage: 'sceneItemTransform', priority: 20, data: { positionX: 42 } },
+          {
+            sourceRef: 'Scene B.Camera',
+            stage: 'inputSettings',
+            priority: 10,
+            data: { zoom: 222 },
+          },
+          {
+            sourceRef: 'Scene B.Camera',
+            stage: 'sceneItemTransform',
+            priority: 20,
+            data: { positionX: 42 },
+          },
           { sourceRef: 'Scene B.Camera', stage: 'sceneItemEnabled', priority: 30, data: false },
         ],
       },
@@ -470,8 +514,18 @@ describe('obs-source-recaller example script', () => {
       paused: true,
       triggers: {
         'Scene A': [
-          { sourceRef: 'Scene B.Camera', stage: 'inputSettings', priority: 10, data: { zoom: 222 } },
-          { sourceRef: 'Scene B.Camera', stage: 'sceneItemTransform', priority: 20, data: { positionX: 42 } },
+          {
+            sourceRef: 'Scene B.Camera',
+            stage: 'inputSettings',
+            priority: 10,
+            data: { zoom: 222 },
+          },
+          {
+            sourceRef: 'Scene B.Camera',
+            stage: 'sceneItemTransform',
+            priority: 20,
+            data: { positionX: 42 },
+          },
           { sourceRef: 'Scene B.Camera', stage: 'sceneItemEnabled', priority: 30, data: false },
         ],
       },
@@ -485,8 +539,18 @@ describe('obs-source-recaller example script', () => {
         paused: false,
         triggers: {
           'Scene A': [
-            { sourceRef: 'Scene A.Camera', stage: 'inputSettings', priority: 10, data: { zoom: 200 } },
-            { sourceRef: 'Scene A.Camera', stage: 'sceneItemTransform', priority: 20, data: { positionX: 42 } },
+            {
+              sourceRef: 'Scene A.Camera',
+              stage: 'inputSettings',
+              priority: 10,
+              data: { zoom: 200 },
+            },
+            {
+              sourceRef: 'Scene A.Camera',
+              stage: 'sceneItemTransform',
+              priority: 20,
+              data: { positionX: 42 },
+            },
             { sourceRef: 'Scene A.Camera', stage: 'sceneItemEnabled', priority: 30, data: false },
           ],
         },
@@ -532,8 +596,18 @@ describe('obs-source-recaller example script', () => {
         paused: false,
         triggers: {
           'Scene A': [
-            { sourceRef: 'Scene B.Camera', stage: 'inputSettings', priority: 10, data: { zoom: 200 } },
-            { sourceRef: 'Scene B.Camera', stage: 'sceneItemTransform', priority: 20, data: { positionX: 42 } },
+            {
+              sourceRef: 'Scene B.Camera',
+              stage: 'inputSettings',
+              priority: 10,
+              data: { zoom: 200 },
+            },
+            {
+              sourceRef: 'Scene B.Camera',
+              stage: 'sceneItemTransform',
+              priority: 20,
+              data: { positionX: 42 },
+            },
             { sourceRef: 'Scene B.Camera', stage: 'sceneItemEnabled', priority: 30, data: true },
           ],
         },
@@ -599,8 +673,18 @@ describe('obs-source-recaller example script', () => {
         paused: false,
         triggers: {
           'Scene B': [
-            { sourceRef: 'Scene B.Camera', stage: 'inputSettings', priority: 10, data: { zoom: 80 } },
-            { sourceRef: 'Scene B.Camera', stage: 'sceneItemTransform', priority: 20, data: { positionX: 5 } },
+            {
+              sourceRef: 'Scene B.Camera',
+              stage: 'inputSettings',
+              priority: 10,
+              data: { zoom: 80 },
+            },
+            {
+              sourceRef: 'Scene B.Camera',
+              stage: 'sceneItemTransform',
+              priority: 20,
+              data: { positionX: 5 },
+            },
             { sourceRef: 'Scene B.Camera', stage: 'sceneItemEnabled', priority: 30, data: true },
           ],
         },
@@ -667,11 +751,31 @@ describe('obs-source-recaller example script', () => {
         paused: false,
         triggers: {
           'Scene B': [
-            { sourceRef: 'Scene B.Overlay', stage: 'inputSettings', priority: 10, data: { file: 'b.png' } },
-            { sourceRef: 'Scene B.Overlay', stage: 'sceneItemTransform', priority: 20, data: { positionY: 25 } },
+            {
+              sourceRef: 'Scene B.Overlay',
+              stage: 'inputSettings',
+              priority: 10,
+              data: { file: 'b.png' },
+            },
+            {
+              sourceRef: 'Scene B.Overlay',
+              stage: 'sceneItemTransform',
+              priority: 20,
+              data: { positionY: 25 },
+            },
             { sourceRef: 'Scene B.Overlay', stage: 'sceneItemEnabled', priority: 30, data: false },
-            { sourceRef: 'Scene B.Camera', stage: 'inputSettings', priority: 10, data: { zoom: 80 } },
-            { sourceRef: 'Scene B.Camera', stage: 'sceneItemTransform', priority: 20, data: { positionX: 5 } },
+            {
+              sourceRef: 'Scene B.Camera',
+              stage: 'inputSettings',
+              priority: 10,
+              data: { zoom: 80 },
+            },
+            {
+              sourceRef: 'Scene B.Camera',
+              stage: 'sceneItemTransform',
+              priority: 20,
+              data: { positionX: 5 },
+            },
             { sourceRef: 'Scene B.Camera', stage: 'sceneItemEnabled', priority: 30, data: true },
           ],
         },
@@ -714,13 +818,33 @@ describe('obs-source-recaller example script', () => {
         paused: true,
         triggers: {
           'Scene B': [
-            { sourceRef: 'Scene B.Camera', stage: 'inputSettings', priority: 10, data: { zoom: 80 } },
-            { sourceRef: 'Scene B.Camera', stage: 'sceneItemTransform', priority: 20, data: { positionX: 5 } },
+            {
+              sourceRef: 'Scene B.Camera',
+              stage: 'inputSettings',
+              priority: 10,
+              data: { zoom: 80 },
+            },
+            {
+              sourceRef: 'Scene B.Camera',
+              stage: 'sceneItemTransform',
+              priority: 20,
+              data: { positionX: 5 },
+            },
             { sourceRef: 'Scene B.Camera', stage: 'sceneItemEnabled', priority: 30, data: true },
           ],
           'Scene A': [
-            { sourceRef: 'Scene A.Overlay', stage: 'inputSettings', priority: 10, data: { file: 'a.png' } },
-            { sourceRef: 'Scene A.Overlay', stage: 'sceneItemTransform', priority: 20, data: { positionY: 25 } },
+            {
+              sourceRef: 'Scene A.Overlay',
+              stage: 'inputSettings',
+              priority: 10,
+              data: { file: 'a.png' },
+            },
+            {
+              sourceRef: 'Scene A.Overlay',
+              stage: 'sceneItemTransform',
+              priority: 20,
+              data: { positionY: 25 },
+            },
             { sourceRef: 'Scene A.Overlay', stage: 'sceneItemEnabled', priority: 30, data: false },
           ],
         },

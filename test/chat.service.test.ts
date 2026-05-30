@@ -125,10 +125,16 @@ describe('ChatService', () => {
 
   test('should clamp oversized max history settings', () => {
     chatService.setMaxHistorySize(999999);
-    chatService.registerProvider('twitch', twitchProvider);
 
     for (let i = 0; i < 6000; i++) {
-      twitchProvider._simulateMessage(`Msg ${i}`, `User${i}`);
+      chatService.injectMessage({
+        id: `inject_${i}`,
+        platform: 'twitch',
+        userId: `user_${i}`,
+        username: `User${i}`,
+        message: `Msg ${i}`,
+        timestamp: i,
+      });
     }
 
     const history = chatService.getMessageHistory();

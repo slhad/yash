@@ -9,11 +9,7 @@ import {
 } from '../actions/types';
 import { chatService, obsService } from '../services';
 import { defaultLogger } from '../utils/logger';
-import {
-  getValueAtPath,
-  loadScriptConfig,
-  writeScriptConfig,
-} from '../utils/scriptConfig';
+import { getValueAtPath, loadScriptConfig, writeScriptConfig } from '../utils/scriptConfig';
 
 // ─── Types (mirrored in ~/.config/yash/scripts/types.d.ts for user IDE support) ──
 

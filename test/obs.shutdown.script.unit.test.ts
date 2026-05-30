@@ -49,7 +49,7 @@ async function writeObsShutdownConfig(dataDir: string, opts: ShutdownConfigOptio
   "chatInterval": 10,
   "stopStream": ${stopStream ? 'true' : 'false'},
   "source": "[TXT] Countdown",
-  "sourceText": "{remaining}s"${extra ? ',\n' + extra.replace(/,$/, '') : ''}
+  "sourceText": "{remaining}s"${extra ? `,\n${extra.replace(/,$/, '')}` : ''}
 }
 `,
     'utf8',
