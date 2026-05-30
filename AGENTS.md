@@ -59,7 +59,10 @@ When beginning work in this repository:
 ## Script Config Ownership In Docs
 
 - Treat `YASH_DATA_DIR/config.json` and `YASH_DATA_DIR/settings.json` as YASH-owned only
-- Document user scripts as owning `YASH_DATA_DIR/scripts/<scriptId>/` for both `config.jsonc` and script-local `state.json` plus any other script-private runtime artifacts/state files
+- Document user scripts as owning `YASH_DATA_DIR/scripts/<scriptId>/config.jsonc` as the single script-owned source of truth, plus any other script-private runtime artifacts only when a task explicitly needs them
+- Bundled scripts and bundled example scripts must expose both `/action <prefix>.config` and `/action <prefix>.configTUI`
+- `<prefix>.config` must read and write the script-local settings surface in `YASH_DATA_DIR/scripts/<scriptId>/config.jsonc` and stay IPC-safe
+- `<prefix>.configTUI` must edit that same `config.jsonc` surface through the live TUI, and must be marked TUI-only / rejected over IPC
 - Do not describe user script runtime state as part of YASH's top-level settings surface
 - Until YASH reaches v1, do not add or preserve migration logic for user/app data unless the task explicitly asks for it
 - Prefer current-state correctness and simple resets over compatibility shims for old script/app data during pre-v1 work

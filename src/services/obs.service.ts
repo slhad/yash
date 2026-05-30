@@ -6,6 +6,7 @@ import { defaultLogger } from '../utils/logger';
 import { metrics } from '../utils/metrics';
 
 export class ObsService {
+  private static readonly MAX_SCHEDULED_HISTORY = 100;
   private connected: boolean = false;
   private connectionPromise: Promise<void> | null = null;
   // Scheduled reconnect timer (replaces the old interval-based approach)
@@ -537,6 +538,12 @@ export class ObsService {
     const entry = { delay, attempt: attemptNum };
     this.lastScheduledInfo = entry;
     this.scheduledHistory.push(entry);
+    if (this.scheduledHistory.length > ObsService.MAX_SCHEDULED_HISTORY) {
+      this.scheduledHistory.splice(
+        0,
+        this.scheduledHistory.length - ObsService.MAX_SCHEDULED_HISTORY,
+      );
+    }
     this.reconnectTimer = setTimeout(() => {
       // clear the timer handle first
       this.reconnectTimer = null;

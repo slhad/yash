@@ -10,10 +10,7 @@ function unquoteString(value: string): string {
   return value;
 }
 
-export function parseActionArgs(
-  tokens: string[],
-  schema: Record<string, ActionArgSchema>,
-): { args: Record<string, unknown>; errors: string[] } {
+function collectRawActionArgs(tokens: string[]): Record<string, string> {
   const raw: Record<string, string> = {};
   let currentKey: string | null = null;
 
@@ -26,6 +23,20 @@ export function parseActionArgs(
       raw[currentKey] = `${raw[currentKey]} ${token}`;
     }
   }
+
+  return raw;
+}
+
+export function parseLooseActionArgs(tokens: string[]): Record<string, string> {
+  const raw = collectRawActionArgs(tokens);
+  return Object.fromEntries(Object.entries(raw).map(([key, value]) => [key, unquoteString(value)]));
+}
+
+export function parseActionArgs(
+  tokens: string[],
+  schema: Record<string, ActionArgSchema>,
+): { args: Record<string, unknown>; errors: string[] } {
+  const raw = collectRawActionArgs(tokens);
 
   const args: Record<string, unknown> = {};
   const errors: string[] = [];

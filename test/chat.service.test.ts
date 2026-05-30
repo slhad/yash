@@ -123,6 +123,19 @@ describe('ChatService', () => {
     expect(history[0]?.message).toBe('Msg 2');
   });
 
+  test('should clamp oversized max history settings', () => {
+    chatService.setMaxHistorySize(999999);
+    chatService.registerProvider('twitch', twitchProvider);
+
+    for (let i = 0; i < 6000; i++) {
+      twitchProvider._simulateMessage(`Msg ${i}`, `User${i}`);
+    }
+
+    const history = chatService.getMessageHistory();
+    expect(history.length).toBe(5000);
+    expect(history[0]?.message).toBe('Msg 1000');
+  });
+
   test('should clear history', () => {
     chatService.registerProvider('twitch', twitchProvider);
 
@@ -145,6 +158,19 @@ describe('ChatService', () => {
 
     unsubscribe();
     twitchProvider._simulateMessage('Message 2', 'User');
+    expect(callCount).toBe(1);
+  });
+
+  test('should replace prior provider subscription when re-registering a platform', () => {
+    let callCount = 0;
+    chatService.subscribeToMessages(() => {
+      callCount++;
+    });
+
+    chatService.registerProvider('twitch', twitchProvider);
+    chatService.registerProvider('twitch', twitchProvider);
+    twitchProvider._simulateMessage('Message 1', 'User');
+
     expect(callCount).toBe(1);
   });
 

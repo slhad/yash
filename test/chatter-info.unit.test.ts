@@ -55,6 +55,31 @@ describe('ChatterCache', () => {
     cache.set('twitch', 'user-123', info2);
     expect(cache.get('twitch', 'user-123')?.sessionMessageCount).toBe(42);
   });
+
+  test('evicts the least recently used entry when max entries is exceeded', () => {
+    const boundedCache = new ChatterCache(2);
+    boundedCache.set('twitch', 'user-1', makeChatterInfo({ userId: 'user-1' }));
+    boundedCache.set('twitch', 'user-2', makeChatterInfo({ userId: 'user-2' }));
+    boundedCache.set('twitch', 'user-3', makeChatterInfo({ userId: 'user-3' }));
+
+    expect(boundedCache.get('twitch', 'user-1')).toBeUndefined();
+    expect(boundedCache.get('twitch', 'user-2')?.userId).toBe('user-2');
+    expect(boundedCache.get('twitch', 'user-3')?.userId).toBe('user-3');
+  });
+
+  test('get refreshes recency before eviction', () => {
+    const boundedCache = new ChatterCache(2);
+    boundedCache.set('twitch', 'user-1', makeChatterInfo({ userId: 'user-1' }));
+    boundedCache.set('twitch', 'user-2', makeChatterInfo({ userId: 'user-2' }));
+
+    expect(boundedCache.get('twitch', 'user-1')?.userId).toBe('user-1');
+
+    boundedCache.set('twitch', 'user-3', makeChatterInfo({ userId: 'user-3' }));
+
+    expect(boundedCache.get('twitch', 'user-1')?.userId).toBe('user-1');
+    expect(boundedCache.get('twitch', 'user-2')).toBeUndefined();
+    expect(boundedCache.get('twitch', 'user-3')?.userId).toBe('user-3');
+  });
 });
 
 describe('ChatterCache.computeSessionStats', () => {

@@ -1,16 +1,19 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { IpcActionError, registry } from '../actions/registry';
-import { IPC_ERROR_CODES, type YashActionDefinition } from '../actions/types';
+import {
+  type ActionArgMode,
+  IPC_ERROR_CODES,
+  type ScriptConfigModalSpec,
+  type YashActionDefinition,
+} from '../actions/types';
 import { chatService, obsService } from '../services';
 import { defaultLogger } from '../utils/logger';
 import {
   getValueAtPath,
   loadScriptConfig,
-  loadScriptSettings,
-  writeScriptSettings,
+  writeScriptConfig,
 } from '../utils/scriptConfig';
-import { deepMerge } from '../utils/settings';
 
 // ─── Types (mirrored in ~/.config/yash/scripts/types.d.ts for user IDE support) ──
 
@@ -31,11 +34,23 @@ export type UserScriptAction = {
   title: string;
   description: string;
   domain: string;
+  ipcEnabled?: boolean;
   readOnly?: boolean;
   voiceHint?: boolean;
+  argMode?: ActionArgMode;
   args?: Record<string, UserScriptArgSchema>;
   examples?: Array<{ args: Record<string, unknown>; description?: string }>;
-  invoke: (args: Record<string, unknown>) => Promise<UserScriptResult>;
+  invoke: (
+    args: Record<string, unknown>,
+    ctx?: UserScriptActionContext,
+  ) => Promise<UserScriptResult>;
+};
+
+export type UserScriptActionContext = {
+  emit?: (line: string) => void;
+  ui?: {
+    openScriptConfigModal?: (spec: ScriptConfigModalSpec) => void;
+  };
 };
 
 export type ScriptApi = {
@@ -116,15 +131,10 @@ function forceRegister(def: YashActionDefinition): void {
 // ─── ScriptApi factory ────────────────────────────────────────────────────────
 
 function createScriptApi(scriptId: string, cleanupFns: (() => void)[], dataDir: string): ScriptApi {
-  let cachedConfig: Record<string, unknown> | null = null;
-  let cachedSettings: Record<string, unknown> | null = null;
-  function scriptConfig(): Record<string, unknown> {
-    if (!cachedConfig) cachedConfig = loadScriptConfig(scriptId, dataDir);
-    return cachedConfig;
-  }
-  function scriptSettings(): Record<string, unknown> {
-    if (!cachedSettings) cachedSettings = loadScriptSettings(scriptId, dataDir);
-    return cachedSettings;
+  let cachedScriptData: Record<string, unknown> | null = null;
+  function scriptData(): Record<string, unknown> {
+    if (!cachedScriptData) cachedScriptData = loadScriptConfig(scriptId, dataDir);
+    return cachedScriptData;
   }
   return {
     registerAction(action: UserScriptAction): void {
@@ -133,9 +143,14 @@ function createScriptApi(scriptId: string, cleanupFns: (() => void)[], dataDir: 
         defaultLogger.warn(`[user-scripts] "${scriptId}" overrides existing action "${action.id}"`);
       }
 
-      const wrappedInvoke: YashActionDefinition['invoke'] = async (args, _ctx) => {
+      const wrappedInvoke: YashActionDefinition['invoke'] = async (args, ctx) => {
         try {
-          return await action.invoke(args);
+          return await action.invoke(args, {
+            emit: ctx.emit,
+            ui: {
+              openScriptConfigModal: ctx.ui?.openScriptConfigModal,
+            },
+          });
         } catch (err) {
           defaultLogger.error(`[user-scripts] action "${action.id}" failed: ${String(err)}`);
           throw new IpcActionError(
@@ -150,11 +165,12 @@ function createScriptApi(scriptId: string, cleanupFns: (() => void)[], dataDir: 
         title: action.title,
         description: action.description,
         domain: action.domain,
-        ipcEnabled: true,
+        ipcEnabled: action.ipcEnabled ?? true,
         readOnly: action.readOnly ?? false,
         safety: 'safe',
         visibility: 'public',
         voiceHint: action.voiceHint,
+        argMode: action.argMode,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         args: (action.args ?? {}) as any,
         examples: action.examples,
@@ -209,24 +225,11 @@ function createScriptApi(scriptId: string, cleanupFns: (() => void)[], dataDir: 
 
     settings: {
       get: <T>(key: string, defaultVal: T): T => {
-        const configValue = getValueAtPath(scriptConfig(), key, undefined);
-        const persistedValue = getValueAtPath(scriptSettings(), key, undefined);
-        const mergedValue =
-          configValue &&
-          typeof configValue === 'object' &&
-          !Array.isArray(configValue) &&
-          persistedValue &&
-          typeof persistedValue === 'object' &&
-          !Array.isArray(persistedValue)
-            ? deepMerge(configValue, persistedValue)
-            : (persistedValue ?? configValue);
-        return (mergedValue as T | undefined) ?? defaultVal;
+        const value = getValueAtPath(scriptData(), key, undefined);
+        return (value as T | undefined) ?? defaultVal;
       },
       set: async (key, value) => {
-        const nextSettings = JSON.parse(JSON.stringify(scriptSettings())) as Record<
-          string,
-          unknown
-        >;
+        const nextSettings = JSON.parse(JSON.stringify(scriptData())) as Record<string, unknown>;
         const segments = key
           .split('.')
           .map((segment) => segment.trim())
@@ -244,8 +247,8 @@ function createScriptApi(scriptId: string, cleanupFns: (() => void)[], dataDir: 
           current = current[segment] as Record<string, unknown>;
         }
         current[segments[segments.length - 1] as string] = JSON.parse(JSON.stringify(value));
-        writeScriptSettings(scriptId, dataDir, nextSettings);
-        cachedSettings = nextSettings;
+        writeScriptConfig(scriptId, dataDir, nextSettings);
+        cachedScriptData = nextSettings;
       },
     },
 
@@ -262,7 +265,8 @@ function createScriptApi(scriptId: string, cleanupFns: (() => void)[], dataDir: 
 const README_CONTENT = `# yash user scripts
 
 Place \`.ts\` or \`.js\` files here. Each file is loaded at startup and can register
-IPC-accessible actions (available to TUI, WebUI, and yash-voice-bridge).
+actions for TUI/IPC use. Actions are IPC-accessible by default unless they set
+\`ipcEnabled: false\`.
 
 ## Script structure
 
@@ -291,9 +295,10 @@ export default function setup(api) {
 ## Available API (passed as first argument to setup)
 
 - \`api.registerAction(action)\` — register an IPC-accessible action
+- action \`invoke(args, ctx?)\` receives an optional runtime context; TUI-only actions can use \`ctx.ui?.openScriptConfigModal(...)\`
 - \`api.obs\` — scene queries, input/source state helpers, scene-item transform/enabled helpers, scene-change subscription, plus stream controls
 - \`api.chat\` — sendMessage(text, platforms?)
-- \`api.settings\` — get(key, default), set(key, value)  [reads config.jsonc defaults merged with script-local runtime state from state.json in the same script folder]
+- \`api.settings\` — get(key, default), set(key, value)  [reads and writes the script-local config.jsonc in the same script folder]
 - \`api.logger\` — info/warn/error  [prefixed with [script:<filename>]]
 
 ## Cleanup
@@ -320,9 +325,8 @@ Create the file (JSONC = JSON with // and /* */ comments):
 \`\`\`
 
 Read it in your script with \`api.settings.get('myKey', defaultValue)\`.
-Values written later with \`api.settings.set('myKey', value)\` persist in
-\`~/.config/yash/scripts/<scriptId>/state.json\` and override the config defaults on
-subsequent reads.
+Values written later with \`api.settings.set('myKey', value)\` persist back into
+\`~/.config/yash/scripts/<scriptId>/config.jsonc\`.
 
 ## Notes
 
@@ -396,11 +400,29 @@ export type UserScriptAction = {
   title: string;
   description: string;
   domain: string;
+  ipcEnabled?: boolean;
   readOnly?: boolean;
   voiceHint?: boolean;
+  argMode?: 'schema' | 'kv_pairs';
   args?: Record<string, UserScriptArgSchema>;
   examples?: Array<{ args: Record<string, unknown>; description?: string }>;
-  invoke: (args: Record<string, unknown>) => Promise<UserScriptResult>;
+  invoke: (args: Record<string, unknown>, ctx?: UserScriptActionContext) => Promise<UserScriptResult>;
+};
+
+export type UserScriptActionContext = {
+  emit?: (line: string) => void;
+  ui?: {
+    openScriptConfigModal?: (spec: {
+      title: string;
+      intro: string;
+      prefix: string;
+      fields: Array<
+        | { key: string; kind: 'text'; label: string; description: string; value: string; placeholder?: string }
+        | { key: string; kind: 'toggle'; label: string; description: string; value: boolean }
+      >;
+      onSave: (values: Record<string, unknown>) => Promise<{ changedKeys: string[]; errors?: string[] }>;
+    }) => void;
+  };
 };
 
 export type ScriptApi = {

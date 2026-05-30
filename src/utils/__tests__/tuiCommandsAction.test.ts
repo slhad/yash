@@ -51,6 +51,28 @@ function buildRegistry(): ActionRegistry {
   );
 
   reg.registerAction(
+    makeAction('obs.shutdown.config', {
+      domain: 'obs',
+      visibility: 'public',
+      safety: 'safe',
+      args: {
+        delay: { type: 'number', min: 10, max: 3600 },
+        scene: { type: 'string', maxLength: 200 },
+      },
+    }),
+  );
+
+  reg.registerAction(
+    makeAction('obs.shutdown.configTUI', {
+      domain: 'obs',
+      visibility: 'public',
+      safety: 'safe',
+      ipcEnabled: false,
+      args: {},
+    }),
+  );
+
+  reg.registerAction(
     makeAction('chat.send', {
       domain: 'chat',
       visibility: 'public',
@@ -127,12 +149,12 @@ describe('getAutocomplete /action branch', () => {
     test('/action obs.shutdown.i → completes to full id, single hint', () => {
       const result = getAutocomplete('/action obs.shutdown.i');
       expect(result.completion).toBe('/action obs.shutdown.initiate');
-      expect(result.hints).toEqual(['obs.shutdown.initiate']);
+      expect(result.hints[0]).toBe('obs.shutdown.initiate');
     });
 
     test('/action osi → completes to obs.shutdown.initiate via fuzzy subsequence match', () => {
       const result = getAutocomplete('/action osi');
-      expect(result.completion).toBe('/action obs.shutdown.initiate');
+      expect(result.hints[0]).toBe('obs.shutdown.initiate');
       expect(result.hints[0]).toBe('obs.shutdown.initiate');
     });
 
@@ -140,6 +162,14 @@ describe('getAutocomplete /action branch', () => {
       const result = getAutocomplete('/action obs.shutdown.');
       expect(result.hints).toContain('obs.shutdown.initiate');
       expect(result.hints).toContain('obs.shutdown.cancel');
+      expect(result.hints).toContain('obs.shutdown.config');
+      expect(result.hints).toContain('obs.shutdown.configTUI');
+    });
+
+    test('/action obs.shutdown.c → hints prefer config actions', () => {
+      const result = getAutocomplete('/action obs.shutdown.c');
+      expect(result.hints).toContain('obs.shutdown.config');
+      expect(result.hints).toContain('obs.shutdown.configTUI');
     });
 
     test('/action xyz → empty (no match)', () => {

@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
-import { getValueAtPath } from './settings';
+import { deepMerge, getValueAtPath } from './settings';
 
 export { getValueAtPath };
 
@@ -47,7 +47,7 @@ export function getScriptConfigPath(scriptId: string, dataDir: string): string {
 }
 
 export function getScriptSettingsPath(scriptId: string, dataDir: string): string {
-  return path.join(dataDir, 'scripts', scriptId, 'state.json');
+  return getScriptConfigPath(scriptId, dataDir);
 }
 
 export function loadScriptConfig(scriptId: string, dataDir: string): Record<string, unknown> {
@@ -65,17 +65,17 @@ export function loadScriptConfig(scriptId: string, dataDir: string): Record<stri
 }
 
 export function loadScriptSettings(scriptId: string, dataDir: string): Record<string, unknown> {
-  const filePath = getScriptSettingsPath(scriptId, dataDir);
-  try {
-    const text = fs.readFileSync(filePath, 'utf8');
-    const parsed = JSON.parse(text);
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      return parsed as Record<string, unknown>;
-    }
-  } catch {
-    // file missing or unparseable — return empty
-  }
-  return {};
+  return loadScriptConfig(scriptId, dataDir);
+}
+
+export function writeScriptConfig(
+  scriptId: string,
+  dataDir: string,
+  data: Record<string, unknown>,
+): void {
+  const filePath = getScriptConfigPath(scriptId, dataDir);
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
 }
 
 export function writeScriptSettings(
@@ -83,9 +83,11 @@ export function writeScriptSettings(
   dataDir: string,
   data: Record<string, unknown>,
 ): void {
-  const filePath = getScriptSettingsPath(scriptId, dataDir);
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
+  writeScriptConfig(scriptId, dataDir, data);
+}
+
+export function loadMergedScriptConfig(scriptId: string, dataDir: string): Record<string, unknown> {
+  return loadScriptConfig(scriptId, dataDir);
 }
 
 export function makeScriptCfg(scriptId: string, dataDir: string) {

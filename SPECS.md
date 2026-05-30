@@ -31,13 +31,24 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
     * Command /msg <all|youtube|twitch|kick> <text> - sends a message to the specified platform(s)
     * Command `/action [action-id] [key=value ...]` - lists public IPC-safe actions, invokes actions directly when all args are optional, and shows help/examples when required args still need values
         * Autocomplete is fuzzy-ranked for command names, `/action` ids, arg names, and enum values: prefix matches first, then substring matches, then subsequence matches
+        * The live TUI may also invoke visible non-IPC actions through `/action`; modal-only actions such as `obs.shutdown.configTUI`, `obs.startup.configTUI`, and `obs.source-recaller.configTUI` remain blocked over IPC (`bun run cmd`)
     * Command `/scripts | /scripts list | /scripts install <example-id> [repair|force]` - list bundled example scripts and copy one into `YASH_DATA_DIR/scripts/<example-id>` without overwriting existing files unless repair/force is requested explicitly
         * Intended for AppImage and packaged installs so users can install tracked example scripts without manually extracting repo files
         * Bundled examples currently include `obs-startup` and `obs-source-recaller`
-        * `YASH_DATA_DIR/scripts/<example-id>/` is owned by that script; keep both editable config and script-local `state.json` plus any other script-private runtime artifacts inside that folder
+        * `YASH_DATA_DIR/scripts/<example-id>/config.jsonc` is the single source of truth owned by that script; do not split normal script settings across a separate runtime settings file
+        * Every bundled script or bundled example script must expose both `/action <prefix>.config` and `/action <prefix>.configTUI`
+        * `<prefix>.config` must show/update the script-local settings stored in `YASH_DATA_DIR/scripts/<scriptId>/config.jsonc` and remain callable over IPC
+        * `<prefix>.configTUI` must edit the same `config.jsonc` surface from the live TUI and stay blocked over IPC
+        * Script config files may include a reserved top-level `"$ui"` object for self-describing TUI metadata such as labels, descriptions, widget hints (`toggle`, `json`, `text`), ordering, hidden fields, and wildcard path templates like `titleTemplate`, `labelTemplate`, and `descriptionTemplate`; runtime values remain in the normal config shape outside `"$ui"`, and the generic TUI editor explores nested objects/arrays recursively
+        * The generic script config modal should render scalar leaves compactly as single-line editors in the form `key: type = value`, while nested object/array section rows may be renamed through `"$ui"` templates
+        * When a focused config row represents an object/array entry inside an array, the generic script config modal must allow local reordering with `[` (move up) / `]` (move down) and local deletion with `x` before save/cancel
+        * Bundled `obs-startup` actions: `begin`, `cancel`, `status`, `config`, and `configTUI`; all persisted startup settings now live in `YASH_DATA_DIR/scripts/obs-startup/config.jsonc`
+        * Bundled `obs-shutdown` exposes `/action obs.shutdown.config` and `/action obs.shutdown.configTUI` against `YASH_DATA_DIR/scripts/obs-shutdown/config.jsonc`
         * `repair`/`force` refreshes tracked files and merges shipped `config.jsonc` defaults with the user's current `config.jsonc`, preserving existing values and unknown keys
-        * `obs-source-recaller` actions: `save source=<source|scene.source>`, `load source=<source|scene.source>`, `list`, `explore`, `pause`, and `resume`
-        * `obs-source-recaller` saves per-source, per-scene snapshots; `resume` reapplies matching snapshots for the current scene when OBS is connected
+        * `obs-source-recaller` actions: `config [startPaused=<true|false>]`, `configTUI`, `save source=<source|scene.source> [stage=<inputSettings|sceneItemTransform|sceneItemEnabled>]`, `load source=<source|scene.source>`, `list`, `explore [scene=<scene>]`, `pause`, and `resume`
+        * For `save` and `load`, the active OBS program scene is always the trigger scene; an explicit `scene.source` only changes the targeted source path so nested/keyed sources can be captured or restored under the active trigger
+        * `obs-source-recaller.save` without `stage=` refreshes all three restore stages for the target source; with `stage=...` it replaces only that stored stage and leaves the other saved stages for that source unchanged
+        * `obs-source-recaller` keeps defaults, mutable overrides, pause state, and per-scene source triggers together in `YASH_DATA_DIR/scripts/obs-source-recaller/config.jsonc`; top-level `triggers` is a map of `<scene name>` to ordered restore operations, each operation still carries its `scene.source` ref, and `resume` reapplies matching triggers for the current scene when OBS is connected
     * Command /marker [description] [| timestamp] - places a stream marker on all platforms
         * Optional description (chapter label, max 140 chars on Twitch)
         * Optional pipe-delimited timestamp accepts raw seconds, `mm:ss`, or `hh:mm:ss` from stream start (used by YouTube for chapter generation; ignored by Twitch which sets position server-side; Kick does not support markers)
@@ -67,6 +78,7 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
     * `/stream` modal cascade (`Ctrl+→`): propagates the current field value down the platform chain — Subject → fills Twitch category + Kick category (triggering their autocomplete searches immediately at 0 ms delay); Twitch category → fills Kick category (triggering its search); only cascades to platforms that are currently selected
     * Message box to send message to [all|youtube|twitch|kick] platform and receive command "/" (without sending to platforms)
         * Input history: Up/Down arrow keys navigate previously-sent messages (like a shell history)
+        * The TUI persists previously sent commands and plain messages across restarts in `YASH_DATA_DIR/input-history.json`, so Up/Down recall still works after relaunch
         * Plain messages (input not starting with `/`) show a target preview `all|youtube|twitch|kick > message`; `Tab` cycles between `all` and currently connected providers before sending
         * Slash commands are echoed into the Chat pane before their output so later feedback lines keep a visible source command context
         * After a successful Twitch send, the chat panel also appends a local self-echo incoming line so Twitch matches the visible send/echo behavior of the other providers
@@ -285,9 +297,9 @@ Bootstrap config is stored in `YASH_DATA_DIR/config.json` (default `~/.config/ya
 
 Mutable settings live in `settings.json`, including `demo`, `chat.*`, `stream.*`, `platforms.youtube.setup`, `platforms.<provider>.showViewers`, and TUI/WebUI display preferences.
 
-`config.json` and `settings.json` are reserved for YASH itself. User scripts own `YASH_DATA_DIR/scripts/<scriptId>/`; their editable config belongs in `config.jsonc` there, and mutable script runtime state belongs in `state.json` there, with any other script-private runtime files also staying inside that same script folder rather than being documented as part of YASH's top-level settings surface.
+`config.json` and `settings.json` are reserved for YASH itself. User scripts own `YASH_DATA_DIR/scripts/<scriptId>/config.jsonc` as their primary persisted surface; do not document normal script settings as part of YASH's top-level settings surface.
 
-Pre-v1 rule: do not add migration/compatibility behavior for old user-script or app-data layouts unless a task explicitly requires it; format changes may require resetting script-local `state.json`.
+Pre-v1 rule: do not add migration/compatibility behavior for old user-script or app-data layouts unless a task explicitly requires it; format changes may require resetting a script's local `config.jsonc`.
 
 **Environment variable overrides:**
 

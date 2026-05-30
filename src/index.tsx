@@ -31,7 +31,7 @@ import {
 } from './services';
 import { ChatterCache } from './services/chatter-cache';
 import { messageLog, type StreamSummary } from './services/message-log';
-import { formatActionHelp, parseActionArgs } from './utils/actionArgs';
+import { formatActionHelp, parseActionArgs, parseLooseActionArgs } from './utils/actionArgs';
 import { type ChatClearLineKind, runChatClearCommand } from './utils/chatClear';
 import { buildChatHistoryMessages } from './utils/chatHistoryLoader';
 import {
@@ -48,6 +48,13 @@ import { renderTuiHelpLines } from './utils/help';
 import { runIpcCommand } from './utils/ipcCommandRunner';
 import logCollector from './utils/logCollector';
 import { defaultLogger } from './utils/logger';
+import {
+  applyObsShutdownConfigPatch,
+  buildObsShutdownConfigDraft,
+  loadObsShutdownEffectiveConfig,
+  type ObsShutdownConfigDraft,
+  validateObsShutdownConfigDraft,
+} from './utils/obsShutdownConfig';
 import { buildTargetedStreamMetadataUpdate } from './utils/streamMetadata';
 import { getAutocomplete, initTuiCommands, setActionRegistry } from './utils/tuiCommands';
 import { installTuiErrorCapture } from './utils/tuiErrorCapture';
@@ -69,9 +76,11 @@ import {
   SETTINGS_WIDTH_OPTIONS,
   validateTuiSettingsDraft,
 } from './utils/tuiSettings';
+import { getValueAtPath, setValueAtPath } from './utils/settings';
 import { parseMarkerArgs, parseMarkersArgs, parseSettingsValue } from './utils/webCommands';
 import './index.ts'; // start Bun.serve web server in the same process
 import { IpcActionError, registry } from './actions/registry';
+import type { ScriptConfigModalField, ScriptConfigModalSpec } from './actions/types';
 import { startIpcServer } from './ipc/server';
 import { handleScriptsCommand } from './scripts/commands';
 import { loadUserScripts } from './scripts/loader';
@@ -88,13 +97,32 @@ type TwitchProviderEmoteContext = {
 };
 
 const DEFAULT_TUI_EMOTE_SCALE_PERCENT = 100;
+const DEFAULT_CHAT_HISTORY_LIMIT = 1000;
+const MAX_CHAT_HISTORY_LIMIT = 5000;
+const MAX_EVENT_LOG_ENTRIES = 500;
+const MAX_ACTIVITY_EVENTS = 500;
+const MAX_TUI_FFZ_IMAGES = 512;
 
 installTuiErrorCapture();
+
+function getChatHistoryLimit(): number {
+  const raw = Number(settings.get('chat.maxHistorySize', DEFAULT_CHAT_HISTORY_LIMIT));
+  if (!Number.isFinite(raw) || raw <= 0) {
+    return DEFAULT_CHAT_HISTORY_LIMIT;
+  }
+  return Math.min(Math.floor(raw), MAX_CHAT_HISTORY_LIMIT);
+}
+
+function trimArrayTail<T>(items: T[], maxEntries: number): void {
+  if (items.length <= maxEntries) return;
+  items.splice(0, items.length - maxEntries);
+}
 
 // In-memory event log for the sidebar
 const eventLog: Array<{ ts: number; platform: string; type: string; message: string }> = [];
 function pushEvent(platform: string, type: string, message: string): void {
   eventLog.push({ ts: Date.now(), platform, type, message });
+  trimArrayTail(eventLog, MAX_EVENT_LOG_ENTRIES);
 }
 
 // ─── Activity log ────────────────────────────────────────────────────────────
@@ -112,6 +140,7 @@ const activityEvents: ActivityEvent[] = [];
 let activityRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 let activityBarHovered = false;
 let currentActivitySessionId = '';
+const INPUT_HISTORY_LIMIT = 200;
 
 function _getActivityLogPath(): string {
   return `${getDataDir()}/activity-events.json`;
@@ -132,7 +161,40 @@ function _loadActivityEvents(): ActivityEvent[] {
 
 function _saveActivityEvents(): void {
   try {
+    pruneActivityEvents();
     require('node:fs').writeFileSync(_getActivityLogPath(), JSON.stringify(activityEvents), 'utf8');
+  } catch {
+    /* ignore */
+  }
+}
+
+function _getInputHistoryPath(): string {
+  return `${getDataDir()}/input-history.json`;
+}
+
+function _loadInputHistory(): string[] {
+  try {
+    const raw = require('node:fs').readFileSync(_getInputHistoryPath(), 'utf8');
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((entry): entry is string => typeof entry === 'string')
+      .map((entry) => entry.trim())
+      .filter(Boolean)
+      .slice(-INPUT_HISTORY_LIMIT);
+  } catch {
+    return [];
+  }
+}
+
+function _saveInputHistory(): void {
+  try {
+    require('node:fs').mkdirSync(getDataDir(), { recursive: true });
+    require('node:fs').writeFileSync(
+      _getInputHistoryPath(),
+      `${JSON.stringify(inputHistory.slice(-INPUT_HISTORY_LIMIT), null, 2)}\n`,
+      'utf8',
+    );
   } catch {
     /* ignore */
   }
@@ -143,6 +205,20 @@ function _timedVisibleEvents(): ActivityEvent[] {
   const secs = numSetting(settings.get('activity.timeout', 10), 10);
   const cutoff = Date.now() - secs * 1000;
   return activityEvents.filter((ev) => ev.ts > cutoff);
+}
+
+function pruneActivityEvents(): void {
+  const mode = settings.get('activity.mode', 'permanent') as string;
+  if (mode === 'timed' && !activityBarHovered) {
+    const secs = numSetting(settings.get('activity.timeout', 10), 10);
+    const cutoff = Date.now() - secs * 1000;
+    for (let i = activityEvents.length - 1; i >= 0; i--) {
+      if (activityEvents[i]!.ts <= cutoff) {
+        activityEvents.splice(i, 1);
+      }
+    }
+  }
+  trimArrayTail(activityEvents, MAX_ACTIVITY_EVENTS);
 }
 
 function _activityBarShouldBeVisible(): boolean {
@@ -193,6 +269,7 @@ function pushActivityEvent(platform: string, type: string, message: string): voi
     sessionId: currentActivitySessionId,
   };
   activityEvents.push(ev);
+  pruneActivityEvents();
   _saveActivityEvents();
   _scheduleActivityBarRefresh();
   if (uiNodes) updateUI(lastMessages);
@@ -221,9 +298,11 @@ function applySettingSideEffects(key: string, value: unknown): void {
     const parsed = typeof value === 'number' ? value : Number.parseInt(String(value), 10);
     if (Number.isFinite(parsed) && parsed > 0) {
       chatService.setMaxHistorySize(parsed);
+      trimUiChatMemory();
     }
   }
   if (key === 'activity.mode') {
+    pruneActivityEvents();
     _scheduleActivityBarRefresh();
   }
 }
@@ -361,6 +440,8 @@ interface SettingsModal {
 let activeModal: TwitchSetupModal | null = null;
 let activeStreamModal: StreamModal | null = null;
 let activeSettingsModal: SettingsModal | null = null;
+let activeObsShutdownConfigModal: SettingsModal | null = null;
+let activeScriptConfigModal: SettingsModal | null = null;
 let activeChatterInfoModal: {
   box: BoxRenderable;
   refreshForMessage: (msg: ChatMessage) => void;
@@ -376,6 +457,8 @@ function ensureMainInputFocus(): void {
     activeModal ||
     activeStreamModal ||
     activeSettingsModal ||
+    activeObsShutdownConfigModal ||
+    activeScriptConfigModal ||
     activeChatterInfoModal ||
     activeHistoryModal ||
     activeActivityModal
@@ -789,7 +872,18 @@ function _updateActivityBarText(node: TextRenderable): void {
 }
 
 function openActivityModal(): void {
-  if (!uiNodes || activeActivityModal) return;
+  if (
+    !uiNodes ||
+    activeActivityModal ||
+    activeModal ||
+    activeStreamModal ||
+    activeSettingsModal ||
+    activeObsShutdownConfigModal ||
+    activeScriptConfigModal ||
+    activeChatterInfoModal ||
+    activeHistoryModal
+  )
+    return;
   const { renderer } = uiNodes;
 
   const box = new BoxRenderable(renderer, {
@@ -870,6 +964,8 @@ function openActivityModal(): void {
 
 function updateUI(messages: ChatLine[]): void {
   if (!uiNodes) return;
+  trimUiChatMemory();
+  pruneActivityEvents();
   const {
     renderer,
     titleText,
@@ -2195,7 +2291,15 @@ function openYouTubeSetupModal(): void {
 }
 
 function openMarkerEditModal(selectionId: number): void {
-  if (!uiNodes || activeModal || activeStreamModal || activeSettingsModal) return;
+  if (
+    !uiNodes ||
+    activeModal ||
+    activeStreamModal ||
+    activeSettingsModal ||
+    activeObsShutdownConfigModal ||
+    activeScriptConfigModal
+  )
+    return;
   const marker = youtube.getPersistedMarkerBySelectionId(selectionId);
   if (!marker) {
     lastMessages.push(`[markers] Unknown persisted marker #${selectionId}`);
@@ -2356,7 +2460,15 @@ function openMarkerEditModal(selectionId: number): void {
 }
 
 function openStreamModal(preselected: string[]): void {
-  if (!uiNodes || activeStreamModal || activeModal || activeSettingsModal) return;
+  if (
+    !uiNodes ||
+    activeStreamModal ||
+    activeModal ||
+    activeSettingsModal ||
+    activeObsShutdownConfigModal ||
+    activeScriptConfigModal
+  )
+    return;
   const { renderer } = uiNodes;
 
   const selectedPlatforms = new Set(preselected.length > 0 ? preselected : [...platforms]);
@@ -3402,10 +3514,7 @@ const commandHandlers: Record<
       if (!hasRequiredArgs) {
         // No required args — invoke with config/default-backed empty args
         try {
-          const ctx = { chatService, providers: { youtube, twitch, kick } };
-          const result = await registry.invokeAction(id, {}, ctx);
-          for (const line of result.output ?? []) emit(line);
-          for (const warn of result.warnings ?? []) emit(`[warning] ${warn}`);
+          await invokeActionFromTui(id, {}, emit);
         } catch (err) {
           const msg = err instanceof IpcActionError ? err.message : String(err);
           emit(`[action] Error: ${msg}`);
@@ -3423,17 +3532,17 @@ const commandHandlers: Record<
       return;
     }
 
-    const { args, errors } = parseActionArgs(parts.slice(2), def.args);
+    const { args, errors } =
+      def.argMode === 'kv_pairs'
+        ? { args: parseLooseActionArgs(parts.slice(2)), errors: [] as string[] }
+        : parseActionArgs(parts.slice(2), def.args);
     if (errors.length > 0) {
       for (const err of errors) emit(`[action] ${err}`);
       return;
     }
 
     try {
-      const ctx = { chatService, providers: { youtube, twitch, kick } };
-      const result = await registry.invokeAction(id, args, ctx);
-      for (const line of result.output ?? []) emit(line);
-      for (const warn of result.warnings ?? []) emit(`[warning] ${warn}`);
+      await invokeActionFromTui(id, args, emit);
     } catch (err) {
       if (err instanceof IpcActionError) {
         emit(`[action] ${err.message}`);
@@ -3481,7 +3590,15 @@ async function handleCommandForCli(trimmed: string): Promise<string> {
 }
 
 function openSettingsModal(): void {
-  if (!uiNodes || activeStreamModal || activeModal || activeSettingsModal) return;
+  if (
+    !uiNodes ||
+    activeStreamModal ||
+    activeModal ||
+    activeSettingsModal ||
+    activeObsShutdownConfigModal ||
+    activeScriptConfigModal
+  )
+    return;
   const { renderer } = uiNodes;
 
   const draft = {
@@ -4125,10 +4242,1045 @@ function openSettingsModal(): void {
   }
 }
 
+function openObsShutdownConfigModal(): void {
+  if (
+    !uiNodes ||
+    activeModal ||
+    activeStreamModal ||
+    activeSettingsModal ||
+    activeObsShutdownConfigModal ||
+    activeScriptConfigModal ||
+    activeChatterInfoModal ||
+    activeHistoryModal ||
+    activeActivityModal
+  )
+    return;
+
+  const { renderer } = uiNodes;
+  const draft = buildObsShutdownConfigDraft(loadObsShutdownEffectiveConfig());
+
+  function makeLabel(text: string): TextRenderable {
+    return new TextRenderable(renderer, { content: text, fg: 'gray' });
+  }
+
+  function makeToggleRow(label: string, value: boolean, focused: boolean): string {
+    return `${focused ? '▶' : ' '} ${label}: ${value ? 'ON' : 'OFF'}`;
+  }
+
+  const box = new BoxRenderable(renderer, {
+    position: 'absolute',
+    top: '7%',
+    left: '6%',
+    width: '88%',
+    height: '84%',
+    zIndex: 100,
+    border: true,
+    borderStyle: 'rounded',
+    borderColor: 'cyan',
+    backgroundColor: 'black',
+    shouldFill: true,
+    padding: 1,
+    flexDirection: 'column',
+    gap: 1,
+    title: ' OBS Shutdown Config ',
+  });
+
+  const intro = new TextRenderable(renderer, {
+    content:
+      ' Tab/Shift+Tab move focus. Space or ◄/► toggles stopStream. Enter saves all changes. Esc cancels.',
+    fg: 'gray',
+  });
+
+  const sceneLabel = makeLabel('  scene: OBS scene to switch to before the countdown starts');
+  const sceneInput = new InputRenderable(renderer, { placeholder: '[PS] End', width: '100%' });
+  sceneInput.value = draft.scene;
+  const delayLabel = makeLabel('  delay: countdown duration in seconds (10-3600)');
+  const delayInput = new InputRenderable(renderer, { placeholder: '30', width: '100%' });
+  delayInput.value = draft.delay;
+  const messageLabel = makeLabel(
+    '  message: chat template, use {remaining} for the countdown value',
+  );
+  const messageInput = new InputRenderable(renderer, {
+    placeholder: 'Stream ending in {remaining}s!',
+    width: '100%',
+  });
+  messageInput.value = draft.message;
+  const chatIntervalLabel = makeLabel('  chatInterval: seconds between chat countdown updates');
+  const chatIntervalInput = new InputRenderable(renderer, { placeholder: '10', width: '100%' });
+  chatIntervalInput.value = draft.chatInterval;
+  const stopStreamRow = new TextRenderable(renderer, { content: '', fg: 'white' });
+  const sourceLabel = makeLabel(
+    '  source: optional OBS text source to update during the countdown',
+  );
+  const sourceInput = new InputRenderable(renderer, {
+    placeholder: '[TXT] Countdown',
+    width: '100%',
+  });
+  sourceInput.value = draft.source;
+  const sourceTextLabel = makeLabel(
+    '  sourceText: source template, use {remaining} for the countdown value',
+  );
+  const sourceTextInput = new InputRenderable(renderer, {
+    placeholder: '{remaining}',
+    width: '100%',
+  });
+  sourceTextInput.value = draft.sourceText;
+  const hideSourcesLabel = makeLabel(
+    '  hideSources: comma-separated OBS sources to hide during shutdown',
+  );
+  const hideSourcesInput = new InputRenderable(renderer, {
+    placeholder: 'Camera A, Camera B',
+    width: '100%',
+  });
+  hideSourcesInput.value = draft.hideSources;
+  const muteSourcesLabel = makeLabel(
+    '  muteSources: comma-separated OBS inputs to mute during shutdown',
+  );
+  const muteSourcesInput = new InputRenderable(renderer, { placeholder: 'Mic/Aux', width: '100%' });
+  muteSourcesInput.value = draft.muteSources;
+  const finalCountdownLabel = makeLabel(
+    '  finalCountdownAt: switch chat updates to every second from this value',
+  );
+  const finalCountdownInput = new InputRenderable(renderer, { placeholder: '0', width: '100%' });
+  finalCountdownInput.value = draft.finalCountdownAt;
+
+  const sceneRow = createIndentedInputRow(renderer, sceneInput, '    ');
+  const delayRow = createIndentedInputRow(renderer, delayInput, '    ');
+  const messageRow = createIndentedInputRow(renderer, messageInput, '    ');
+  const chatIntervalRow = createIndentedInputRow(renderer, chatIntervalInput, '    ');
+  const sourceRow = createIndentedInputRow(renderer, sourceInput, '    ');
+  const sourceTextRow = createIndentedInputRow(renderer, sourceTextInput, '    ');
+  const hideSourcesRow = createIndentedInputRow(renderer, hideSourcesInput, '    ');
+  const muteSourcesRow = createIndentedInputRow(renderer, muteSourcesInput, '    ');
+  const finalCountdownRow = createIndentedInputRow(renderer, finalCountdownInput, '    ');
+
+  box.add(intro);
+  box.add(sceneLabel);
+  box.add(sceneRow);
+  box.add(delayLabel);
+  box.add(delayRow);
+  box.add(messageLabel);
+  box.add(messageRow);
+  box.add(chatIntervalLabel);
+  box.add(chatIntervalRow);
+  box.add(stopStreamRow);
+  box.add(sourceLabel);
+  box.add(sourceRow);
+  box.add(sourceTextLabel);
+  box.add(sourceTextRow);
+  box.add(hideSourcesLabel);
+  box.add(hideSourcesRow);
+  box.add(muteSourcesLabel);
+  box.add(muteSourcesRow);
+  box.add(finalCountdownLabel);
+  box.add(finalCountdownRow);
+  renderer.root.add(box);
+
+  type ObsShutdownFocusItem =
+    | { kind: 'input'; node: InputRenderable }
+    | {
+        kind: 'toggle';
+        node: TextRenderable;
+        render: (focused: boolean) => void;
+        toggle: () => void;
+      };
+
+  const items: ObsShutdownFocusItem[] = [
+    { kind: 'input', node: sceneInput },
+    { kind: 'input', node: delayInput },
+    { kind: 'input', node: messageInput },
+    { kind: 'input', node: chatIntervalInput },
+    {
+      kind: 'toggle',
+      node: stopStreamRow,
+      render: (focused) => {
+        stopStreamRow.content = makeToggleRow('stopStream', draft.stopStream, focused).concat(
+          '  - stop the OBS stream when the countdown reaches zero',
+        );
+        stopStreamRow.fg = focused ? 'cyan' : 'white';
+      },
+      toggle: () => {
+        draft.stopStream = !draft.stopStream;
+      },
+    },
+    { kind: 'input', node: sourceInput },
+    { kind: 'input', node: sourceTextInput },
+    { kind: 'input', node: hideSourcesInput },
+    { kind: 'input', node: muteSourcesInput },
+    { kind: 'input', node: finalCountdownInput },
+  ];
+
+  let focusIdx = 0;
+  activeObsShutdownConfigModal = { box, focusIndex: 0 };
+
+  function blurCurrent(): void {
+    const current = items[focusIdx];
+    if (!current) return;
+    if (current.kind === 'input') current.node.blur();
+    else current.render(false);
+  }
+
+  function focusCurrent(): void {
+    const current = items[focusIdx];
+    if (!current) return;
+    if (current.kind === 'input') current.node.focus();
+    else current.render(true);
+  }
+
+  function renderRows(): void {
+    for (let i = 0; i < items.length; i += 1) {
+      const item = items[i];
+      if (!item || item.kind === 'input') continue;
+      item.render(i === focusIdx);
+    }
+  }
+
+  renderRows();
+  focusCurrent();
+
+  async function saveAndClose(): Promise<void> {
+    const validation = validateObsShutdownConfigDraft({
+      delay: delayInput.value,
+      scene: sceneInput.value,
+      message: messageInput.value,
+      chatInterval: chatIntervalInput.value,
+      stopStream: draft.stopStream,
+      source: sourceInput.value,
+      sourceText: sourceTextInput.value,
+      hideSources: hideSourcesInput.value,
+      muteSources: muteSourcesInput.value,
+      finalCountdownAt: finalCountdownInput.value,
+    } satisfies ObsShutdownConfigDraft);
+
+    if (!validation.values) {
+      for (const error of validation.errors) {
+        lastMessages.push(`[obs-shutdown] ${error}`);
+      }
+      updateUI(lastMessages);
+      return;
+    }
+
+    const result = applyObsShutdownConfigPatch(validation.values);
+    if (result.errors.length > 0) {
+      for (const error of result.errors) {
+        lastMessages.push(`[obs-shutdown] ${error}`);
+      }
+      updateUI(lastMessages);
+      return;
+    }
+
+    renderer.removeInputHandler(modalKeyHandler);
+    renderer.root.remove(box.id);
+    activeObsShutdownConfigModal = null;
+    uiNodes?.inputEl.focus();
+
+    if (result.changedKeys.length === 0) {
+      lastMessages.push('[obs-shutdown] No changes.');
+    } else {
+      lastMessages.push(`[obs-shutdown] Updated: ${result.changedKeys.join(', ')}`);
+    }
+    updateUI(lastMessages);
+  }
+
+  function cancelAndClose(): void {
+    renderer.removeInputHandler(modalKeyHandler);
+    renderer.root.remove(box.id);
+    activeObsShutdownConfigModal = null;
+    uiNodes?.inputEl.focus();
+  }
+
+  const modalKeyHandler = (sequence: string): boolean => {
+    if (!activeObsShutdownConfigModal) return false;
+    const current = items[focusIdx];
+    if (!current) return false;
+
+    if (sequence === '\t' || sequence === '\x1b[Z') {
+      blurCurrent();
+      focusIdx = (focusIdx + (sequence === '\t' ? 1 : -1) + items.length) % items.length;
+      activeObsShutdownConfigModal.focusIndex = focusIdx;
+      focusCurrent();
+      return true;
+    }
+
+    if (
+      current.kind === 'toggle' &&
+      (sequence === ' ' || sequence === '\x1b[C' || sequence === '\x1b[D')
+    ) {
+      current.toggle();
+      current.render(true);
+      return true;
+    }
+
+    if (sequence === '\r' || sequence === '\n') {
+      void saveAndClose();
+      return true;
+    }
+    if (sequence === '\x1b' || sequence === '\x1b\x1b') {
+      cancelAndClose();
+      return true;
+    }
+    return false;
+  };
+
+  renderer.prependInputHandler(modalKeyHandler);
+
+  const escapeViaKeyDown = (key: { name: string }) => {
+    if (key.name === 'escape' && activeObsShutdownConfigModal) cancelAndClose();
+  };
+  for (const input of [
+    sceneInput,
+    delayInput,
+    messageInput,
+    chatIntervalInput,
+    sourceInput,
+    sourceTextInput,
+    hideSourcesInput,
+    muteSourcesInput,
+    finalCountdownInput,
+  ]) {
+    input.onKeyDown = escapeViaKeyDown as any;
+  }
+}
+
+function openScriptConfigModal(spec: ScriptConfigModalSpec): void {
+  if (
+    !uiNodes ||
+    activeModal ||
+    activeStreamModal ||
+    activeSettingsModal ||
+    activeObsShutdownConfigModal ||
+    activeScriptConfigModal ||
+    activeChatterInfoModal ||
+    activeHistoryModal ||
+    activeActivityModal
+  )
+    return;
+
+  const { renderer } = uiNodes;
+  const box = new BoxRenderable(renderer, {
+    position: 'absolute',
+    top: '7%',
+    left: '6%',
+    width: '88%',
+    height: '84%',
+    zIndex: 100,
+    border: true,
+    borderStyle: 'rounded',
+    borderColor: 'cyan',
+    backgroundColor: 'black',
+    shouldFill: true,
+    padding: 1,
+    flexDirection: 'column',
+    gap: 1,
+    title: ` ${spec.title} `,
+  });
+
+  const contentScroll = new ScrollBoxRenderable(renderer, {
+    flexGrow: 1,
+    stickyScroll: false,
+    stickyStart: 'top',
+    scrollX: false,
+    scrollY: true,
+  });
+  const contentBox = new BoxRenderable(renderer, {
+    flexDirection: 'column',
+    gap: 0,
+    width: '100%',
+  });
+
+  box.add(new TextRenderable(renderer, { content: spec.intro, fg: 'gray' }));
+  box.add(new TextRenderable(renderer, { content: '', fg: 'gray' }));
+  contentScroll.add(contentBox);
+  box.add(contentScroll);
+
+  const isRecord = (value: unknown): value is Record<string, unknown> =>
+    typeof value === 'object' && value !== null && !Array.isArray(value);
+  const cloneValue = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
+  const clearBox = (target: BoxRenderable): void => {
+    for (const child of target.getChildren()) {
+      target.remove(child.id);
+    }
+  };
+  const UI_SCHEMA_KEY = '$ui';
+  const isObjectConfigSpec = 'config' in spec;
+  const draftConfig = isObjectConfigSpec ? cloneValue(spec.config) : null;
+  type PathSegment = string | number;
+  type ResolvedConfigField =
+    | (Extract<ScriptConfigModalField, { kind: 'text' | 'toggle' }> & {
+        pathSegments: PathSegment[];
+        originalValue: unknown;
+        depth: number;
+        valueType: 'text' | 'number' | 'boolean' | 'null';
+        helpText?: string;
+      })
+    | {
+        key: string;
+        kind: 'section';
+        pathSegments: PathSegment[];
+        label: string;
+        description?: string;
+        depth: number;
+        nodeType: 'array' | 'object';
+        editableArrayItem: boolean;
+      };
+  const pathKey = (segments: PathSegment[]) => segments.map((segment) => String(segment)).join('/');
+  const splitSchemaPath = (schemaPath: string): string[] => schemaPath.split('/').filter(Boolean);
+  const matchesSchemaPath = (schemaPath: string, segments: PathSegment[]): boolean => {
+    const parts = splitSchemaPath(schemaPath);
+    if (parts.length !== segments.length) return false;
+    return parts.every((part, index) => part === '*' || part === String(segments[index]));
+  };
+  const schemaSpecificity = (schemaPath: string): number => {
+    const parts = splitSchemaPath(schemaPath);
+    return parts.reduce((score, part) => score + (part === '*' ? 0 : 2), 0) + parts.length;
+  };
+  const inferValueType = (value: unknown): 'text' | 'number' | 'boolean' | 'null' => {
+    if (typeof value === 'number') return 'number';
+    if (typeof value === 'boolean') return 'boolean';
+    if (value === null) return 'null';
+    return 'text';
+  };
+  const buildTemplateContext = (
+    segments: PathSegment[],
+    value: unknown,
+  ): Record<string, string | number | boolean> => {
+    const lastSegment = segments[segments.length - 1];
+    const context: Record<string, string | number | boolean> = {
+      key: String(lastSegment ?? ''),
+      path: pathKey(segments),
+      index: typeof lastSegment === 'number' ? lastSegment : '',
+      type: Array.isArray(value)
+        ? 'array'
+        : isRecord(value)
+          ? 'object'
+          : inferValueType(value),
+      length: Array.isArray(value) ? value.length : isRecord(value) ? Object.keys(value).length : 0,
+    };
+    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+      context.value = value;
+    }
+    if (isRecord(value)) {
+      for (const [key, child] of Object.entries(value)) {
+        if (
+          typeof child === 'string' ||
+          typeof child === 'number' ||
+          typeof child === 'boolean'
+        ) {
+          context[key] = child;
+        }
+      }
+    }
+    return context;
+  };
+  const renderTemplate = (
+    template: string | undefined,
+    context: Record<string, string | number | boolean>,
+  ): string | undefined => {
+    if (!template) return undefined;
+    return template.replaceAll(/\$\{([^}]+)\}/g, (_match, rawKey) => {
+      const key = String(rawKey).trim();
+      return String(context[key] ?? '');
+    });
+  };
+  const getValueAtSegments = (data: unknown, segments: PathSegment[]): unknown => {
+    let current = data;
+    for (const segment of segments) {
+      if (Array.isArray(current) && typeof segment === 'number') {
+        current = current[segment];
+        continue;
+      }
+      if (isRecord(current) && typeof segment === 'string' && segment in current) {
+        current = current[segment];
+        continue;
+      }
+      return undefined;
+    }
+    return current;
+  };
+  const setValueAtSegments = (
+    data: Record<string, unknown>,
+    segments: PathSegment[],
+    value: unknown,
+  ): void => {
+    if (segments.length === 0) {
+      throw new Error('config path required');
+    }
+    let current: unknown = data;
+    for (let i = 0; i < segments.length - 1; i += 1) {
+      const segment = segments[i] as PathSegment;
+      const nextSegment = segments[i + 1] as PathSegment;
+      if (typeof segment === 'number') {
+        if (!Array.isArray(current)) {
+          throw new Error(`invalid array path at ${pathKey(segments.slice(0, i + 1))}`);
+        }
+        if (current[segment] === undefined) {
+          current[segment] = typeof nextSegment === 'number' ? [] : {};
+        }
+        current = current[segment];
+        continue;
+      }
+      if (!isRecord(current)) {
+        throw new Error(`invalid object path at ${pathKey(segments.slice(0, i + 1))}`);
+      }
+      const nextValue = current[segment];
+      if (nextValue === undefined) {
+        current[segment] = typeof nextSegment === 'number' ? [] : {};
+      }
+      current = current[segment];
+    }
+    const lastSegment = segments[segments.length - 1] as PathSegment;
+    if (typeof lastSegment === 'number') {
+      if (!Array.isArray(current)) {
+        throw new Error(`invalid array path at ${pathKey(segments)}`);
+      }
+      current[lastSegment] = cloneValue(value);
+      return;
+    }
+    if (!isRecord(current)) {
+      throw new Error(`invalid object path at ${pathKey(segments)}`);
+    }
+    current[lastSegment] = cloneValue(value);
+  };
+  const moveArrayValue = (
+    data: Record<string, unknown>,
+    segments: PathSegment[],
+    direction: -1 | 1,
+  ): PathSegment[] | null => {
+    if (segments.length === 0) return null;
+    const currentIndex = segments[segments.length - 1];
+    if (typeof currentIndex !== 'number') return null;
+    const parent = getValueAtSegments(data, segments.slice(0, -1));
+    if (!Array.isArray(parent)) return null;
+    const nextIndex = currentIndex + direction;
+    if (nextIndex < 0 || nextIndex >= parent.length) return null;
+    const currentValue = parent[currentIndex];
+    parent[currentIndex] = parent[nextIndex];
+    parent[nextIndex] = currentValue;
+    return [...segments.slice(0, -1), nextIndex];
+  };
+  const deleteArrayValue = (
+    data: Record<string, unknown>,
+    segments: PathSegment[],
+  ): PathSegment[] | null => {
+    if (segments.length === 0) return null;
+    const currentIndex = segments[segments.length - 1];
+    if (typeof currentIndex !== 'number') return null;
+    const parentPath = segments.slice(0, -1);
+    const parent = getValueAtSegments(data, parentPath);
+    if (!Array.isArray(parent)) return null;
+    parent.splice(currentIndex, 1);
+    if (parent.length === 0) return parentPath.length > 0 ? parentPath : null;
+    return [...parentPath, Math.min(currentIndex, parent.length - 1)];
+  };
+
+  const buildResolvedFields = (configSource: Record<string, unknown>): ResolvedConfigField[] => {
+    if (!isObjectConfigSpec) {
+      return spec.fields.map((field) => ({
+        ...field,
+        pathSegments: [field.key],
+        originalValue: field.kind === 'toggle' ? field.value : field.value,
+        depth: 0,
+        valueType: field.kind === 'toggle' ? 'boolean' : 'text',
+        helpText: field.description,
+      }));
+    }
+
+    const config = cloneValue(configSource);
+    const rawSchema = isRecord(config[UI_SCHEMA_KEY]) ? config[UI_SCHEMA_KEY] : {};
+    const schema = rawSchema as Record<
+      string,
+      {
+        label?: string;
+        description?: string;
+        titleTemplate?: string;
+        labelTemplate?: string;
+        descriptionTemplate?: string;
+        widget?: 'auto' | 'text' | 'toggle' | 'json';
+        hidden?: boolean;
+        placeholder?: string;
+        order?: number;
+      }
+    >;
+    const schemaEntries = Object.entries(schema).sort(
+      ([leftPath], [rightPath]) => schemaSpecificity(rightPath) - schemaSpecificity(leftPath),
+    );
+    const resolvedFields: Array<ResolvedConfigField & { order: number }> = [];
+    const resolveMeta = (segments: PathSegment[]) => {
+      const exact = schema[pathKey(segments)];
+      if (exact) return exact;
+      return schemaEntries.find(([schemaPath]) => matchesSchemaPath(schemaPath, segments))?.[1] ?? {};
+    };
+    const pushScalarField = (
+      segments: PathSegment[],
+      value: unknown,
+      depth: number,
+      meta: (typeof schema)[string],
+    ) => {
+      if (meta.hidden) return;
+      const key = pathKey(segments);
+      const labelBase = String(segments[segments.length - 1] ?? key);
+      const valueType = inferValueType(value);
+      const context = buildTemplateContext(segments, value);
+      const label = renderTemplate(meta.labelTemplate, context) ?? meta.label ?? labelBase;
+      const helpText = renderTemplate(meta.descriptionTemplate, context) ?? meta.description;
+      if (meta.widget === 'toggle' || (meta.widget !== 'text' && typeof value === 'boolean')) {
+        resolvedFields.push({
+          key,
+          kind: 'toggle',
+          label,
+          description: helpText ?? 'boolean',
+          value: Boolean(value),
+          pathSegments: segments,
+          originalValue: value,
+          depth,
+          valueType,
+          helpText,
+          order: meta.order ?? Number.MAX_SAFE_INTEGER,
+        });
+        return;
+      }
+      resolvedFields.push({
+        key,
+        kind: 'text',
+        label,
+        description: valueType,
+        value: value === null ? 'null' : String(value ?? ''),
+        placeholder: meta.placeholder,
+        pathSegments: segments,
+        originalValue: value,
+        depth,
+        valueType,
+        helpText,
+        order: meta.order ?? Number.MAX_SAFE_INTEGER,
+      });
+    };
+    const walkConfig = (value: unknown, segments: PathSegment[], depth: number): void => {
+      const meta = resolveMeta(segments);
+      if (segments.length > 0 && !meta.hidden && (Array.isArray(value) || isRecord(value))) {
+        const context = buildTemplateContext(segments, value);
+        const renderedTitle = renderTemplate(meta.titleTemplate, context);
+        const renderedLabel =
+          renderTemplate(meta.labelTemplate, context) ??
+          meta.label ??
+          String(segments[segments.length - 1]);
+        const renderedDescription =
+          renderTemplate(meta.descriptionTemplate, context) ??
+          meta.description ??
+          (Array.isArray(value) ? `${value.length} item(s)` : 'object');
+        resolvedFields.push({
+          key: pathKey(segments),
+          kind: 'section',
+          pathSegments: segments,
+          label: renderedTitle ?? renderedLabel,
+          description: renderedTitle ? undefined : renderedDescription,
+          depth: Math.max(depth - 1, 0),
+          nodeType: Array.isArray(value) ? 'array' : 'object',
+          editableArrayItem:
+            typeof segments[segments.length - 1] === 'number' &&
+            (Array.isArray(value) || isRecord(value)),
+          order: meta.order ?? Number.MAX_SAFE_INTEGER,
+        });
+      }
+      if (Array.isArray(value)) {
+        value.forEach((entry, index) => walkConfig(entry, [...segments, index], depth + 1));
+        return;
+      }
+      if (isRecord(value)) {
+        for (const [key, child] of Object.entries(value)) {
+          if (segments.length === 0 && key === UI_SCHEMA_KEY) continue;
+          walkConfig(child, [...segments, key], depth + 1);
+        }
+        return;
+      }
+      pushScalarField(segments, value, Math.max(depth - 1, 0), meta);
+    };
+    for (const [key, value] of Object.entries(config)) {
+      if (key === UI_SCHEMA_KEY) continue;
+      walkConfig(value, [key], 0);
+    }
+
+    return resolvedFields
+      .sort((a, b) => (a.order === b.order ? a.key.localeCompare(b.key) : a.order - b.order))
+      .map(({ order: _order, ...field }) => field);
+  };
+
+  type ScriptConfigFocusItem =
+    | {
+        field: Extract<ResolvedConfigField, { kind: 'text' }>;
+        kind: 'input';
+        node: InputRenderable;
+        container: BoxRenderable;
+        prefixNode: TextRenderable;
+      }
+    | {
+        field: Extract<ResolvedConfigField, { kind: 'toggle' }>;
+        kind: 'toggle';
+        node: TextRenderable;
+        container: TextRenderable;
+      }
+    | {
+        field: Extract<ResolvedConfigField, { kind: 'section' }>;
+        kind: 'section';
+        node: TextRenderable;
+        container: TextRenderable;
+      };
+
+  let resolvedFields = buildResolvedFields(draftConfig ?? {});
+  let items: ScriptConfigFocusItem[] = [];
+  const rawValues: Record<string, unknown> = {};
+  const compactIndent = (depth: number): string => ' '.repeat(Math.min(depth, 6) * 2);
+  renderer.root.add(box);
+  let focusIdx = 0;
+  activeScriptConfigModal = { box, focusIndex: 0 };
+  const scalarColor = (valueType: 'text' | 'number' | 'boolean' | 'null'): string => {
+    if (valueType === 'boolean') return 'green';
+    if (valueType === 'number') return 'yellow';
+    if (valueType === 'null') return 'gray';
+    return 'white';
+  };
+  const sectionColor = (nodeType: 'array' | 'object'): string =>
+    nodeType === 'array' ? 'cyan' : 'magenta';
+
+  function parseScalarValue(
+    field: Extract<ResolvedConfigField, { kind: 'text' | 'toggle' }>,
+    rawValue: unknown,
+  ): unknown {
+    if (field.kind === 'toggle') return Boolean(rawValue);
+    if (typeof field.originalValue === 'number') {
+      const num = Number(String(rawValue ?? '').trim());
+      if (!Number.isFinite(num)) {
+        throw new Error(`${field.label} must be a valid number`);
+      }
+      return num;
+    }
+    if (field.originalValue === null) {
+      const text = String(rawValue ?? '').trim();
+      return text === 'null' ? null : text;
+    }
+    return String(rawValue ?? '');
+  }
+
+  function syncDraftFromInputs(): { errors: string[] } {
+    const errors: string[] = [];
+    if (!isObjectConfigSpec || !draftConfig) return { errors };
+    for (const item of items) {
+      if (item.kind === 'section') continue;
+      const rawValue = item.kind === 'input' ? item.node.value : rawValues[item.field.key];
+      try {
+        const parsedValue = parseScalarValue(item.field, rawValue);
+        setValueAtSegments(draftConfig, item.field.pathSegments, parsedValue);
+        rawValues[item.field.key] = parsedValue;
+      } catch (error) {
+        errors.push(String(error instanceof Error ? error.message : error));
+      }
+    }
+    return { errors };
+  }
+
+  function renderSection(
+    item: Extract<ScriptConfigFocusItem, { kind: 'section' }>,
+    focused: boolean,
+  ): void {
+    const actionsHint = item.field.editableArrayItem ? '  - [ up, ] down, x delete' : '';
+    item.node.content = `${focused ? '>' : ' '} ${compactIndent(item.field.depth)}${item.field.label}${item.field.description ? `  - ${item.field.description}` : ''}${actionsHint}`;
+    item.node.fg = focused ? 'cyan' : sectionColor(item.field.nodeType);
+    item.node.attributes = focused || item.field.depth === 0 ? TextAttributes.BOLD : undefined;
+  }
+
+  function renderToggle(
+    item: Extract<ScriptConfigFocusItem, { kind: 'toggle' }>,
+    focused: boolean,
+  ): void {
+    const value = Boolean(rawValues[item.field.key]);
+    item.node.content = `${focused ? '>' : ' '} ${`${compactIndent(item.field.depth)}${item.field.label}: ${item.field.valueType} = `.padEnd(scalarPrefixWidth)}${value ? 'ON' : 'OFF'}${item.field.helpText ? `  - ${item.field.helpText}` : ''}`;
+    item.node.fg = focused ? 'cyan' : scalarColor(item.field.valueType);
+  }
+
+  let scalarPrefixWidth = 0;
+  function escapeViaKeyDown(key: { name: string }): void {
+    if (key.name === 'escape' && activeScriptConfigModal) cancelAndClose();
+  }
+
+  function renderFields(focusPath?: string): void {
+    clearBox(contentBox);
+    items = [];
+    for (const key of Object.keys(rawValues)) delete rawValues[key];
+    resolvedFields = buildResolvedFields(draftConfig ?? {});
+    scalarPrefixWidth = resolvedFields
+      .filter(
+        (field): field is Extract<ResolvedConfigField, { kind: 'text' | 'toggle' }> =>
+          field.kind === 'text' || field.kind === 'toggle',
+      )
+      .reduce((maxWidth, field) => {
+        const prefix = `${compactIndent(field.depth)}${field.label}: ${field.valueType} = `;
+        return Math.max(maxWidth, prefix.length);
+      }, 0);
+
+    for (const field of resolvedFields) {
+      if (field.kind === 'section') {
+        const row = new TextRenderable(renderer, { content: '', fg: sectionColor(field.nodeType) });
+        contentBox.add(row);
+        if (field.editableArrayItem) {
+          items.push({ field, kind: 'section', node: row, container: row });
+        } else {
+          renderSection({ field, kind: 'section', node: row, container: row }, false);
+        }
+        continue;
+      }
+      if (field.kind === 'toggle') {
+        const row = new TextRenderable(renderer, { content: '', fg: scalarColor(field.valueType) });
+        rawValues[field.key] = field.value;
+        contentBox.add(row);
+        items.push({ field, kind: 'toggle', node: row, container: row });
+        continue;
+      }
+      const fieldRow = new BoxRenderable(renderer, {
+        width: '100%',
+        flexDirection: 'row',
+        gap: 0,
+      });
+      const prefixNode = new TextRenderable(renderer, {
+        content: `${compactIndent(field.depth)}${field.label}: ${field.valueType} = `.padEnd(
+          scalarPrefixWidth,
+        ),
+        fg: scalarColor(field.valueType),
+      });
+      fieldRow.add(prefixNode);
+      const inputBox = new BoxRenderable(renderer, {
+        flexDirection: 'column',
+        flexGrow: 1,
+      });
+      const input = new InputRenderable(renderer, {
+        placeholder: field.placeholder ?? '',
+        width: '100%',
+      });
+      input.value = field.value;
+      rawValues[field.key] = field.value;
+      inputBox.add(input);
+      fieldRow.add(inputBox);
+      contentBox.add(fieldRow);
+      items.push({ field, kind: 'input', node: input, container: fieldRow, prefixNode });
+    }
+
+    if (items.length === 0) {
+      focusIdx = 0;
+      return;
+    }
+    if (focusPath) {
+      const matchedIndex = items.findIndex((item) => pathKey(item.field.pathSegments) === focusPath);
+      focusIdx = matchedIndex >= 0 ? matchedIndex : Math.min(focusIdx, items.length - 1);
+    } else {
+      focusIdx = Math.min(focusIdx, items.length - 1);
+    }
+    for (const item of items) {
+      if (item.kind === 'toggle') renderToggle(item, false);
+      else if (item.kind === 'section') renderSection(item, false);
+      else item.node.onKeyDown = escapeViaKeyDown as any;
+    }
+  }
+
+  function blurCurrent(): void {
+    const current = items[focusIdx];
+    if (!current) return;
+    if (current.kind === 'input') {
+      current.node.blur();
+      current.prefixNode.fg = scalarColor(current.field.valueType);
+    }
+    else if (current.kind === 'toggle') renderToggle(current, false);
+    else renderSection(current, false);
+  }
+
+  function scrollCurrentIntoView(): void {
+    const current = items[focusIdx];
+    if (!current) return;
+    contentScroll.scrollChildIntoView(current.container.id);
+  }
+
+  function focusCurrent(): void {
+    const current = items[focusIdx];
+    if (!current) return;
+    if (current.kind === 'input') {
+      current.node.focus();
+      current.prefixNode.fg = 'cyan';
+    } else if (current.kind === 'toggle') {
+      renderToggle(current, true);
+    } else {
+      renderSection(current, true);
+    }
+    scrollCurrentIntoView();
+  }
+
+  renderFields();
+  focusCurrent();
+
+  async function saveAndClose(): Promise<void> {
+    let result: { changedKeys: string[]; errors?: string[] };
+    if (isObjectConfigSpec) {
+      const { errors } = syncDraftFromInputs();
+      if (errors.length > 0) {
+        for (const error of errors) lastMessages.push(`${spec.prefix} ${error}`);
+        updateUI(lastMessages);
+        return;
+      }
+      result = await spec.onSaveConfig(cloneValue(draftConfig as Record<string, unknown>));
+    } else {
+      for (const item of items) {
+        if (item.kind === 'input') rawValues[item.field.key] = item.node.value;
+      }
+      result = await spec.onSave(rawValues);
+    }
+    if (result.errors && result.errors.length > 0) {
+      for (const error of result.errors) lastMessages.push(`${spec.prefix} ${error}`);
+      updateUI(lastMessages);
+      return;
+    }
+
+    renderer.removeInputHandler(modalKeyHandler);
+    renderer.root.remove(box.id);
+    activeScriptConfigModal = null;
+    uiNodes?.inputEl.focus();
+    lastMessages.push(
+      result.changedKeys.length > 0
+        ? `${spec.prefix} Updated: ${result.changedKeys.join(', ')}`
+        : `${spec.prefix} No changes.`,
+    );
+    updateUI(lastMessages);
+  }
+
+  function cancelAndClose(): void {
+    renderer.removeInputHandler(modalKeyHandler);
+    renderer.root.remove(box.id);
+    activeScriptConfigModal = null;
+    uiNodes?.inputEl.focus();
+  }
+
+  const modalKeyHandler = (sequence: string): boolean => {
+    if (!activeScriptConfigModal) return false;
+    const current = items[focusIdx];
+    if (!current) return false;
+
+    if (sequence === '\t' || sequence === '\x1b[Z') {
+      blurCurrent();
+      focusIdx = (focusIdx + (sequence === '\t' ? 1 : -1) + items.length) % items.length;
+      activeScriptConfigModal.focusIndex = focusIdx;
+      focusCurrent();
+      return true;
+    }
+
+    if (
+      current.kind === 'section' &&
+      current.field.editableArrayItem &&
+      isObjectConfigSpec &&
+      draftConfig
+    ) {
+      if (sequence === '[' || sequence === '\x1b[1;3A' || sequence === '\x1bk') {
+        const { errors } = syncDraftFromInputs();
+        if (errors.length > 0) {
+          for (const error of errors) lastMessages.push(`${spec.prefix} ${error}`);
+          updateUI(lastMessages);
+          return true;
+        }
+        const nextPath = moveArrayValue(draftConfig, current.field.pathSegments, -1);
+        if (nextPath) {
+          renderFields(pathKey(nextPath));
+          focusCurrent();
+        }
+        return true;
+      }
+      if (sequence === ']' || sequence === '\x1b[1;3B' || sequence === '\x1bj') {
+        const { errors } = syncDraftFromInputs();
+        if (errors.length > 0) {
+          for (const error of errors) lastMessages.push(`${spec.prefix} ${error}`);
+          updateUI(lastMessages);
+          return true;
+        }
+        const nextPath = moveArrayValue(draftConfig, current.field.pathSegments, 1);
+        if (nextPath) {
+          renderFields(pathKey(nextPath));
+          focusCurrent();
+        }
+        return true;
+      }
+      if (sequence === 'x' || sequence === '\x7f' || sequence === '\x1b[3~') {
+        const { errors } = syncDraftFromInputs();
+        if (errors.length > 0) {
+          for (const error of errors) lastMessages.push(`${spec.prefix} ${error}`);
+          updateUI(lastMessages);
+          return true;
+        }
+        const nextPath = deleteArrayValue(draftConfig, current.field.pathSegments);
+        renderFields(nextPath ? pathKey(nextPath) : undefined);
+        focusCurrent();
+        return true;
+      }
+    }
+
+    if (
+      current.kind === 'toggle' &&
+      (sequence === ' ' || sequence === '\x1b[C' || sequence === '\x1b[D')
+    ) {
+      rawValues[current.field.key] = !rawValues[current.field.key];
+      renderToggle(current, true);
+      return true;
+    }
+
+    if (sequence === '\r' || sequence === '\n') {
+      void saveAndClose();
+      return true;
+    }
+    if (sequence === '\x1b' || sequence === '\x1b\x1b') {
+      cancelAndClose();
+      return true;
+    }
+    if (sequence === '\x1b[A') {
+      contentScroll.scrollBy(-1);
+      return true;
+    }
+    if (sequence === '\x1b[B') {
+      contentScroll.scrollBy(1);
+      return true;
+    }
+    if (sequence === '\x1b[5~') {
+      contentScroll.scrollBy(-0.5, 'viewport');
+      return true;
+    }
+    if (sequence === '\x1b[6~') {
+      contentScroll.scrollBy(0.5, 'viewport');
+      return true;
+    }
+    return false;
+  };
+
+  renderer.prependInputHandler(modalKeyHandler);
+}
+
+async function invokeActionFromTui(
+  id: string,
+  args: Record<string, unknown>,
+  emit: (line: string) => void,
+): Promise<void> {
+  const result = await registry.invokeLocalAction(id, args, {
+    chatService,
+    providers: { youtube, twitch, kick },
+    emit,
+    ui: { openObsShutdownConfigModal, openScriptConfigModal },
+  });
+  for (const line of result.output ?? []) emit(line);
+  for (const warn of result.warnings ?? []) emit(`[warning] ${warn}`);
+}
+
 // ─── Chatter info modal ──────────────────────────────────────────────────────
 
 function openChatterInfoModal(msg: ChatMessage): void {
-  if (!uiNodes || activeModal || activeStreamModal || activeSettingsModal || activeChatterInfoModal)
+  if (
+    !uiNodes ||
+    activeModal ||
+    activeStreamModal ||
+    activeSettingsModal ||
+    activeObsShutdownConfigModal ||
+    activeScriptConfigModal ||
+    activeChatterInfoModal
+  )
     return;
   const { renderer } = uiNodes;
 
@@ -4773,6 +5925,8 @@ function openHistoryModal(opts?: { query?: string }): void {
     activeModal ||
     activeStreamModal ||
     activeSettingsModal ||
+    activeObsShutdownConfigModal ||
+    activeScriptConfigModal ||
     activeChatterInfoModal ||
     activeHistoryModal
   )
@@ -5238,6 +6392,15 @@ let browseModeActive = false;
 let browseSelectedIdx: number | null = null; // index into lastMessages
 const lastRawMessages: ChatMessage[] = []; // parallel to lastMessages (only chat platform messages)
 
+function trimUiChatMemory(): void {
+  const maxHistory = getChatHistoryLimit();
+  trimArrayTail(lastMessages, maxHistory);
+  trimArrayTail(lastRawMessages, maxHistory);
+  if (browseSelectedIdx !== null && browseSelectedIdx >= lastMessages.length) {
+    browseSelectedIdx = lastMessages.length > 0 ? lastMessages.length - 1 : null;
+  }
+}
+
 const tuiFfzEmotes: Record<string, SharedTwitchEmoteDefinition> = {};
 const tuiFfzImageIdsByName: Record<string, number> = {};
 const tuiFfzImageIdsByUrl = new Map<string, number>();
@@ -5299,6 +6462,7 @@ function clearTuiFfzState(): void {
   for (const key of Object.keys(tuiFfzEmotes)) delete tuiFfzEmotes[key];
   for (const key of Object.keys(tuiFfzImageIdsByName)) delete tuiFfzImageIdsByName[key];
   tuiFfzImageIdsByUrl.clear();
+  nextTuiFfzImageId = 1;
 }
 
 async function uploadTuiFfzImage(
@@ -5366,6 +6530,22 @@ async function refreshTuiFfzEmotes(reason: string): Promise<void> {
       }
       tuiFfzLastChannel = payload.channel;
 
+      const activeNames = new Set(Object.keys(payload.emotes));
+      const activeUrls = new Set(
+        Object.values(payload.emotes).map((emote) =>
+          emote.source === 'twitch' ? (emote.staticUrl ?? emote.url) : emote.url,
+        ),
+      );
+      for (const name of Object.keys(tuiFfzEmotes)) {
+        if (!activeNames.has(name)) delete tuiFfzEmotes[name];
+      }
+      for (const name of Object.keys(tuiFfzImageIdsByName)) {
+        if (!activeNames.has(name)) delete tuiFfzImageIdsByName[name];
+      }
+      for (const cachedUrl of Array.from(tuiFfzImageIdsByUrl.keys())) {
+        if (!activeUrls.has(cachedUrl)) tuiFfzImageIdsByUrl.delete(cachedUrl);
+      }
+
       for (const [name, emote] of Object.entries(payload.emotes)) {
         tuiFfzEmotes[name] = emote;
         const cacheKey = emote.source === 'twitch' ? (emote.staticUrl ?? emote.url) : emote.url;
@@ -5375,6 +6555,10 @@ async function refreshTuiFfzEmotes(reason: string): Promise<void> {
             imageId = nextTuiFfzImageId++;
             await uploadTuiFfzImage(emote, imageId);
             tuiFfzImageIdsByUrl.set(cacheKey, imageId);
+            if (tuiFfzImageIdsByUrl.size > MAX_TUI_FFZ_IMAGES) {
+              const oldestUrl = tuiFfzImageIdsByUrl.keys().next().value;
+              if (oldestUrl) tuiFfzImageIdsByUrl.delete(oldestUrl);
+            }
           }
           tuiFfzImageIdsByName[name] = imageId;
         } catch (error) {
@@ -5616,8 +6800,7 @@ async function fetchPlatformInfo(platform: string): Promise<Record<string, unkno
 }
 
 function loadChatHistory(): { lines: ChatLine[]; rawMsgs: ChatMessage[] } {
-  const rawMax = Number(settings.get('chat.maxHistorySize', 1000));
-  const maxHistory = Number.isFinite(rawMax) && rawMax > 0 ? Math.floor(rawMax) : 1000;
+  const maxHistory = getChatHistoryLimit();
   const streamIds: string[] = [];
 
   const ytInfo = youtube.getChannelInfo();
@@ -5705,7 +6888,9 @@ async function main() {
           sequence === '\x1b[1;2A' &&
           !activeModal &&
           !activeStreamModal &&
-          !activeSettingsModal
+          !activeSettingsModal &&
+          !activeObsShutdownConfigModal &&
+          !activeScriptConfigModal
         ) {
           browseModeActive = true;
           browseSelectedIdx = lastMessages.length > 0 ? lastMessages.length - 1 : null;
@@ -5718,7 +6903,9 @@ async function main() {
           sequence === '\x1b[1;2B' &&
           !activeModal &&
           !activeStreamModal &&
-          !activeSettingsModal
+          !activeSettingsModal &&
+          !activeObsShutdownConfigModal &&
+          !activeScriptConfigModal
         ) {
           browseModeActive = false;
           browseSelectedIdx = null;
@@ -5776,7 +6963,14 @@ async function main() {
 
         // Ctrl+L / Ctrl+Shift+L — cycle sidebar visibility
         // Both send \x0c in this terminal; can't be distinguished without kitty support
-        if (sequence === '\x0c' && !activeModal && !activeStreamModal && !activeSettingsModal) {
+        if (
+          sequence === '\x0c' &&
+          !activeModal &&
+          !activeStreamModal &&
+          !activeSettingsModal &&
+          !activeObsShutdownConfigModal &&
+          !activeScriptConfigModal
+        ) {
           const ev = boolSetting(settings.get('events.visible', true), true);
           const lg = boolSetting(settings.get('logs.visible', true), true);
           // Cycle: (T,T)→(F,T)→(F,F)→(T,F)→(T,T)
@@ -5828,6 +7022,7 @@ async function main() {
   chatService.subscribeToMessages((msg) => {
     lastMessages.push(transformMessage(msg));
     lastRawMessages.push(msg);
+    trimUiChatMemory();
     activeChatterInfoModal?.refreshForMessage(msg);
     if (msg.platform === 'twitch' && Object.keys(tuiFfzEmotes).length === 0) {
       void refreshTuiFfzEmotes('incoming-twitch-message');
@@ -5889,6 +7084,7 @@ async function main() {
   const restoredActivity = _loadActivityEvents();
   if (restoredActivity.length > 0) {
     activityEvents.push(...restoredActivity);
+    pruneActivityEvents();
   }
   _scheduleActivityBarRefresh();
 
@@ -5910,8 +7106,11 @@ async function main() {
       lastMessages.push('[system] --- chat history ---');
       lastMessages.push(...newLines);
       lastRawMessages.push(...newRaw);
+      trimUiChatMemory();
     }
   }
+
+  inputHistory.push(..._loadInputHistory());
 
   // Build UI tree once — no flicker on periodic updates
   uiNodes = initUI(renderer, lastMessages);
@@ -5950,6 +7149,10 @@ async function main() {
     uiNodes!.autocompleteHint.visible = false;
     if (!trimmed) return;
     inputHistory.push(trimmed);
+    if (inputHistory.length > INPUT_HISTORY_LIMIT) {
+      inputHistory.splice(0, inputHistory.length - INPUT_HISTORY_LIMIT);
+    }
+    _saveInputHistory();
     historyIndex = -1;
     await handleCommand(trimmed);
     selectedMessageTarget = 'all';

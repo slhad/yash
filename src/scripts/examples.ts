@@ -27,14 +27,14 @@ const BUNDLED_EXAMPLE_SCRIPTS: readonly BundledExampleScriptDefinition[] = [
     name: 'OBS startup',
     description: 'Five-phase OBS startup sequence with countdown and go-live actions.',
     relativeDir: 'obs-startup',
-    files: ['README.md', 'config.jsonc', 'index.ts'],
+    files: ['README.md', 'config.jsonc', 'config.ts', 'index.ts', 'types.d.ts'],
   },
   {
     id: 'obs-source-recaller',
     name: 'OBS source recaller',
     description: 'Per-scene OBS source snapshot saver with automatic scene-change restores.',
     relativeDir: 'obs-source-recaller',
-    files: ['README.md', 'config.jsonc', 'index.ts'],
+    files: ['README.md', 'config.jsonc', 'index.ts', 'types.d.ts'],
   },
 ] as const;
 

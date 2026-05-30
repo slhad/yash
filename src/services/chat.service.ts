@@ -1,10 +1,21 @@
 import type { ChatMessage, PlatformProvider } from '../platforms/base';
 import { messageLog } from './message-log';
 
+const DEFAULT_MAX_HISTORY_SIZE = 1000;
+const MAX_HISTORY_SIZE = 5000;
+
+function clampHistorySize(size: number): number {
+  if (!Number.isFinite(size) || size <= 0) {
+    return DEFAULT_MAX_HISTORY_SIZE;
+  }
+  return Math.min(Math.floor(size), MAX_HISTORY_SIZE);
+}
+
 export class ChatService {
   private providers: Map<string, PlatformProvider> = new Map();
   private messageHistory: ChatMessage[] = [];
-  private maxHistorySize = 1000;
+  private maxHistorySize = DEFAULT_MAX_HISTORY_SIZE;
+  private providerUnsubscribers: Map<string, () => void> = new Map();
 
   // Callbacks for when new messages arrive
   private messageCallbacks: ((msg: ChatMessage) => void)[] = [];
@@ -13,6 +24,7 @@ export class ChatService {
    * Register a platform provider with the chat service
    */
   registerProvider(platform: string, provider: PlatformProvider): void {
+    this.providerUnsubscribers.get(platform)?.();
     this.providers.set(platform, provider);
 
     // Set up message listener for this provider
@@ -20,8 +32,7 @@ export class ChatService {
       this.handleIncomingMessage(message);
     });
 
-    // Store unsubscribe function for cleanup if needed
-    // In a real implementation, we'd manage these subscriptions properly
+    this.providerUnsubscribers.set(platform, unsubscribe);
   }
 
   /**
@@ -122,7 +133,7 @@ export class ChatService {
    * Set maximum history size
    */
   setMaxHistorySize(size: number): void {
-    this.maxHistorySize = size;
+    this.maxHistorySize = clampHistorySize(size);
     // Trim existing history if needed
     if (this.messageHistory.length > this.maxHistorySize) {
       this.messageHistory = this.messageHistory.slice(-this.maxHistorySize);
@@ -152,6 +163,13 @@ export class ChatService {
    */
   isPlatformRegistered(platform: string): boolean {
     return this.providers.has(platform);
+  }
+
+  dispose(): void {
+    for (const unsubscribe of this.providerUnsubscribers.values()) {
+      unsubscribe();
+    }
+    this.providerUnsubscribers.clear();
   }
 
   /**

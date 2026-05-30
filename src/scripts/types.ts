@@ -2,7 +2,7 @@
 // Bundled scripts (src/scripts/*.ts) use internal imports and register directly.
 // User scripts (~/.config/yash/scripts/*.ts) use the ScriptApi passed to their setup function.
 
-import type { YashActionDefinition } from '../actions/types';
+import type { ActionArgMode, ScriptConfigModalSpec, YashActionDefinition } from '../actions/types';
 
 // ─── Bundled script convention ────────────────────────────────────────────────
 
@@ -34,12 +34,24 @@ export type UserScriptAction = {
   title: string;
   description: string;
   domain: string;
+  ipcEnabled?: boolean;
   readOnly?: boolean;
   voiceHint?: boolean;
+  argMode?: ActionArgMode;
   args?: Record<string, UserScriptArgSchema>;
   examples?: Array<{ args: Record<string, unknown>; description?: string }>;
   /** No ActionContext here — everything needed comes through the ScriptApi closure. */
-  invoke: (args: Record<string, unknown>) => Promise<UserScriptResult>;
+  invoke: (
+    args: Record<string, unknown>,
+    ctx?: UserScriptActionContext,
+  ) => Promise<UserScriptResult>;
+};
+
+export type UserScriptActionContext = {
+  emit?: (line: string) => void;
+  ui?: {
+    openScriptConfigModal?: (spec: ScriptConfigModalSpec) => void;
+  };
 };
 
 export type ScriptApi = {
@@ -95,7 +107,7 @@ export type ScriptApi = {
     sendMessage: (msg: string, platforms?: string[]) => Promise<void>;
   };
   settings: {
-    /** Key is relative to this script's local state.json file in YASH_DATA_DIR/scripts/<scriptId>/. */
+    /** Key is relative to this script's local config.jsonc file in YASH_DATA_DIR/scripts/<scriptId>/. */
     get: <T>(key: string, defaultVal: T) => T;
     set: (key: string, value: unknown) => Promise<void>;
   };

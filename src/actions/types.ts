@@ -10,11 +10,67 @@ export type ActionArgSchema =
 export type ActionSafety = 'safe' | 'confirm' | 'dangerous' | 'blocked';
 export type ActionVisibility = 'public' | 'internal';
 export type ActionIpcOutputMode = 'response_only' | 'response_and_tui';
+export type ActionArgMode = 'schema' | 'kv_pairs';
+
+export type ScriptConfigModalField =
+  | {
+      key: string;
+      kind: 'text';
+      label: string;
+      description: string;
+      value: string;
+      placeholder?: string;
+    }
+  | {
+      key: string;
+      kind: 'toggle';
+      label: string;
+      description: string;
+      value: boolean;
+    };
+
+export type ScriptConfigUiFieldSpec = {
+  label?: string;
+  description?: string;
+  titleTemplate?: string;
+  labelTemplate?: string;
+  descriptionTemplate?: string;
+  widget?: 'auto' | 'text' | 'toggle' | 'json';
+  hidden?: boolean;
+  placeholder?: string;
+  order?: number;
+};
+
+export type ScriptConfigObjectUiSchema = Record<string, ScriptConfigUiFieldSpec>;
+
+export type ScriptConfigModalSpec =
+  | {
+      title: string;
+      intro: string;
+      prefix: string;
+      fields: ScriptConfigModalField[];
+      onSave: (
+        values: Record<string, unknown>,
+      ) => Promise<{ changedKeys: string[]; errors?: string[] }>;
+    }
+  | {
+      title: string;
+      intro: string;
+      prefix: string;
+      config: Record<string, unknown>;
+      onSaveConfig: (
+        config: Record<string, unknown>,
+      ) => Promise<{ changedKeys: string[]; errors?: string[] }>;
+    };
 
 export type ActionContext = {
   chatService: ChatService;
   providers: Record<string, PlatformProvider>;
   emit?: (line: string) => void;
+  ui?: {
+    openObsShutdownConfigModal?: () => void;
+    openScriptConfigModal?: (spec: ScriptConfigModalSpec) => void;
+  };
 };
 
 export type ActionResult = {
@@ -36,6 +92,7 @@ export type YashActionDefinition = {
   deprecated?: boolean;
   voiceHint?: boolean;
   scriptHint?: boolean;
+  argMode?: ActionArgMode;
   args: Record<string, ActionArgSchema>;
   examples?: Array<{ args: Record<string, unknown>; description?: string }>;
   invoke: (args: Record<string, unknown>, ctx: ActionContext) => Promise<ActionResult>;

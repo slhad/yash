@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { ActionArgSchema, YashActionDefinition } from '../../actions/types';
-import { formatActionHelp, parseActionArgs } from '../actionArgs';
+import { formatActionHelp, parseActionArgs, parseLooseActionArgs } from '../actionArgs';
 
 // ---------------------------------------------------------------------------
 // parseActionArgs
@@ -185,6 +185,18 @@ describe('parseActionArgs', () => {
     expect(errors).toHaveLength(2);
     expect(errors.some((e) => e.includes('"delay"'))).toBe(true);
     expect(errors.some((e) => e.includes('ghost'))).toBe(true);
+  });
+});
+
+describe('parseLooseActionArgs', () => {
+  test('keeps unknown and dotted keys while preserving spaced values', () => {
+    expect(
+      parseLooseActionArgs(['countdown.scene=[PS]', 'End', 'chat.interval=15', 'stopStream=false']),
+    ).toEqual({
+      'countdown.scene': '[PS] End',
+      'chat.interval': '15',
+      stopStream: 'false',
+    });
   });
 });
 

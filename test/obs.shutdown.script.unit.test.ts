@@ -6,7 +6,13 @@ import type { ActionContext, YashActionDefinition } from '../src/actions/types';
 import { obsService } from '../src/services';
 import { makeRepoTempDir, removeRepoTempDir } from './helpers/testDataDir';
 
-const ACTION_IDS = ['obs.shutdown.initiate', 'obs.shutdown.cancel', 'obs.shutdown.status'];
+const ACTION_IDS = [
+  'obs.shutdown.initiate',
+  'obs.shutdown.cancel',
+  'obs.shutdown.status',
+  'obs.shutdown.config',
+  'obs.shutdown.configTUI',
+];
 
 function clearObsShutdownActions() {
   const actions = (registry as unknown as { actions: Map<string, YashActionDefinition> }).actions;
@@ -414,5 +420,95 @@ describe('obs.shutdown bundled script', () => {
     // must have sent at 2 and 1 on consecutive seconds
     const finalMessages = messages.filter((r) => r <= 2);
     expect(finalMessages.length).toBeGreaterThanOrEqual(2);
+  });
+
+  test('config action reports effective values and persists overrides used by initiate', async () => {
+    tempDir = await loadObsShutdownScript({ stopStream: true });
+
+    const ctx: ActionContext = {
+      chatService: { sendMessage: mock(async () => {}) } as unknown as ActionContext['chatService'],
+      providers: {},
+    };
+
+    const unsub = mock(() => {});
+    vi.spyOn(obsService, 'isConnected').mockReturnValue(true);
+    vi.spyOn(obsService, 'setCurrentScene').mockResolvedValue(undefined);
+    vi.spyOn(obsService, 'setInputSettings').mockResolvedValue(undefined);
+    vi.spyOn(obsService, 'stopStream').mockResolvedValue(undefined);
+    vi.spyOn(obsService, 'subscribeToStatusChanges').mockReturnValue(unsub);
+
+    const config = getAction('obs.shutdown.config');
+    const initiate = getAction('obs.shutdown.initiate');
+
+    const summary = await config.invoke({}, ctx);
+    expect(summary.output?.[0]).toContain('config path');
+    expect(summary.data?.scene).toBe('[PS] End');
+
+    const update = await config.invoke({ delay: '45', stopStream: 'false', scene: 'BRB' }, ctx);
+    expect(update.output).toContain('[obs-shutdown] updated overrides: delay, stopStream, scene');
+
+    const configJson = JSON.parse(
+      await fs.readFile(path.join(tempDir, 'scripts', 'obs-shutdown', 'config.jsonc'), 'utf8'),
+    ) as Record<string, unknown>;
+    expect(configJson).toMatchObject({ delay: 45, stopStream: false, scene: 'BRB' });
+
+    const result = await initiate.invoke({}, ctx);
+    expect(result.output).toContain('[obs-shutdown] countdown started: 45s');
+    expect(result.output).toContain('[obs-shutdown] scene → BRB');
+    expect(result.output).toContain('[obs-shutdown] stop stream at end → no');
+  });
+
+  test('config action accepts dotted aliases and warns when a countdown is already active', async () => {
+    tempDir = await loadObsShutdownScript({ stopStream: true });
+
+    const ctx: ActionContext = {
+      chatService: { sendMessage: mock(async () => {}) } as unknown as ActionContext['chatService'],
+      providers: {},
+    };
+
+    const unsub = mock(() => {});
+    vi.spyOn(obsService, 'isConnected').mockReturnValue(true);
+    vi.spyOn(obsService, 'setCurrentScene').mockResolvedValue(undefined);
+    vi.spyOn(obsService, 'setInputSettings').mockResolvedValue(undefined);
+    vi.spyOn(obsService, 'stopStream').mockResolvedValue(undefined);
+    vi.spyOn(obsService, 'subscribeToStatusChanges').mockReturnValue(unsub);
+
+    const initiate = getAction('obs.shutdown.initiate');
+    const config = getAction('obs.shutdown.config');
+
+    await initiate.invoke({ delay: 120 }, ctx);
+    const update = await config.invoke(
+      { 'countdown.scene': 'BRB', 'chat.interval': '12', 'stream.stopAtEnd': 'false' },
+      ctx,
+    );
+
+    expect(update.warnings).toContain(
+      'A countdown is already running; saved defaults apply on the next start.',
+    );
+
+    const configJson = JSON.parse(
+      await fs.readFile(path.join(tempDir, 'scripts', 'obs-shutdown', 'config.jsonc'), 'utf8'),
+    ) as Record<string, unknown>;
+    expect(configJson).toMatchObject({
+      scene: 'BRB',
+      chatInterval: 12,
+      stopStream: false,
+    });
+  });
+
+  test('config action rejects unknown keys and invalid arrays', async () => {
+    tempDir = await loadObsShutdownScript({ stopStream: true });
+
+    const ctx: ActionContext = {
+      chatService: { sendMessage: mock(async () => {}) } as unknown as ActionContext['chatService'],
+      providers: {},
+    };
+
+    const config = getAction('obs.shutdown.config');
+
+    await expect(config.invoke({ nope: 'x' }, ctx)).rejects.toThrow('Unknown config key: nope');
+    await expect(config.invoke({ hideSources: '[1,2]' }, ctx)).rejects.toThrow(
+      'hideSources must be a JSON array of strings',
+    );
   });
 });

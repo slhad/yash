@@ -1,4 +1,28 @@
 {
   // Start with automatic scene recalls paused until you explicitly resume them.
-  "startPaused": false
+  // `/action obs.source-recaller.config` and runtime snapshots are written back here.
+  "startPaused": false,
+  "$ui": {
+    "startPaused": {
+      "widget": "toggle",
+      "label": "startPaused",
+      "description": "start future script loads with automatic scene recalls paused",
+      "order": 10
+    },
+    "paused": {
+      "widget": "toggle",
+      "label": "paused",
+      "description": "pause automatic recalls immediately until resume or config change",
+      "order": 20
+    },
+    "triggers": {
+      "widget": "json",
+      "label": "triggers",
+      "description": "JSON map of trigger scenes to ordered restore operations",
+      "order": 30
+    },
+    "triggers/*/*": {
+      "titleTemplate": "${index} - ${sourceRef} : ${stage}"
+    }
+  }
 }

@@ -99,7 +99,7 @@ export default function setup(api) {
       sceneItemTransform: { positionX: 320, positionY: 180, scaleX: 1, scaleY: 1 },
     });
     await fs.writeFile(
-      path.join(scriptStateDir, 'state.json'),
+      path.join(scriptStateDir, 'config.jsonc'),
       JSON.stringify({ persistedFlag: true }, null, 2),
       'utf8',
     );

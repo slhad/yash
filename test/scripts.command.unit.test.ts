@@ -43,15 +43,19 @@ describe('bundled example script helpers', () => {
 
     const result = installBundledExampleScript(tempDir, 'obs-startup');
     expect(result.scriptId).toBe('obs-startup');
-    expect(result.installedFiles).toHaveLength(3);
+    expect(result.installedFiles).toHaveLength(5);
 
     const installedIndex = await fs.readFile(path.join(result.targetDir, 'index.ts'), 'utf8');
     const installedReadme = await fs.readFile(path.join(result.targetDir, 'README.md'), 'utf8');
     const installedConfig = await fs.readFile(path.join(result.targetDir, 'config.jsonc'), 'utf8');
+    const installedHelper = await fs.readFile(path.join(result.targetDir, 'config.ts'), 'utf8');
+    const installedTypes = await fs.readFile(path.join(result.targetDir, 'types.d.ts'), 'utf8');
 
     expect(installedIndex).toContain('export default function setup(api: ScriptApi)');
     expect(installedReadme).toContain('# obs-startup');
     expect(installedConfig).toContain('"prepareScene"');
+    expect(installedHelper).toContain('OBS_STARTUP_SCRIPT_ID');
+    expect(installedTypes).toContain('export type { ScriptApi, UserScriptAction }');
   });
 
   test('install aborts without overwriting when any target file already exists', async () => {
@@ -68,6 +72,8 @@ describe('bundled example script helpers', () => {
     expect(await fs.readFile(path.join(targetDir, 'README.md'), 'utf8')).toBe('keep me');
     expect(await pathExists(path.join(targetDir, 'index.ts'))).toBe(false);
     expect(await pathExists(path.join(targetDir, 'config.jsonc'))).toBe(false);
+    expect(await pathExists(path.join(targetDir, 'config.ts'))).toBe(false);
+    expect(await pathExists(path.join(targetDir, 'types.d.ts'))).toBe(false);
   });
 });
 
