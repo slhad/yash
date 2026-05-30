@@ -1,20 +1,35 @@
-import type { ScriptApi } from './types';
+import type { ScriptApi, UserScriptAction } from './types';
+import {
+  applyObsStartupConfigPatch,
+  buildObsStartupConfigDraft,
+  formatObsStartupConfigValue,
+  getObsStartupConfigPath,
+  loadObsStartupEffectiveConfig,
+  OBS_STARTUP_ACTION_ARG_SCHEMA,
+  validateObsStartupConfigDraft,
+} from './config';
 
 // ─── State machine types ───────────────────────────────────────────────────────
 
 type StartupPhase = 'prepare' | 'pre-start-wait' | 'stream-start' | 'countdown' | 'go-live';
 
+type SceneSourceRef = {
+  raw: string;
+  sceneName: string;
+  sourceName: string;
+};
+
 type ResolvedConfig = {
   prepareScene: string;
   liveScene: string;
-  hideSources: string[];
-  showSources: string[];
+  hideSources: SceneSourceRef[];
+  showSources: SceneSourceRef[];
   muteSources: string[];
   unmuteSources: string[];
   preStartDelaySec: number;
   countdownSec: number;
   startStream: boolean;
-  countdownSource: string;
+  countdownSource: SceneSourceRef | null;
   sourceTemplate: string;
   countdownMessage: string;
   chatInterval: number;
@@ -40,22 +55,54 @@ let state: StartupState = { active: false };
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
 export default function setup(api: ScriptApi): void {
+  function getLongestScenePrefixMatch(target: string, sceneNames: string[]): string | null {
+    const trimmedTarget = target.trim();
+    const explicitScene = sceneNames
+      .filter(
+        (sceneName) =>
+          trimmedTarget.startsWith(`${sceneName}.`) && trimmedTarget.length > sceneName.length + 1,
+      )
+      .sort((a, b) => b.length - a.length)[0];
+    return explicitScene ?? null;
+  }
+
+  function resolveSceneSourceRef(
+    rawTarget: string,
+    sceneNames: string[],
+    fallbackScene: string,
+  ): SceneSourceRef {
+    const trimmedTarget = rawTarget.trim();
+    const explicitScene = getLongestScenePrefixMatch(trimmedTarget, sceneNames);
+    if (explicitScene) {
+      return {
+        raw: trimmedTarget,
+        sceneName: explicitScene,
+        sourceName: trimmedTarget.slice(explicitScene.length + 1).trim(),
+      };
+    }
+    return {
+      raw: trimmedTarget,
+      sceneName: fallbackScene,
+      sourceName: trimmedTarget,
+    };
+  }
+
   async function updateCountdownSource(remaining: number): Promise<void> {
     if (!state.active) return;
     const { countdownSource, sourceTemplate } = state.cfg;
     if (!countdownSource || !api.obs.isConnected()) return;
     const text = sourceTemplate.replace(/\{remaining\}/g, String(remaining));
     try {
-      await api.obs.setInputSettings(countdownSource, { text });
+      await api.obs.setInputSettings(countdownSource.sourceName, { text });
     } catch {
       // best-effort
     }
   }
 
-  async function clearCountdownSource(source: string): Promise<void> {
+  async function clearCountdownSource(source: SceneSourceRef | null): Promise<void> {
     if (!source || !api.obs.isConnected()) return;
     try {
-      await api.obs.setInputSettings(source, { text: '' });
+      await api.obs.setInputSettings(source.sourceName, { text: '' });
     } catch {
       // best-effort
     }
@@ -87,12 +134,12 @@ export default function setup(api: ScriptApi): void {
       return;
     }
 
-    for (const sourceName of cfg.hideSources) {
+    for (const target of cfg.hideSources) {
       try {
-        const id = await api.obs.getSceneItemId(cfg.prepareScene, sourceName);
-        await api.obs.setSceneItemEnabled(cfg.prepareScene, id, false);
+        const id = await api.obs.getSceneItemId(target.sceneName, target.sourceName);
+        await api.obs.setSceneItemEnabled(target.sceneName, id, false);
       } catch {
-        api.logger.warn(`[obs-startup] could not hide "${sourceName}" in "${cfg.prepareScene}"`);
+        api.logger.warn(`[obs-startup] could not hide "${target.sourceName}" in "${target.sceneName}"`);
       }
     }
 
@@ -189,12 +236,12 @@ export default function setup(api: ScriptApi): void {
       api.logger.warn(`[obs-startup] could not switch to live scene: ${String(err)}`);
     }
 
-    for (const sourceName of cfg.showSources) {
+    for (const target of cfg.showSources) {
       try {
-        const id = await api.obs.getSceneItemId(cfg.liveScene, sourceName);
-        await api.obs.setSceneItemEnabled(cfg.liveScene, id, true);
+        const id = await api.obs.getSceneItemId(target.sceneName, target.sourceName);
+        await api.obs.setSceneItemEnabled(target.sceneName, id, true);
       } catch {
-        api.logger.warn(`[obs-startup] could not show "${sourceName}" in "${cfg.liveScene}"`);
+        api.logger.warn(`[obs-startup] could not show "${target.sourceName}" in "${target.sceneName}"`);
       }
     }
 
@@ -247,7 +294,7 @@ export default function setup(api: ScriptApi): void {
       { args: { startStream: true }, description: 'Also start the OBS stream' },
       { args: { delay: 0 },         description: 'Skip countdown, go live immediately' },
     ],
-    invoke: async (args) => {
+    invoke: async (args: Parameters<UserScriptAction['invoke']>[0]) => {
       if (state.active) {
         throw new Error(`Startup already active in phase \`${state.phase}\` — cancel first`);
       }
@@ -255,10 +302,9 @@ export default function setup(api: ScriptApi): void {
         throw new Error('OBS is not connected');
       }
 
-      const prepareScene =
-        (args.prepareScene as string | undefined) ?? api.settings.get<string>('prepareScene', '');
-      const liveScene =
-        (args.liveScene as string | undefined) ?? api.settings.get<string>('liveScene', '');
+      const config = loadObsStartupEffectiveConfig();
+      const prepareScene = (args.prepareScene as string | undefined) ?? config.prepareScene;
+      const liveScene = (args.liveScene as string | undefined) ?? config.liveScene;
 
       if (!prepareScene) {
         throw new Error('No prepare scene configured — set "prepareScene" in config.jsonc or pass prepareScene= as an argument');
@@ -267,25 +313,46 @@ export default function setup(api: ScriptApi): void {
         throw new Error('No live scene configured — set "liveScene" in config.jsonc or pass liveScene= as an argument');
       }
 
+      const sceneList = await api.obs.getSceneList();
+      const sceneNames = Array.isArray(sceneList?.scenes)
+        ? sceneList.scenes
+            .map((scene: { sceneName?: string }) =>
+              typeof scene?.sceneName === 'string' ? scene.sceneName.trim() : '',
+            )
+            .filter(Boolean)
+        : [];
+
+      const hideSources = config.hideSources
+        .map((target: string) => resolveSceneSourceRef(String(target ?? ''), sceneNames, prepareScene))
+        .filter((target: SceneSourceRef) => target.sourceName);
+      const showSources = config.showSources
+        .map((target: string) => resolveSceneSourceRef(String(target ?? ''), sceneNames, liveScene))
+        .filter((target: SceneSourceRef) => target.sourceName);
+      const countdownSourceRaw =
+        (args.countdownSource as string | undefined) ?? config.countdownSource;
+      const countdownSource = countdownSourceRaw.trim()
+        ? resolveSceneSourceRef(countdownSourceRaw, sceneNames, prepareScene)
+        : null;
+
       const cfg: ResolvedConfig = {
         prepareScene,
         liveScene,
-        hideSources:      api.settings.get<string[]>('hideSources', []),
-        showSources:      api.settings.get<string[]>('showSources', []),
-        muteSources:      api.settings.get<string[]>('muteSources', []),
-        unmuteSources:    api.settings.get<string[]>('unmuteSources', []),
-        preStartDelaySec: (args.preStartDelay as number | undefined)   ?? api.settings.get<number>('preStartDelay', 0),
-        countdownSec:     (args.delay as number | undefined)           ?? api.settings.get<number>('countdownDelay', 0),
-        startStream:      (args.startStream as boolean | undefined)    ?? api.settings.get<boolean>('startStream', false),
-        countdownSource:  (args.countdownSource as string | undefined) ?? api.settings.get<string>('countdownSource', ''),
-        sourceTemplate:   (args.sourceText as string | undefined)      ?? api.settings.get<string>('countdownSourceText', '{remaining}s'),
-        countdownMessage: (args.message as string | undefined)         ?? api.settings.get<string>('countdownMessage', ''),
-        chatInterval:     (args.chatInterval as number | undefined)    ?? api.settings.get<number>('chatInterval', 0),
-        finalCountdownAt: api.settings.get<number>('finalCountdownAt', 0),
-        chatMessage:      (args.chatMessage as string | undefined)     ?? api.settings.get<string>('liveMessage', ''),
+        hideSources,
+        showSources,
+        muteSources:      config.muteSources,
+        unmuteSources:    config.unmuteSources,
+        preStartDelaySec: (args.preStartDelay as number | undefined)   ?? config.preStartDelay,
+        countdownSec:     (args.delay as number | undefined)           ?? config.countdownDelay,
+        startStream:      (args.startStream as boolean | undefined)    ?? config.startStream,
+        countdownSource,
+        sourceTemplate:   (args.sourceText as string | undefined)      ?? config.countdownSourceText,
+        countdownMessage: (args.message as string | undefined)         ?? config.countdownMessage,
+        chatInterval:     (args.chatInterval as number | undefined)    ?? config.chatInterval,
+        finalCountdownAt: config.finalCountdownAt,
+        chatMessage:      (args.chatMessage as string | undefined)     ?? config.liveMessage,
       };
 
-      const unsubObs = api.obs.subscribeToStatusChanges((connected) => {
+      const unsubObs = api.obs.subscribeToStatusChanges((connected: boolean) => {
         if (!connected && state.active) {
           if (state.tickTimer !== null) clearTimeout(state.tickTimer);
           state.unsubObs();
@@ -312,11 +379,11 @@ export default function setup(api: ScriptApi): void {
       ];
       if (cfg.startStream)                                output.push('[obs-startup] start stream → yes');
       if (cfg.startStream && cfg.preStartDelaySec > 0)   output.push(`[obs-startup] pre-start wait → ${cfg.preStartDelaySec}s`);
-      if (cfg.countdownSource)                            output.push(`[obs-startup] countdown source → ${cfg.countdownSource}`);
+      if (cfg.countdownSource)                            output.push(`[obs-startup] countdown source → ${cfg.countdownSource.raw}`);
       if (cfg.countdownMessage && cfg.chatInterval > 0)  output.push(`[obs-startup] chat every ${cfg.chatInterval}s → ${cfg.countdownMessage}`);
       if (cfg.finalCountdownAt > 0)                      output.push(`[obs-startup] final countdown every 1s from ${cfg.finalCountdownAt}s`);
-      if (cfg.hideSources.length > 0)                    output.push(`[obs-startup] hide → ${cfg.hideSources.join(', ')}`);
-      if (cfg.showSources.length > 0)                    output.push(`[obs-startup] show → ${cfg.showSources.join(', ')}`);
+      if (cfg.hideSources.length > 0)                    output.push(`[obs-startup] hide → ${cfg.hideSources.map((target) => target.raw).join(', ')}`);
+      if (cfg.showSources.length > 0)                    output.push(`[obs-startup] show → ${cfg.showSources.map((target) => target.raw).join(', ')}`);
       if (cfg.muteSources.length > 0)                    output.push(`[obs-startup] mute → ${cfg.muteSources.join(', ')}`);
       if (cfg.unmuteSources.length > 0)                  output.push(`[obs-startup] unmute → ${cfg.unmuteSources.join(', ')}`);
 
@@ -330,9 +397,9 @@ export default function setup(api: ScriptApi): void {
           startStream:      cfg.startStream,
           chatInterval:     cfg.chatInterval || null,
           finalCountdownAt: cfg.finalCountdownAt || null,
-          countdownSource:  cfg.countdownSource || null,
-          hideSources:      cfg.hideSources,
-          showSources:      cfg.showSources,
+          countdownSource:  cfg.countdownSource?.raw ?? null,
+          hideSources:      cfg.hideSources.map((target) => target.raw),
+          showSources:      cfg.showSources.map((target) => target.raw),
           muteSources:      cfg.muteSources,
           unmuteSources:    cfg.unmuteSources,
         },
@@ -341,6 +408,247 @@ export default function setup(api: ScriptApi): void {
   });
 
   // ─── obs.startup.cancel ──────────────────────────────────────────────────────
+
+  api.registerAction({
+    id: 'obs.startup.config',
+    title: 'Configure OBS startup defaults',
+    description:
+      'Reads or updates the obs-startup script config stored in scripts/obs-startup/config.jsonc.',
+    domain: 'obs',
+    ipcEnabled: true,
+    readOnly: false,
+    voiceHint: true,
+    argMode: 'kv_pairs',
+    args: OBS_STARTUP_ACTION_ARG_SCHEMA,
+    examples: [
+      { args: {}, description: 'Show the effective obs-startup settings' },
+      {
+        args: { prepareScene: '[PS] PreLive', liveScene: '[PS] Start' },
+        description: 'Update the prepare/live scenes',
+      },
+      {
+        args: { countdownDelay: 60, startStream: true },
+        description: 'Update the countdown and OBS auto-start behavior',
+      },
+    ],
+    invoke: async (args: Parameters<UserScriptAction['invoke']>[0]) => {
+      if (Object.keys(args).length === 0) {
+        const config = loadObsStartupEffectiveConfig();
+        return {
+          output: [
+            `[obs-startup] config path → ${getObsStartupConfigPath()}`,
+            ...Object.entries(config).map(
+              ([key, value]) =>
+                `[obs-startup] ${key} → ${formatObsStartupConfigValue(
+                  key as keyof typeof config,
+                  value,
+                )}`,
+            ),
+          ],
+          data: {
+            configPath: getObsStartupConfigPath(),
+            ...config,
+          },
+        };
+      }
+
+      const result = applyObsStartupConfigPatch(args);
+      return {
+        output:
+          result.changedKeys.length > 0
+            ? [
+                `[obs-startup] updated overrides: ${result.changedKeys.join(', ')}`,
+                `[obs-startup] config path → ${getObsStartupConfigPath()}`,
+              ]
+            : ['[obs-startup] no changes'],
+        warnings:
+          state.active
+            ? ['A startup sequence is already running; saved defaults apply on the next start.']
+            : undefined,
+        data: {
+          changedKeys: result.changedKeys,
+          configPath: getObsStartupConfigPath(),
+          ...result.effectiveConfig,
+        },
+      };
+    },
+  });
+
+  api.registerAction({
+    id: 'obs.startup.configTUI',
+    title: 'Open OBS startup config modal',
+    description: 'Opens a TUI modal for editing obs-startup script runtime overrides.',
+    domain: 'obs',
+    ipcEnabled: false,
+    readOnly: false,
+    voiceHint: true,
+    args: {},
+    examples: [{ args: {}, description: 'Open the OBS startup config modal in the TUI' }],
+    invoke: async (_args, ctx) => {
+      if (!ctx?.ui?.openScriptConfigModal) {
+        throw new Error('This action requires the TUI');
+      }
+
+      const draft = buildObsStartupConfigDraft(loadObsStartupEffectiveConfig());
+      ctx.ui.openScriptConfigModal({
+        title: 'OBS Startup Config',
+        intro:
+          ' Tab/Shift+Tab move focus. Space or ◄/► toggles startStream. Enter saves all changes. Esc cancels.',
+        prefix: '[obs-startup]',
+        fields: [
+          {
+            key: 'prepareScene',
+            kind: 'text',
+            label: 'prepareScene',
+            description: 'OBS scene to switch to before the startup sequence begins',
+            value: draft.prepareScene,
+            placeholder: '[PS] PreLive',
+          },
+          {
+            key: 'liveScene',
+            kind: 'text',
+            label: 'liveScene',
+            description: 'OBS scene to switch to when the startup sequence goes live',
+            value: draft.liveScene,
+            placeholder: '[PS] Start',
+          },
+          {
+            key: 'hideSources',
+            kind: 'text',
+            label: 'hideSources',
+            description: 'Comma-separated sources to hide during prepare',
+            value: draft.hideSources,
+            placeholder: '[SC] Brio NB',
+          },
+          {
+            key: 'showSources',
+            kind: 'text',
+            label: 'showSources',
+            description: 'Comma-separated sources to show when going live',
+            value: draft.showSources,
+            placeholder: '[SC] Brio NB',
+          },
+          {
+            key: 'muteSources',
+            kind: 'text',
+            label: 'muteSources',
+            description: 'Comma-separated OBS inputs to mute during prepare',
+            value: draft.muteSources,
+            placeholder: 'Mic/Aux',
+          },
+          {
+            key: 'unmuteSources',
+            kind: 'text',
+            label: 'unmuteSources',
+            description: 'Comma-separated OBS inputs to unmute when going live',
+            value: draft.unmuteSources,
+            placeholder: 'Mic/Aux',
+          },
+          {
+            key: 'startStream',
+            kind: 'toggle',
+            label: 'startStream',
+            description: 'Call OBS startStream automatically before the countdown',
+            value: draft.startStream,
+          },
+          {
+            key: 'preStartDelay',
+            kind: 'text',
+            label: 'preStartDelay',
+            description: 'Seconds to wait before starting OBS when startStream is enabled',
+            value: draft.preStartDelay,
+            placeholder: '15',
+          },
+          {
+            key: 'countdownDelay',
+            kind: 'text',
+            label: 'countdownDelay',
+            description: 'Seconds to count down before switching to the live scene',
+            value: draft.countdownDelay,
+            placeholder: '180',
+          },
+          {
+            key: 'countdownSource',
+            kind: 'text',
+            label: 'countdownSource',
+            description: 'Optional OBS text source updated with the countdown',
+            value: draft.countdownSource,
+            placeholder: '[TXT] Countdown',
+          },
+          {
+            key: 'countdownSourceText',
+            kind: 'text',
+            label: 'countdownSourceText',
+            description: 'Template written to the countdown source; use {remaining}',
+            value: draft.countdownSourceText,
+            placeholder: '{remaining}s',
+          },
+          {
+            key: 'countdownMessage',
+            kind: 'text',
+            label: 'countdownMessage',
+            description: 'Periodic chat countdown message; use {remaining}',
+            value: draft.countdownMessage,
+            placeholder: 'Stream starting in {remaining}s!',
+          },
+          {
+            key: 'chatInterval',
+            kind: 'text',
+            label: 'chatInterval',
+            description: 'Seconds between countdown chat updates (0 disables)',
+            value: draft.chatInterval,
+            placeholder: '30',
+          },
+          {
+            key: 'finalCountdownAt',
+            kind: 'text',
+            label: 'finalCountdownAt',
+            description: 'Switch chat updates to every second from this value',
+            value: draft.finalCountdownAt,
+            placeholder: '15',
+          },
+          {
+            key: 'liveMessage',
+            kind: 'text',
+            label: 'liveMessage',
+            description: 'Chat message sent when the live scene is shown',
+            value: draft.liveMessage,
+            placeholder: "We're live!",
+          },
+        ],
+        onSave: async (values) => {
+          const validation = validateObsStartupConfigDraft({
+            prepareScene: String(values.prepareScene ?? ''),
+            liveScene: String(values.liveScene ?? ''),
+            hideSources: String(values.hideSources ?? ''),
+            showSources: String(values.showSources ?? ''),
+            muteSources: String(values.muteSources ?? ''),
+            unmuteSources: String(values.unmuteSources ?? ''),
+            preStartDelay: String(values.preStartDelay ?? ''),
+            countdownDelay: String(values.countdownDelay ?? ''),
+            startStream: Boolean(values.startStream),
+            countdownSource: String(values.countdownSource ?? ''),
+            countdownSourceText: String(values.countdownSourceText ?? ''),
+            countdownMessage: String(values.countdownMessage ?? ''),
+            chatInterval: String(values.chatInterval ?? ''),
+            finalCountdownAt: String(values.finalCountdownAt ?? ''),
+            liveMessage: String(values.liveMessage ?? ''),
+          });
+
+          if (!validation.values) {
+            return { changedKeys: [], errors: validation.errors };
+          }
+
+          const result = applyObsStartupConfigPatch(validation.values);
+          return {
+            changedKeys: result.changedKeys,
+            errors: result.errors.length > 0 ? result.errors : undefined,
+          };
+        },
+      });
+      return { output: ['[obs-startup] opened config modal'] };
+    },
+  });
 
   api.registerAction({
     id: 'obs.startup.cancel',

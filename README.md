@@ -42,6 +42,8 @@ bun run cmd /settings set demo true
 bun run cmd /connect youtube
 bun run cmd /msg all Hello chat
 bun run cmd /help
+bun run cmd /scripts list
+bun run cmd /scripts install obs-source-recaller
 ```
 
 Both forms are accepted — `bun run cmd marker` and `bun run cmd /marker` are equivalent; the leading `/` is added automatically if omitted.
@@ -72,6 +74,23 @@ Commands invoked over IPC are also echoed into the live TUI chat pane before the
 
 `/settings get <key>` and `/settings set <key> <value>` work normally over IPC.
 
+### Bundled example scripts
+
+YASH ships a small catalog of tracked example user scripts under `examples/scripts/`, and the live TUI/IPC command surface can copy them into your runtime script directory without manual symlinks:
+
+```sh
+bun run cmd /scripts list
+bun run cmd /scripts install obs-startup
+bun run cmd /scripts install obs-source-recaller
+bun run cmd /scripts install obs-source-recaller repair
+```
+
+- Install target: `${YASH_DATA_DIR}/scripts/<example-id>/`
+- Existing files are never overwritten; install aborts if any target file already exists
+- Use `repair` (or `force`) to refresh tracked files intentionally for a partial or outdated install
+- Repair merges the shipped `config.jsonc` defaults with your current `config.jsonc`, preserving your existing values and unknown keys
+- Restart YASH after install so the copied script is loaded at startup
+
 ### `/action` command
 
 `/action` exposes public IPC-safe actions from the internal action registry.
@@ -81,6 +100,8 @@ bun run cmd /action
 bun run cmd /action marker.create timestamp=-300
 bun run cmd /action obs.shutdown.initiate
 bun run cmd /action obs.shutdown.initiate delay=10 scene='[PS] End'
+bun run cmd /action obs.shutdown.config delay=45 stopStream=false
+bun run cmd /action obs.startup.config countdownDelay=60 startStream=true
 ```
 
 - `/action` with no action id lists public actions grouped by domain
@@ -88,7 +109,7 @@ bun run cmd /action obs.shutdown.initiate delay=10 scene='[PS] End'
 - `/action <id>` shows help and examples when required args are still missing
 - `/action <id> key=value ...` parses typed args and invokes the action
 
-The TUI autocomplete also understands `/action`, including action ids, `key=` argument names, and enum values.
+The TUI autocomplete also understands `/action`, including action ids, `key=` argument names, and enum values. Matches are fuzzy-ranked: prefix matches win, then substring matches, then subsequence matches.
 
 **Stale socket cleanup:** the server removes any pre-existing socket file at startup, so a leftover socket from a crash does not block a new TUI launch.
 
@@ -153,11 +174,20 @@ On startup, YASH performs a one-time migration from the legacy repository-root `
    ```
 3. If you already have a legacy repo-root `config.json`, YASH will migrate it once automatically the first time it starts without an existing runtime config file.
 
-`config.json` holds rarely edited bootstrap data such as OBS, server, and provider credentials/setup fields. `settings.json` holds mutable runtime state such as `stream.*`, `platforms.youtube.setup`, chat/UI preferences, demo mode, and per-platform viewer display settings.
+`config.json` holds rarely edited bootstrap data such as OBS, server, and provider credentials/setup fields. `settings.json` holds mutable YASH-owned runtime state such as `stream.*`, `platforms.youtube.setup`, chat/UI preferences, demo mode, and per-platform viewer display settings.
+
+Ownership boundary:
+
+- `YASH_DATA_DIR/config.json`, `YASH_DATA_DIR/settings.json`, tokens, logs, the message DB, and the IPC socket are YASH-owned files
+- User scripts own `YASH_DATA_DIR/scripts/<scriptId>/`
+- A script's editable config lives at `YASH_DATA_DIR/scripts/<scriptId>/config.jsonc`
+- For normal script settings, `config.jsonc` is the single source of truth; live edits from commands or TUI should write back there rather than splitting into another runtime settings file
 
 ## Script configuration
 
-Bundled and user scripts read JSONC config from `~/.config/yash/scripts/<scriptId>/config.jsonc`.
+Bundled and user scripts use a dedicated per-script folder at `~/.config/yash/scripts/<scriptId>/`.
+
+The standard editable config file is `config.jsonc` inside that folder:
 
 For example, the bundled `obs-shutdown` action can be configured at:
 
@@ -170,11 +200,80 @@ For example, the bundled `obs-shutdown` action can be configured at:
   "scene": "[PS] End",
   "message": "Stream ending in {remaining}s!",
   "source": "[TXT] Countdown",
-  "sourceText": "{remaining}s"
+  "sourceText": "{remaining}s",
+  "hideSources": ["Gameplay.Camera"],
+  "muteSources": ["Mic/Aux"]
 }
 ```
 
 That lets `/action obs.shutdown.initiate` run with config-backed defaults, optionally keep an OBS text source updated during the countdown, and choose whether the countdown should actually stop the OBS stream when it reaches zero.
+
+The bundled script reads and writes `YASH_DATA_DIR/scripts/obs-shutdown/config.jsonc`. You can inspect or update it with `/action obs.shutdown.config`; for example:
+
+```sh
+/action obs.shutdown.config
+/action obs.shutdown.config delay=45 stopStream=false scene='[PS] End'
+/action obs.shutdown.config chat.interval=15 countdown.source='[TXT] Countdown'
+```
+
+Inside the live TUI, `/action obs.shutdown.configTUI` opens a dedicated modal for the same settings. That modal is TUI-only and is rejected over IPC.
+
+`source` accepts either `<source>` or `<scene>.<source>`. The scene qualifier is only used to resolve the intended source name before OBS text updates, because the text update itself still applies to the underlying source globally. `hideSources` accepts the same two forms: plain `<source>` searches every scene, while explicit `<scene>.<source>` only hides and restores that one scene item.
+
+The bundled `obs-startup` example follows the same ownership model. Its settings live in `YASH_DATA_DIR/scripts/obs-startup/config.jsonc`; `/action obs.startup.config` inspects or updates that file, and `/action obs.startup.configTUI` opens the live TUI editor for it.
+
+Keep any script-private data inside the same `YASH_DATA_DIR/scripts/<scriptId>/` folder so ownership stays local to that script and YASH's own `config.json` / `settings.json` remain reserved for the app itself. For normal script settings, `config.jsonc` is the standard persisted file.
+
+Bundled scripts and bundled example scripts are expected to expose both `/action <prefix>.config` and `/action <prefix>.configTUI`: the former stays IPC-safe and reads/writes script-local settings in `config.jsonc`, while the latter edits that same surface from the live TUI and is rejected over IPC. A script `config.jsonc` may also include a reserved top-level `"$ui"` object so the generic TUI editor can apply labels, ordering, widget hints, hidden fields, and wildcard path templates for nested object/array rows.
+
+The main TUI input history is persisted separately in `YASH_DATA_DIR/input-history.json`, so previously sent commands and plain messages remain recallable with Up/Down after a restart.
+
+For self-describing script config UIs, a script may also keep reserved TUI metadata inside the same `config.jsonc` file under a top-level `"$ui"` object. The generic script config modal reads that metadata to choose labels, ordering, widget hints such as `toggle` or `json`, descriptions, and hidden fields, while leaving the actual runtime values in their normal config shape. Object and array values are explored recursively; `json` hints render them as structured tree sections with editable scalar leaves rather than one opaque blob. When focus is on an array-item section row, `[` moves it up, `]` moves it down, and `x` deletes it locally until you save or cancel.
+
+Pre-v1 note:
+
+- YASH does not guarantee migration of old user-script runtime state layouts
+- Script/runtime data format changes may require reinstalling or resetting a script's local `config.jsonc`
+
+## Example script: `obs-source-recaller`
+
+The bundled `obs-source-recaller` example remembers one OBS source's settings per scene and automatically restores matching snapshots on `CurrentProgramSceneChanged`.
+
+Actions:
+
+- `obs.source-recaller.config [startPaused=<true|false>]`
+- `obs.source-recaller.configTUI`
+- `obs.source-recaller.save source=<source|scene.source> [stage=<inputSettings|sceneItemTransform|sceneItemEnabled>]`
+- `obs.source-recaller.load source=<source|scene.source>`
+- `obs.source-recaller.list`
+- `obs.source-recaller.explore`
+- `obs.source-recaller.pause`
+- `obs.source-recaller.resume`
+
+Typical flow:
+
+1. Install it with `bun run cmd /scripts install obs-source-recaller`
+2. Run `/action obs.source-recaller.explore` to list source names in the current scene
+3. If needed, inspect another scene directly with `/action obs.source-recaller.explore scene='Starting Soon'`
+4. Adjust a source in one OBS scene and run `/action obs.source-recaller.save source='Camera'`
+5. If you only want to refresh one restore stage, use `/action obs.source-recaller.save source='Camera' stage='sceneItemTransform'`
+6. Switch to another scene, adjust the same source differently, and save again
+7. If needed, target another scene or nested/keyed source directly with `/action obs.source-recaller.save source='Starting Soon.Camera'`
+8. The active OBS scene still acts as the trigger scene; the explicit `scene.source` only changes which source is captured or restored
+9. Use `/action obs.source-recaller.list` to see which saved sources match the current OBS program scene
+10. Leave the watcher active so later scene changes restore the matching snapshot automatically
+
+Notes:
+
+- `load` restores the saved snapshot for the current OBS trigger scene; an explicit `scene.source` changes the targeted source rather than the trigger scene
+- `save` without `stage=` refreshes all three restore stages; with `stage=...` it replaces only that stored stage for the target source and leaves the other saved stages untouched
+- `pause` disables automatic scene-change recalls without deleting saved snapshots
+- `resume` re-enables recalls and, when OBS is connected, immediately reapplies any matching snapshots for the current scene
+- `config` updates the script-local `startPaused` default, while `configTUI` can also edit top-level `paused` and the `triggers` JSON map in `YASH_DATA_DIR/scripts/obs-source-recaller/config.jsonc`
+- The generic script config TUI renders scalar leaves as compact one-line editors (`key: type = value`) and can rename nested object/array rows with `"$ui"` wildcard templates such as `"triggers/*/*": { "titleTemplate": "${index} - ${sourceRef} : ${stage}" }`
+- When focus lands on an array-item section row in the generic script config TUI, `[` moves that item up, `]` moves it down, and `x` deletes it locally until you save or cancel
+- The same `config.jsonc` file also stores top-level `paused` and `triggers` keys for this script
+- The bundled example also ships a top-level `"$ui"` section so the generic TUI config editor can describe `startPaused`, `paused`, and `triggers` from the same file
 
 ## Security
 

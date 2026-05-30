@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { ActionArgSchema, YashActionDefinition } from '../../actions/types';
-import { formatActionHelp, parseActionArgs } from '../actionArgs';
+import { formatActionHelp, parseActionArgs, parseLooseActionArgs } from '../actionArgs';
 
 // ---------------------------------------------------------------------------
 // parseActionArgs
@@ -15,6 +15,24 @@ describe('parseActionArgs', () => {
     };
     const { args, errors } = parseActionArgs(['scene=Lobby'], schema);
     expect(args).toEqual({ scene: 'Lobby' });
+    expect(errors).toEqual([]);
+  });
+
+  test('single-quoted string arg is unwrapped', () => {
+    const schema: Record<string, ActionArgSchema> = {
+      source: { type: 'string', maxLength: 200 },
+    };
+    const { args, errors } = parseActionArgs(["source='[SC] Brio NB'"], schema);
+    expect(args).toEqual({ source: '[SC] Brio NB' });
+    expect(errors).toEqual([]);
+  });
+
+  test('double-quoted string arg is unwrapped', () => {
+    const schema: Record<string, ActionArgSchema> = {
+      source: { type: 'string', maxLength: 200 },
+    };
+    const { args, errors } = parseActionArgs(['source="[SC] Brio NB"'], schema);
+    expect(args).toEqual({ source: '[SC] Brio NB' });
     expect(errors).toEqual([]);
   });
 
@@ -167,6 +185,18 @@ describe('parseActionArgs', () => {
     expect(errors).toHaveLength(2);
     expect(errors.some((e) => e.includes('"delay"'))).toBe(true);
     expect(errors.some((e) => e.includes('ghost'))).toBe(true);
+  });
+});
+
+describe('parseLooseActionArgs', () => {
+  test('keeps unknown and dotted keys while preserving spaced values', () => {
+    expect(
+      parseLooseActionArgs(['countdown.scene=[PS]', 'End', 'chat.interval=15', 'stopStream=false']),
+    ).toEqual({
+      'countdown.scene': '[PS] End',
+      'chat.interval': '15',
+      stopStream: 'false',
+    });
   });
 });
 

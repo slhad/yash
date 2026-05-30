@@ -56,6 +56,31 @@ When beginning work in this repository:
     - If you are directly starting implementation, copy the selected item into `[tmp]/ONGOING.md` and work from there even if no GitHub issue exists yet
 11. **Once work is active, keep it in `[tmp]/ONGOING.md`** even if a matching GitHub issue also exists
 
+## Memory / Retention Guardrails
+
+- Treat long-lived arrays, maps, caches, timers, intervals, websocket clients, and event/listener subscriptions as leak-prone by default; any new process-lifetime structure must have an explicit bounded-retention or teardown story
+- Do not rely on “the UI only renders the tail” as a memory bound; if a backing array or map can grow forever, cap or prune the backing store itself
+- For in-memory history/caches, prefer hard caps or LRU-style eviction over “clear only when the user asks”
+- For browser and TUI polling loops, prefer self-scheduling `setTimeout` loops that wait for the previous async pass to finish; if `setInterval` is still justified, document why overlapping work cannot happen
+- Every new fetch/debounce/poll path in the Web UI must have cleanup on unmount; use `AbortController` for cancellable requests and clear the outstanding timeout/timer refs
+- Any re-initialization path that replaces a live client/service (OBS, Twitch chat/EventSub, webhook relays, IPC server, etc.) must tear down the previous runtime first instead of just overwriting references
+- Test-only/debug-only histories (for example reconnect attempt history) must stay bounded as well; do not keep unbounded diagnostic arrays in production code
+- When adding or changing message history behavior, verify both the TUI and Web UI surfaces that use it (`/`, `/unified`, `/sidebyside`, browser input history, TUI browse/history surfaces)
+- For changes touching polling, caches, chat history, activity/event logs, emote/image caches, or reconnect logic, add a short live-soak verification in addition to unit tests:
+  - TUI: use `/test-live`, drive repeated events/messages through `yash:all`, and verify the app stays responsive after clears, modal opens, and reconnects
+  - Web UI: leave the page open under traffic for several minutes, verify `/api/status`, `/api/obs/status`, and `/api/chat/history` stay stable, and check browser behavior on `/`, `/unified`, and `/sidebyside`
+
+## Script Config Ownership In Docs
+
+- Treat `YASH_DATA_DIR/config.json` and `YASH_DATA_DIR/settings.json` as YASH-owned only
+- Document user scripts as owning `YASH_DATA_DIR/scripts/<scriptId>/config.jsonc` as the single script-owned source of truth, plus any other script-private runtime artifacts only when a task explicitly needs them
+- Bundled scripts and bundled example scripts must expose both `/action <prefix>.config` and `/action <prefix>.configTUI`
+- `<prefix>.config` must read and write the script-local settings surface in `YASH_DATA_DIR/scripts/<scriptId>/config.jsonc` and stay IPC-safe
+- `<prefix>.configTUI` must edit that same `config.jsonc` surface through the live TUI, and must be marked TUI-only / rejected over IPC
+- Do not describe user script runtime state as part of YASH's top-level settings surface
+- Until YASH reaches v1, do not add or preserve migration logic for user/app data unless the task explicitly asks for it
+- Prefer current-state correctness and simple resets over compatibility shims for old script/app data during pre-v1 work
+
 ## No Binary Files Policy
 
 Never commit binary files (images, GIFs, fonts, archives, compiled artifacts, etc.) to the repository.

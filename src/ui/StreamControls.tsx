@@ -70,10 +70,13 @@ export const StreamControls: React.FC<StreamControlsProps> = ({
 
   const twitchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const kickDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const twitchFetchAbortRef = useRef<AbortController | null>(null);
+  const kickFetchAbortRef = useRef<AbortController | null>(null);
 
   // Load persisted stream info on mount
   useEffect(() => {
-    fetch('/api/stream')
+    const controller = new AbortController();
+    fetch('/api/stream', { signal: controller.signal })
       .then((r) => r.json())
       .then((meta) => {
         setSavedMeta(meta);
@@ -87,11 +90,14 @@ export const StreamControls: React.FC<StreamControlsProps> = ({
         setYoutubeCategory(meta.youtubeCategory ?? '');
       })
       .catch(() => {});
+
+    return () => controller.abort();
   }, []);
 
   // Fetch YouTube categories on mount
   useEffect(() => {
-    fetch('/api/youtube/categories')
+    const controller = new AbortController();
+    fetch('/api/youtube/categories', { signal: controller.signal })
       .then((r) => r.json())
       .then((data) => {
         if (Array.isArray(data.categories)) {
@@ -99,12 +105,26 @@ export const StreamControls: React.FC<StreamControlsProps> = ({
         }
       })
       .catch(() => {});
+
+    return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (twitchDebounceRef.current) clearTimeout(twitchDebounceRef.current);
+      if (kickDebounceRef.current) clearTimeout(kickDebounceRef.current);
+      twitchFetchAbortRef.current?.abort();
+      kickFetchAbortRef.current?.abort();
+    };
   }, []);
 
   const fetchTwitchSuggestions = (q: string) => {
     if (twitchDebounceRef.current) clearTimeout(twitchDebounceRef.current);
     twitchDebounceRef.current = setTimeout(() => {
-      fetch(`/api/twitch/categories?q=${encodeURIComponent(q)}`)
+      twitchFetchAbortRef.current?.abort();
+      const controller = new AbortController();
+      twitchFetchAbortRef.current = controller;
+      fetch(`/api/twitch/categories?q=${encodeURIComponent(q)}`, { signal: controller.signal })
         .then((r) => r.json())
         .then((data) => {
           if (Array.isArray(data.categories)) {
@@ -118,7 +138,10 @@ export const StreamControls: React.FC<StreamControlsProps> = ({
   const fetchKickSuggestions = (q: string) => {
     if (kickDebounceRef.current) clearTimeout(kickDebounceRef.current);
     kickDebounceRef.current = setTimeout(() => {
-      fetch(`/api/kick/categories?q=${encodeURIComponent(q)}`)
+      kickFetchAbortRef.current?.abort();
+      const controller = new AbortController();
+      kickFetchAbortRef.current = controller;
+      fetch(`/api/kick/categories?q=${encodeURIComponent(q)}`, { signal: controller.signal })
         .then((r) => r.json())
         .then((data) => {
           if (Array.isArray(data.categories)) {

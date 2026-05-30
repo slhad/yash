@@ -46,6 +46,10 @@ export function getScriptConfigPath(scriptId: string, dataDir: string): string {
   return path.join(dataDir, 'scripts', scriptId, 'config.jsonc');
 }
 
+export function getScriptSettingsPath(scriptId: string, dataDir: string): string {
+  return getScriptConfigPath(scriptId, dataDir);
+}
+
 export function loadScriptConfig(scriptId: string, dataDir: string): Record<string, unknown> {
   const filePath = getScriptConfigPath(scriptId, dataDir);
   try {
@@ -58,6 +62,32 @@ export function loadScriptConfig(scriptId: string, dataDir: string): Record<stri
     // file missing or unparseable — return empty
   }
   return {};
+}
+
+export function loadScriptSettings(scriptId: string, dataDir: string): Record<string, unknown> {
+  return loadScriptConfig(scriptId, dataDir);
+}
+
+export function writeScriptConfig(
+  scriptId: string,
+  dataDir: string,
+  data: Record<string, unknown>,
+): void {
+  const filePath = getScriptConfigPath(scriptId, dataDir);
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
+}
+
+export function writeScriptSettings(
+  scriptId: string,
+  dataDir: string,
+  data: Record<string, unknown>,
+): void {
+  writeScriptConfig(scriptId, dataDir, data);
+}
+
+export function loadMergedScriptConfig(scriptId: string, dataDir: string): Record<string, unknown> {
+  return loadScriptConfig(scriptId, dataDir);
 }
 
 export function makeScriptCfg(scriptId: string, dataDir: string) {

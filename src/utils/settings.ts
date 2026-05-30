@@ -77,6 +77,42 @@ export function setValueAtPath(data: Record<string, any>, key: string, value: un
   current[segments[segments.length - 1] as string] = clone(value);
 }
 
+export function deleteValueAtPath(data: Record<string, any>, key: string): void {
+  const segments = getPathSegments(key);
+  if (segments.length === 0) {
+    throw new Error('settings key required');
+  }
+
+  const stack: Array<{ parent: Record<string, any>; segment: string }> = [];
+  let current: Record<string, any> = data;
+
+  for (const segment of segments.slice(0, -1)) {
+    const next = current[segment];
+    if (!next || typeof next !== 'object' || Array.isArray(next)) {
+      return;
+    }
+    stack.push({ parent: current, segment });
+    current = next;
+  }
+
+  delete current[segments[segments.length - 1] as string];
+
+  for (let i = stack.length - 1; i >= 0; i -= 1) {
+    const { parent, segment } = stack[i] as { parent: Record<string, any>; segment: string };
+    const value = parent[segment];
+    if (
+      value &&
+      typeof value === 'object' &&
+      !Array.isArray(value) &&
+      Object.keys(value as Record<string, unknown>).length === 0
+    ) {
+      delete parent[segment];
+      continue;
+    }
+    break;
+  }
+}
+
 function loadSettingsFileSync(filePath: string): Record<string, any> {
   try {
     const content = fs.readFileSync(filePath, 'utf8');

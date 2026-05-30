@@ -25,6 +25,7 @@ describe('TUI_COMMANDS', () => {
       '/marker',
       '/markers',
       '/msg',
+      '/scripts',
       '/settings',
     ];
     for (const cmd of expected) {
@@ -63,6 +64,18 @@ describe('getAutocomplete', () => {
 
   test('/z (no match) → no completion, no hints', () => {
     expect(getAutocomplete('/z')).toEqual({ completion: null, hints: [], completions: [] });
+  });
+
+  test('/hst → completes to /history via fuzzy subsequence match', () => {
+    const result = getAutocomplete('/hst');
+    expect(result.completion).toBe('/history');
+    expect(result.hints[0]).toBe('/history');
+  });
+
+  test('/tube → surfaces /setup-youtube as a fuzzy match', () => {
+    const result = getAutocomplete('/tube');
+    expect(result.completion).toBe('/setup-youtube');
+    expect(result.hints[0]).toBe('/setup-youtube');
   });
 
   // ── unique prefix → single completion ──────────────────────────────────────
@@ -129,7 +142,8 @@ describe('getAutocomplete', () => {
   test('/he → completes to /help', () => {
     const result = getAutocomplete('/he');
     expect(result.completion).toBe('/help');
-    expect(result.hints).toEqual(['/help']);
+    expect(result.hints[0]).toBe('/help');
+    expect(result.hints).toContain('/chatter');
   });
 
   // ── exact match ─────────────────────────────────────────────────────────────
@@ -189,6 +203,12 @@ describe('getAutocomplete', () => {
     expect(hints).toEqual(['/settings']);
   });
 
+  test('/scr → completes to /scripts', () => {
+    const result = getAutocomplete('/scr');
+    expect(result.completion).toBe('/scripts');
+    expect(result.hints).toEqual(['/scripts']);
+  });
+
   test('/chat  → hints clear', () => {
     const result = getAutocomplete('/chat ');
     expect(result.hints).toEqual(['clear']);
@@ -211,6 +231,12 @@ describe('getAutocomplete', () => {
     expect(result.hints).toEqual(['messages']);
   });
 
+  test('/chat clear msg → completes to /chat clear messages via fuzzy substring match', () => {
+    const result = getAutocomplete('/chat clear msg');
+    expect(result.completion).toBe('/chat clear messages');
+    expect(result.hints[0]).toBe('messages');
+  });
+
   test('/markers  → hints restore, clear, all, and providers', () => {
     const result = getAutocomplete('/markers ');
     expect(result.hints).toContain('restore');
@@ -224,7 +250,8 @@ describe('getAutocomplete', () => {
   test('/markers r → completes to /markers restore', () => {
     const result = getAutocomplete('/markers r');
     expect(result.completion).toBe('/markers restore');
-    expect(result.hints).toEqual(['restore']);
+    expect(result.hints[0]).toBe('restore');
+    expect(result.hints).toContain('clear');
   });
 
   test('/markers y → completes to /markers youtube', () => {
@@ -236,13 +263,20 @@ describe('getAutocomplete', () => {
   test('/markers e → completes to /markers edit', () => {
     const result = getAutocomplete('/markers e');
     expect(result.completion).toBe('/markers edit');
-    expect(result.hints).toEqual(['edit']);
+    expect(result.hints[0]).toBe('edit');
+    expect(result.hints).toContain('restore');
   });
 
-  test('/markers clear → only clear hint, no extra completion', () => {
+  test('/markers yt → completes to /markers youtube via fuzzy subsequence match', () => {
+    const result = getAutocomplete('/markers yt');
+    expect(result.completion).toBe('/markers youtube');
+    expect(result.hints[0]).toBe('youtube');
+  });
+
+  test('/markers clear → keeps exact token selected even when fuzzy hints exist', () => {
     const result = getAutocomplete('/markers clear');
-    expect(result.completion).toBeNull();
-    expect(result.hints).toEqual(['clear']);
+    expect(result.completion).toBe('/markers clear');
+    expect(result.hints[0]).toBe('clear');
   });
 
   test('/markers restore  → hints twitch', () => {
@@ -279,5 +313,42 @@ describe('getAutocomplete', () => {
     const result = getAutocomplete('/markers all ');
     expect(result.completion).toBeNull();
     expect(result.hints).toEqual(['<limit>']);
+  });
+
+  test('/scripts  → hints list and install', () => {
+    const result = getAutocomplete('/scripts ');
+    expect(result.hints).toEqual(['list', 'install']);
+  });
+
+  test('/scripts i → completes to /scripts install', () => {
+    const result = getAutocomplete('/scripts i');
+    expect(result.completion).toBe('/scripts install');
+    expect(result.hints[0]).toBe('install');
+    expect(result.hints).toContain('list');
+  });
+
+  test('/scripts install  → hints bundled example ids', () => {
+    const result = getAutocomplete('/scripts install ');
+    expect(result.completion).toBeNull();
+    expect(result.hints).toEqual(['obs-startup', 'obs-source-recaller']);
+  });
+
+  test('/scripts install obs → keeps both obs-* scripts as ambiguous prefix matches', () => {
+    const result = getAutocomplete('/scripts install obs');
+    expect(result.completion).toBeNull();
+    expect(result.hints).toEqual(['obs-startup', 'obs-source-recaller']);
+  });
+
+  test('/scripts install obs-startup  → hints repair flags', () => {
+    const result = getAutocomplete('/scripts install obs-startup ');
+    expect(result.completion).toBeNull();
+    expect(result.hints).toEqual(['repair', 'force']);
+  });
+
+  test('/scripts install obs-startup r → completes to repair', () => {
+    const result = getAutocomplete('/scripts install obs-startup r');
+    expect(result.completion).toBe('/scripts install obs-startup repair');
+    expect(result.hints[0]).toBe('repair');
+    expect(result.hints).toContain('force');
   });
 });

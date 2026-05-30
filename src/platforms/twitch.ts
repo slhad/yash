@@ -294,7 +294,33 @@ export class TwitchProvider implements PlatformProvider {
   // ---------------------------------------------------------------------------
   // Wire up everything once we have valid tokens
   // ---------------------------------------------------------------------------
+  private async teardownRuntime(): Promise<void> {
+    this._stopViewerPoll();
+
+    if (this.chatClient) {
+      try {
+        await this.chatClient.quit();
+      } catch {
+        /* ignore */
+      }
+      this.chatClient = null;
+    }
+
+    if (this.eventSubListener) {
+      try {
+        this.eventSubListener.stop();
+      } catch {
+        /* ignore */
+      }
+      this.eventSubListener = null;
+    }
+
+    this.authProvider = null;
+    this.apiClient = null;
+  }
+
   private async _initFromToken(token: TwitchTokenFile): Promise<void> {
+    await this.teardownRuntime();
     this.authProvider = this.buildAuthProvider(token);
     this.apiClient = new ApiClient({
       authProvider: this.authProvider,
@@ -383,6 +409,9 @@ export class TwitchProvider implements PlatformProvider {
   }
 
   async logout(): Promise<void> {
+    const authProvider = this.authProvider;
+    const userId = this.userId;
+
     this._stopViewerPoll();
 
     if (this.chatClient) {
@@ -403,9 +432,9 @@ export class TwitchProvider implements PlatformProvider {
       this.eventSubListener = null;
     }
 
-    if (this.authProvider && this.userId) {
+    if (authProvider && userId) {
       try {
-        const token = await this.authProvider.getAccessTokenForUser(this.userId);
+        const token = await authProvider.getAccessTokenForUser(userId);
         if (token) {
           await fetch(
             `https://id.twitch.tv/oauth2/revoke?client_id=${this.clientId}&token=${token.accessToken}`,

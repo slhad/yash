@@ -3,34 +3,38 @@
 A yash user script that runs your stream startup sequence as an async 5-phase pipeline:
 **prepare → pre-start wait → stream start → countdown → go live**.
 
-Registers three actions: `obs.startup.begin`, `obs.startup.cancel`, and `obs.startup.status`.
+Registers five actions: `obs.startup.begin`, `obs.startup.cancel`, `obs.startup.status`, `obs.startup.config`, and `obs.startup.configTUI`.
 
 ## Install
 
-Symlink the script and config into your yash scripts directory, then restart yash:
+Symlink the script folder contents into your yash scripts directory, then restart yash:
 
 ```bash
 mkdir -p ~/.config/yash/scripts/obs-startup
 ln -s ~/dev/git/yash/examples/scripts/obs-startup/index.ts \
       ~/.config/yash/scripts/obs-startup/index.ts
+ln -s ~/dev/git/yash/examples/scripts/obs-startup/types.d.ts \
+      ~/.config/yash/scripts/obs-startup/types.d.ts
+ln -s ~/dev/git/yash/examples/scripts/obs-startup/config.ts \
+      ~/.config/yash/scripts/obs-startup/config.ts
 ln -s ~/dev/git/yash/examples/scripts/obs-startup/config.jsonc \
       ~/.config/yash/scripts/obs-startup/config.jsonc
 ```
 
-> **Types note:** `index.ts` imports `./types`, which resolves to the yash-generated
-> `~/.config/yash/scripts/types.d.ts` at runtime. There is no `types.d.ts` in this
-> folder — you do not need to create one.
+`types.d.ts` is a thin local re-export of YASH's generated script types so editors and
+typecheckers can resolve `import type { ScriptApi } from './types'` inside the script folder.
 
 ## Configure
 
-Edit `config.jsonc` (or the symlinked copy in `~/.config/yash/scripts/obs-startup/`):
+Edit `config.jsonc` (or the symlinked copy in `~/.config/yash/scripts/obs-startup/`).
+Live edits from `config` / `configTUI` are written back into that same `config.jsonc`.
 
 ### Prepare phase
 
 | Key | Default | Description |
 |---|---|---|
 | `prepareScene` | `"Starting Soon"` | OBS scene to switch to immediately on startup (required) |
-| `hideSources` | `[]` | Sources to disable in the prepare scene |
+| `hideSources` | `[]` | Scene items to disable. Each entry can be either `<source>` for the prepare scene or `<scene>.<source>` to target a different scene explicitly |
 | `muteSources` | `[]` | Audio inputs to mute during prepare |
 
 ### Stream start phase
@@ -45,7 +49,7 @@ Edit `config.jsonc` (or the symlinked copy in `~/.config/yash/scripts/obs-startu
 | Key | Default | Description |
 |---|---|---|
 | `countdownDelay` | `0` | Seconds to wait before switching to the live scene. `0` skips the countdown entirely |
-| `countdownSource` | `""` | OBS text input source to update with remaining time on each tick. Leave empty to disable |
+| `countdownSource` | `""` | OBS text input source to update with remaining time on each tick. Accepts either `<source>` or `<scene>.<source>`; the scene prefix is only used to resolve the intended source name. Leave empty to disable |
 | `countdownSourceText` | `"{remaining}s"` | Template written to the text source — `{remaining}` is replaced with the seconds left |
 
 ### Go-live phase
@@ -53,7 +57,7 @@ Edit `config.jsonc` (or the symlinked copy in `~/.config/yash/scripts/obs-startu
 | Key | Default | Description |
 |---|---|---|
 | `liveScene` | `"Live"` | OBS scene to switch to when going live (required) |
-| `showSources` | `[]` | Sources to enable in the live scene |
+| `showSources` | `[]` | Scene items to enable. Each entry can be either `<source>` for the live scene or `<scene>.<source>` to target a different scene explicitly |
 | `unmuteSources` | `[]` | Audio inputs to unmute when going live |
 | `liveMessage` | `"We're live!"` | Chat message sent when going live. Set to `""` to disable |
 
@@ -80,9 +84,27 @@ Kicks off the startup sequence. Returns immediately after the prepare phase begi
 
 Cancels the in-progress sequence at whatever phase it is currently in. The prepare scene switch is **not** rolled back — cancelling does not restore the previous scene or re-mute sources.
 
+`hideSources`, `showSources`, and `countdownSource` support explicit `scene.source` references. `muteSources` and `unmuteSources` do not — they still expect plain OBS input names because muting is not scene-specific.
+
 ### `obs.startup.status`
 
 Returns the current state: whether a sequence is active, which phase it is in, and how many seconds remain in the countdown (if applicable).
+
+### `obs.startup.config`
+
+Shows or updates the effective startup defaults directly in `config.jsonc`.
+
+Examples:
+
+```text
+/action obs.startup.config
+/action obs.startup.config prepareScene="[PS] PreLive" liveScene="[PS] Start"
+/action obs.startup.config countdown.delay=60 stream.start=true
+```
+
+### `obs.startup.configTUI`
+
+Opens the live TUI modal for editing the same runtime overrides as `obs.startup.config`. This action is TUI-only and is rejected over IPC.
 
 ## Usage examples
 
@@ -95,6 +117,9 @@ From the yash TUI command bar (using `/action <id>` syntax):
 /action obs.startup.begin startStream=true
 /action obs.startup.begin prepareScene="Starting Soon" liveScene="Main"
 /action obs.startup.begin delay=60 chatMessage=""
+/action obs.startup.config
+/action obs.startup.config countdownDelay=60 startStream=true
+/action obs.startup.configTUI
 /action obs.startup.cancel
 /action obs.startup.status
 ```

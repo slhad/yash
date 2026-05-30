@@ -1,11 +1,13 @@
 import { IpcActionError, registry } from '../actions/registry';
 import { type ActionContext, type ActionResult, IPC_ERROR_CODES } from '../actions/types';
 import { obsService } from '../services';
-import { getDataDir } from '../utils/config';
-import { makeScriptCfg } from '../utils/scriptConfig';
-
-const SCRIPT_ID = 'obs-shutdown';
-const cfg = makeScriptCfg(SCRIPT_ID, getDataDir());
+import {
+  applyObsShutdownConfigPatch,
+  formatObsShutdownConfigValue,
+  getObsShutdownConfigPath,
+  loadObsShutdownEffectiveConfig,
+  OBS_SHUTDOWN_ACTION_ARG_SCHEMA,
+} from '../utils/obsShutdownConfig';
 
 // ─── Shared shutdown state ────────────────────────────────────────────────────
 
@@ -28,15 +30,60 @@ type ShutdownState = { active: false } | ActiveShutdown;
 
 let state: ShutdownState = { active: false };
 
+type SourceTargetRef = {
+  sceneName: string | null;
+  sourceName: string;
+};
+
+function resolveSourceTargetRefFromSceneNames(
+  rawTarget: string,
+  sceneNames: string[],
+): SourceTargetRef {
+  const target = rawTarget.trim();
+  if (!target) return { sceneName: null, sourceName: '' };
+
+  const explicitMatch = sceneNames
+    .filter(
+      (sceneName) => target.startsWith(`${sceneName}.`) && target.length > sceneName.length + 1,
+    )
+    .sort((a, b) => b.length - a.length)[0];
+
+  if (explicitMatch) {
+    return {
+      sceneName: explicitMatch,
+      sourceName: target.slice(explicitMatch.length + 1).trim(),
+    };
+  }
+
+  return { sceneName: null, sourceName: target };
+}
+
+async function resolveSourceTargetRef(rawTarget: string): Promise<SourceTargetRef> {
+  const target = rawTarget.trim();
+  if (!target) return { sceneName: null, sourceName: '' };
+
+  try {
+    const sceneList = await obsService.getSceneList();
+    const sceneNames = Array.isArray(sceneList?.scenes)
+      ? sceneList.scenes.map((scene: { sceneName: string }) => scene.sceneName)
+      : [];
+    return resolveSourceTargetRefFromSceneNames(target, sceneNames);
+  } catch {
+    return { sceneName: null, sourceName: target };
+  }
+}
+
 async function updateSource(
   sourceName: string,
   template: string,
   remaining: number,
 ): Promise<void> {
   if (!sourceName || !obsService.isConnected()) return;
+  const { sourceName: resolvedSourceName } = await resolveSourceTargetRef(sourceName);
+  if (!resolvedSourceName) return;
   const text = template.replace(/\{remaining\}/g, String(remaining));
   try {
-    await obsService.setInputSettings(sourceName, { text });
+    await obsService.setInputSettings(resolvedSourceName, { text });
   } catch {
     // best-effort
   }
@@ -44,8 +91,10 @@ async function updateSource(
 
 async function clearSource(sourceName: string): Promise<void> {
   if (!sourceName || !obsService.isConnected()) return;
+  const { sourceName: resolvedSourceName } = await resolveSourceTargetRef(sourceName);
+  if (!resolvedSourceName) return;
   try {
-    await obsService.setInputSettings(sourceName, { text: '' });
+    await obsService.setInputSettings(resolvedSourceName, { text: '' });
   } catch {
     // best-effort
   }
@@ -59,8 +108,13 @@ async function setSourcesVisible(sources: string[], visible: boolean): Promise<v
   } catch {
     return;
   }
-  for (const sourceName of sources) {
-    for (const sceneName of allScenes) {
+  for (const rawTarget of sources) {
+    const { sceneName: explicitSceneName, sourceName } = resolveSourceTargetRefFromSceneNames(
+      rawTarget,
+      allScenes,
+    );
+    const targetScenes = explicitSceneName ? [explicitSceneName] : allScenes;
+    for (const sceneName of targetScenes) {
       try {
         const id = await obsService.getSceneItemId(sceneName, sourceName);
         await obsService.setSceneItemEnabled(sceneName, id, visible);
@@ -194,18 +248,17 @@ registry.registerAction({
       );
     }
 
-    const delay = (args.delay as number | undefined) ?? cfg('delay', 30);
-    const scene = (args.scene as string | undefined) ?? cfg<string>('scene', '');
-    const template =
-      (args.message as string | undefined) ?? cfg('message', 'Stream ending in {remaining}s!');
-    const chatInterval: number = cfg('chatInterval', 10);
-    const stopStreamAtEnd = cfg('stopStream', true);
-    const countdownSource = (args.source as string | undefined) ?? cfg<string>('source', '');
-    const sourceTemplate =
-      (args.sourceText as string | undefined) ?? cfg('sourceText', '{remaining}');
-    const hideSources: string[] = cfg('hideSources', []);
-    const muteSources: string[] = cfg('muteSources', []);
-    const finalCountdownAt: number = cfg('finalCountdownAt', 0);
+    const config = loadObsShutdownEffectiveConfig();
+    const delay = (args.delay as number | undefined) ?? config.delay;
+    const scene = (args.scene as string | undefined) ?? config.scene;
+    const template = (args.message as string | undefined) ?? config.message;
+    const chatInterval = config.chatInterval;
+    const stopStreamAtEnd = config.stopStream;
+    const countdownSource = (args.source as string | undefined) ?? config.source;
+    const sourceTemplate = (args.sourceText as string | undefined) ?? config.sourceText;
+    const hideSources = config.hideSources;
+    const muteSources = config.muteSources;
+    const finalCountdownAt = config.finalCountdownAt;
 
     if (!scene) {
       throw new IpcActionError(
@@ -285,6 +338,99 @@ registry.registerAction({
         finalCountdownAt: finalCountdownAt || null,
       },
     };
+  },
+});
+
+registry.registerAction({
+  id: 'obs.shutdown.config',
+  title: 'Configure OBS shutdown defaults',
+  description:
+    'Reads or updates the obs-shutdown script config stored in scripts/obs-shutdown/config.jsonc.',
+  domain: 'obs',
+  ipcEnabled: true,
+  readOnly: false,
+  safety: 'safe',
+  visibility: 'public',
+  voiceHint: true,
+  argMode: 'kv_pairs',
+  args: OBS_SHUTDOWN_ACTION_ARG_SCHEMA,
+  examples: [
+    { args: {}, description: 'Show the effective obs-shutdown settings' },
+    { args: { delay: 45, stopStream: false }, description: 'Update delay and stop behavior' },
+    {
+      args: { scene: '[PS] End', source: '[TXT] Countdown' },
+      description: 'Set scene and countdown source defaults',
+    },
+  ],
+  async invoke(args): Promise<ActionResult> {
+    if (Object.keys(args).length === 0) {
+      const config = loadObsShutdownEffectiveConfig();
+      return {
+        output: [
+          `[obs-shutdown] config path → ${getObsShutdownConfigPath()}`,
+          ...Object.entries(config).map(
+            ([key, value]) =>
+              `[obs-shutdown] ${key} → ${formatObsShutdownConfigValue(
+                key as keyof typeof config,
+                value,
+              )}`,
+          ),
+        ],
+        data: {
+          configPath: getObsShutdownConfigPath(),
+          ...config,
+        },
+      };
+    }
+
+    const result = applyObsShutdownConfigPatch(args);
+    if (result.errors.length > 0) {
+      throw new IpcActionError(IPC_ERROR_CODES.INVALID_ARGS, result.errors.join('; '), {
+        errors: result.errors,
+      });
+    }
+
+    return {
+      output:
+        result.changedKeys.length > 0
+          ? [
+              `[obs-shutdown] updated overrides: ${result.changedKeys.join(', ')}`,
+              `[obs-shutdown] config path → ${getObsShutdownConfigPath()}`,
+            ]
+          : ['[obs-shutdown] no changes'],
+      warnings: state.active
+        ? ['A countdown is already running; saved defaults apply on the next start.']
+        : undefined,
+      data: {
+        changedKeys: result.changedKeys,
+        configPath: getObsShutdownConfigPath(),
+        ...result.effectiveConfig,
+      },
+    };
+  },
+});
+
+registry.registerAction({
+  id: 'obs.shutdown.configTUI',
+  title: 'Open OBS shutdown config modal',
+  description: 'Opens a TUI modal for editing obs-shutdown script runtime overrides.',
+  domain: 'obs',
+  ipcEnabled: false,
+  readOnly: false,
+  safety: 'safe',
+  visibility: 'public',
+  voiceHint: true,
+  args: {},
+  examples: [{ args: {}, description: 'Open the OBS shutdown config modal in the TUI' }],
+  async invoke(_args, ctx): Promise<ActionResult> {
+    if (!ctx.ui?.openObsShutdownConfigModal) {
+      throw new IpcActionError(
+        IPC_ERROR_CODES.NOT_SUPPORTED_IN_CURRENT_STATE,
+        'This action requires the TUI',
+      );
+    }
+    ctx.ui.openObsShutdownConfigModal();
+    return { output: ['[obs-shutdown] opened config modal'] };
   },
 });
 

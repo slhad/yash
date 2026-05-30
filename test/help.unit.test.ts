@@ -16,6 +16,10 @@ describe('shared help metadata', () => {
     expect(commands.find((entry) => entry.command === '/connect')).toMatchObject({
       usage: '/connect <youtube|twitch|kick>',
     });
+    expect(commands.find((entry) => entry.command === '/scripts')).toMatchObject({
+      usage: '/scripts [list|install <example-id> [repair|force]]',
+      example: '/scripts install obs-startup repair',
+    });
   });
 
   test('tui help renders shared lines including tui-only commands', () => {
@@ -32,6 +36,9 @@ describe('shared help metadata', () => {
     );
     expect(lines).toContain(
       '[help]   /markers restore twitch [limit] | clear [all|ids] | edit <id> | [all|youtube|twitch|kick] [limit]  — List, restore, edit, or clear YouTube chapters',
+    );
+    expect(lines).toContain(
+      '[help]   /scripts [list|install <example-id> [repair|force]]  — List, install, or repair bundled example scripts',
     );
   });
 });

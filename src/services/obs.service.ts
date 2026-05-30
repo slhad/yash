@@ -6,6 +6,7 @@ import { defaultLogger } from '../utils/logger';
 import { metrics } from '../utils/metrics';
 
 export class ObsService {
+  private static readonly MAX_SCHEDULED_HISTORY = 100;
   private connected: boolean = false;
   private connectionPromise: Promise<void> | null = null;
   // Scheduled reconnect timer (replaces the old interval-based approach)
@@ -386,12 +387,52 @@ export class ObsService {
           scenes: [{ sceneName: 'Scene 1' }, { sceneName: 'Scene 2' }],
           currentProgramSceneName: 'Scene 1',
         };
+      case 'GetCurrentProgramScene':
+        return { currentProgramSceneName: 'Scene 1' };
+      case 'GetSceneItemList':
+        return {
+          sceneItems: [
+            { sceneItemId: 7, sourceName: 'Camera', sourceType: 'OBS_SOURCE_TYPE_INPUT' },
+            { sceneItemId: 8, sourceName: 'Overlay', sourceType: 'OBS_SOURCE_TYPE_INPUT' },
+          ],
+        };
+      case 'GetInputSettings':
+        return {
+          inputName: requestData.inputName ?? 'Input 1',
+          inputKind: 'text_gdiplus_v2',
+          inputSettings: {},
+        };
       case 'SetCurrentProgramScene':
         return {};
       case 'StartStream':
         return {};
       case 'StopStream':
         return {};
+      case 'GetSceneItemEnabled':
+        return { sceneItemEnabled: true };
+      case 'GetSceneItemTransform':
+        return {
+          sceneItemTransform: {
+            positionX: 0,
+            positionY: 0,
+            scaleX: 1,
+            scaleY: 1,
+            rotation: 0,
+            sourceWidth: 1920,
+            sourceHeight: 1080,
+            width: 1920,
+            height: 1080,
+            cropLeft: 0,
+            cropTop: 0,
+            cropRight: 0,
+            cropBottom: 0,
+            boundsType: 'OBS_BOUNDS_NONE',
+            boundsAlignment: 0,
+            boundsWidth: 0,
+            boundsHeight: 0,
+            alignment: 5,
+          },
+        };
       case 'GetStreamStatus':
         return {
           outputActive: false,
@@ -426,6 +467,15 @@ export class ObsService {
     return () => {
       this.messageCallbacks = this.messageCallbacks.filter((cb) => cb !== callback);
     };
+  }
+
+  subscribeToCurrentSceneChanges(callback: (sceneName: string, event: any) => void): () => void {
+    return this.subscribeToMessages((event) => {
+      if (event?.eventType !== 'CurrentProgramSceneChanged') return;
+      const sceneName = event?.eventData?.sceneName;
+      if (typeof sceneName !== 'string' || sceneName.length === 0) return;
+      callback(sceneName, event);
+    });
   }
 
   private notifyStatusChange(connected: boolean): void {
@@ -488,6 +538,12 @@ export class ObsService {
     const entry = { delay, attempt: attemptNum };
     this.lastScheduledInfo = entry;
     this.scheduledHistory.push(entry);
+    if (this.scheduledHistory.length > ObsService.MAX_SCHEDULED_HISTORY) {
+      this.scheduledHistory.splice(
+        0,
+        this.scheduledHistory.length - ObsService.MAX_SCHEDULED_HISTORY,
+      );
+    }
     this.reconnectTimer = setTimeout(() => {
       // clear the timer handle first
       this.reconnectTimer = null;
@@ -581,8 +637,43 @@ export class ObsService {
     return this.sendRequest('GetSceneList');
   }
 
+  async getCurrentScene(): Promise<string> {
+    const res = await this.sendRequest('GetCurrentProgramScene');
+    return res.currentProgramSceneName as string;
+  }
+
   async setCurrentScene(sceneName: string): Promise<void> {
     return this.sendRequest('SetCurrentProgramScene', { sceneName });
+  }
+
+  async getInputSettings(inputName: string): Promise<Record<string, unknown>> {
+    const res = await this.sendRequest('GetInputSettings', { inputName });
+    return (res.inputSettings ?? {}) as Record<string, unknown>;
+  }
+
+  async getSceneItemList(
+    sceneName: string,
+  ): Promise<Array<{ sceneItemId: number; sourceName: string; sourceType?: string }>> {
+    type SceneItemRecord = {
+      sceneItemId: number;
+      sourceName: string;
+      sourceType?: string;
+    };
+    const res = await this.sendRequest('GetSceneItemList', { sceneName });
+    const sceneItems: unknown[] = Array.isArray(res.sceneItems) ? res.sceneItems : [];
+    return sceneItems
+      .filter(
+        (item): item is SceneItemRecord =>
+          typeof item === 'object' &&
+          item !== null &&
+          typeof (item as Record<string, unknown>).sceneItemId === 'number' &&
+          typeof (item as Record<string, unknown>).sourceName === 'string',
+      )
+      .map((item) => ({
+        sceneItemId: item.sceneItemId,
+        sourceName: item.sourceName,
+        sourceType: typeof item.sourceType === 'string' ? item.sourceType : undefined,
+      }));
   }
 
   async setInputSettings(inputName: string, inputSettings: Record<string, unknown>): Promise<void> {
@@ -596,6 +687,47 @@ export class ObsService {
   async getSceneItemId(sceneName: string, sourceName: string): Promise<number> {
     const res = await this.sendRequest('GetSceneItemId', { sceneName, sourceName });
     return res.sceneItemId as number;
+  }
+
+  async getSceneItemEnabled(sceneName: string, sceneItemId: number): Promise<boolean> {
+    const res = await this.sendRequest('GetSceneItemEnabled', { sceneName, sceneItemId });
+    return Boolean(res.sceneItemEnabled);
+  }
+
+  async getSceneItemTransform(
+    sceneName: string,
+    sceneItemId: number,
+  ): Promise<Record<string, unknown>> {
+    const res = await this.sendRequest('GetSceneItemTransform', { sceneName, sceneItemId });
+    return (res.sceneItemTransform ?? {}) as Record<string, unknown>;
+  }
+
+  async getSceneItemState(
+    sceneName: string,
+    sourceName: string,
+  ): Promise<{
+    sceneItemId: number;
+    sceneItemEnabled: boolean;
+    sceneItemTransform: Record<string, unknown>;
+  }> {
+    const sceneItemId = await this.getSceneItemId(sceneName, sourceName);
+    const [sceneItemEnabled, sceneItemTransform] = await Promise.all([
+      this.getSceneItemEnabled(sceneName, sceneItemId),
+      this.getSceneItemTransform(sceneName, sceneItemId),
+    ]);
+    return { sceneItemId, sceneItemEnabled, sceneItemTransform };
+  }
+
+  async setSceneItemTransform(
+    sceneName: string,
+    sceneItemId: number,
+    sceneItemTransform: Record<string, unknown>,
+  ): Promise<void> {
+    return this.sendRequest('SetSceneItemTransform', {
+      sceneName,
+      sceneItemId,
+      sceneItemTransform,
+    });
   }
 
   async setSceneItemEnabled(

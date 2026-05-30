@@ -1,10 +1,15 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { IpcActionError, registry } from '../actions/registry';
-import { IPC_ERROR_CODES, type YashActionDefinition } from '../actions/types';
-import { chatService, obsService, settingsStore } from '../services';
+import {
+  type ActionArgMode,
+  IPC_ERROR_CODES,
+  type ScriptConfigModalSpec,
+  type YashActionDefinition,
+} from '../actions/types';
+import { chatService, obsService } from '../services';
 import { defaultLogger } from '../utils/logger';
-import { getValueAtPath, loadScriptConfig } from '../utils/scriptConfig';
+import { getValueAtPath, loadScriptConfig, writeScriptConfig } from '../utils/scriptConfig';
 
 // ─── Types (mirrored in ~/.config/yash/scripts/types.d.ts for user IDE support) ──
 
@@ -25,21 +30,60 @@ export type UserScriptAction = {
   title: string;
   description: string;
   domain: string;
+  ipcEnabled?: boolean;
   readOnly?: boolean;
   voiceHint?: boolean;
+  argMode?: ActionArgMode;
   args?: Record<string, UserScriptArgSchema>;
   examples?: Array<{ args: Record<string, unknown>; description?: string }>;
-  invoke: (args: Record<string, unknown>) => Promise<UserScriptResult>;
+  invoke: (
+    args: Record<string, unknown>,
+    ctx?: UserScriptActionContext,
+  ) => Promise<UserScriptResult>;
+};
+
+export type UserScriptActionContext = {
+  emit?: (line: string) => void;
+  ui?: {
+    openScriptConfigModal?: (spec: ScriptConfigModalSpec) => void;
+  };
 };
 
 export type ScriptApi = {
   registerAction: (action: UserScriptAction) => void;
   obs: {
     isConnected: () => boolean;
+    getSceneList: () => Promise<{
+      scenes: Array<{ sceneName: string }>;
+      currentProgramSceneName?: string;
+    }>;
+    getCurrentScene: () => Promise<string>;
     setCurrentScene: (name: string) => Promise<void>;
+    getInputSettings: (inputName: string) => Promise<Record<string, unknown>>;
+    getSceneItemList: (
+      sceneName: string,
+    ) => Promise<Array<{ sceneItemId: number; sourceName: string; sourceType?: string }>>;
     setInputSettings: (inputName: string, inputSettings: Record<string, unknown>) => Promise<void>;
     setInputMute: (inputName: string, muted: boolean) => Promise<void>;
     getSceneItemId: (sceneName: string, sourceName: string) => Promise<number>;
+    getSceneItemEnabled: (sceneName: string, sceneItemId: number) => Promise<boolean>;
+    getSceneItemTransform: (
+      sceneName: string,
+      sceneItemId: number,
+    ) => Promise<Record<string, unknown>>;
+    getSceneItemState: (
+      sceneName: string,
+      sourceName: string,
+    ) => Promise<{
+      sceneItemId: number;
+      sceneItemEnabled: boolean;
+      sceneItemTransform: Record<string, unknown>;
+    }>;
+    setSceneItemTransform: (
+      sceneName: string,
+      sceneItemId: number,
+      sceneItemTransform: Record<string, unknown>,
+    ) => Promise<void>;
     setSceneItemEnabled: (
       sceneName: string,
       sceneItemId: number,
@@ -48,6 +92,7 @@ export type ScriptApi = {
     stopStream: () => Promise<void>;
     startStream: () => Promise<void>;
     subscribeToStatusChanges: (cb: (connected: boolean) => void) => () => void;
+    subscribeToSceneChanges: (cb: (sceneName: string, event: unknown) => void) => () => void;
   };
   chat: {
     sendMessage: (msg: string, platforms?: string[]) => Promise<void>;
@@ -82,10 +127,10 @@ function forceRegister(def: YashActionDefinition): void {
 // ─── ScriptApi factory ────────────────────────────────────────────────────────
 
 function createScriptApi(scriptId: string, cleanupFns: (() => void)[], dataDir: string): ScriptApi {
-  let cachedConfig: Record<string, unknown> | null = null;
-  function scriptConfig(): Record<string, unknown> {
-    if (!cachedConfig) cachedConfig = loadScriptConfig(scriptId, dataDir);
-    return cachedConfig;
+  let cachedScriptData: Record<string, unknown> | null = null;
+  function scriptData(): Record<string, unknown> {
+    if (!cachedScriptData) cachedScriptData = loadScriptConfig(scriptId, dataDir);
+    return cachedScriptData;
   }
   return {
     registerAction(action: UserScriptAction): void {
@@ -94,9 +139,14 @@ function createScriptApi(scriptId: string, cleanupFns: (() => void)[], dataDir: 
         defaultLogger.warn(`[user-scripts] "${scriptId}" overrides existing action "${action.id}"`);
       }
 
-      const wrappedInvoke: YashActionDefinition['invoke'] = async (args, _ctx) => {
+      const wrappedInvoke: YashActionDefinition['invoke'] = async (args, ctx) => {
         try {
-          return await action.invoke(args);
+          return await action.invoke(args, {
+            emit: ctx.emit,
+            ui: {
+              openScriptConfigModal: ctx.ui?.openScriptConfigModal,
+            },
+          });
         } catch (err) {
           defaultLogger.error(`[user-scripts] action "${action.id}" failed: ${String(err)}`);
           throw new IpcActionError(
@@ -111,11 +161,12 @@ function createScriptApi(scriptId: string, cleanupFns: (() => void)[], dataDir: 
         title: action.title,
         description: action.description,
         domain: action.domain,
-        ipcEnabled: true,
+        ipcEnabled: action.ipcEnabled ?? true,
         readOnly: action.readOnly ?? false,
         safety: 'safe',
         visibility: 'public',
         voiceHint: action.voiceHint,
+        argMode: action.argMode,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         args: (action.args ?? {}) as any,
         examples: action.examples,
@@ -131,17 +182,34 @@ function createScriptApi(scriptId: string, cleanupFns: (() => void)[], dataDir: 
 
     obs: {
       isConnected: () => obsService.isConnected(),
+      getSceneList: () => obsService.getSceneList(),
+      getCurrentScene: () => obsService.getCurrentScene(),
       setCurrentScene: (name) => obsService.setCurrentScene(name),
+      getInputSettings: (inputName) => obsService.getInputSettings(inputName),
+      getSceneItemList: (sceneName) => obsService.getSceneItemList(sceneName),
       setInputSettings: (inputName, inputSettings) =>
         obsService.setInputSettings(inputName, inputSettings),
       setInputMute: (inputName, muted) => obsService.setInputMute(inputName, muted),
       getSceneItemId: (sceneName, sourceName) => obsService.getSceneItemId(sceneName, sourceName),
+      getSceneItemEnabled: (sceneName, sceneItemId) =>
+        obsService.getSceneItemEnabled(sceneName, sceneItemId),
+      getSceneItemTransform: (sceneName, sceneItemId) =>
+        obsService.getSceneItemTransform(sceneName, sceneItemId),
+      getSceneItemState: (sceneName, sourceName) =>
+        obsService.getSceneItemState(sceneName, sourceName),
+      setSceneItemTransform: (sceneName, sceneItemId, sceneItemTransform) =>
+        obsService.setSceneItemTransform(sceneName, sceneItemId, sceneItemTransform),
       setSceneItemEnabled: (sceneName, sceneItemId, enabled) =>
         obsService.setSceneItemEnabled(sceneName, sceneItemId, enabled),
       stopStream: () => obsService.stopStream(),
       startStream: () => obsService.startStream(),
       subscribeToStatusChanges: (cb) => {
         const unsub = obsService.subscribeToStatusChanges(cb);
+        cleanupFns.push(unsub);
+        return unsub;
+      },
+      subscribeToSceneChanges: (cb) => {
+        const unsub = obsService.subscribeToCurrentSceneChanges(cb);
         cleanupFns.push(unsub);
         return unsub;
       },
@@ -152,9 +220,32 @@ function createScriptApi(scriptId: string, cleanupFns: (() => void)[], dataDir: 
     },
 
     settings: {
-      get: <T>(key: string, defaultVal: T): T =>
-        (getValueAtPath(scriptConfig(), key, defaultVal) as T) ?? defaultVal,
-      set: (key, value) => settingsStore.set(`scripts.${scriptId}.${key}`, value),
+      get: <T>(key: string, defaultVal: T): T => {
+        const value = getValueAtPath(scriptData(), key, undefined);
+        return (value as T | undefined) ?? defaultVal;
+      },
+      set: async (key, value) => {
+        const nextSettings = JSON.parse(JSON.stringify(scriptData())) as Record<string, unknown>;
+        const segments = key
+          .split('.')
+          .map((segment) => segment.trim())
+          .filter(Boolean);
+        if (segments.length === 0) {
+          throw new Error('settings key required');
+        }
+
+        let current: Record<string, unknown> = nextSettings;
+        for (const segment of segments.slice(0, -1)) {
+          const next = current[segment];
+          if (!next || typeof next !== 'object' || Array.isArray(next)) {
+            current[segment] = {};
+          }
+          current = current[segment] as Record<string, unknown>;
+        }
+        current[segments[segments.length - 1] as string] = JSON.parse(JSON.stringify(value));
+        writeScriptConfig(scriptId, dataDir, nextSettings);
+        cachedScriptData = nextSettings;
+      },
     },
 
     logger: {
@@ -170,7 +261,8 @@ function createScriptApi(scriptId: string, cleanupFns: (() => void)[], dataDir: 
 const README_CONTENT = `# yash user scripts
 
 Place \`.ts\` or \`.js\` files here. Each file is loaded at startup and can register
-IPC-accessible actions (available to TUI, WebUI, and yash-voice-bridge).
+actions for TUI/IPC use. Actions are IPC-accessible by default unless they set
+\`ipcEnabled: false\`.
 
 ## Script structure
 
@@ -199,9 +291,10 @@ export default function setup(api) {
 ## Available API (passed as first argument to setup)
 
 - \`api.registerAction(action)\` — register an IPC-accessible action
-- \`api.obs\` — isConnected(), setCurrentScene(name), stopStream(), startStream(), subscribeToStatusChanges(cb)
+- action \`invoke(args, ctx?)\` receives an optional runtime context; TUI-only actions can use \`ctx.ui?.openScriptConfigModal(...)\`
+- \`api.obs\` — scene queries, input/source state helpers, scene-item transform/enabled helpers, scene-change subscription, plus stream controls
 - \`api.chat\` — sendMessage(text, platforms?)
-- \`api.settings\` — get(key, default), set(key, value)  [namespaced to scripts.<filename>.*]
+- \`api.settings\` — get(key, default), set(key, value)  [reads and writes the script-local config.jsonc in the same script folder]
 - \`api.logger\` — info/warn/error  [prefixed with [script:<filename>]]
 
 ## Cleanup
@@ -228,6 +321,8 @@ Create the file (JSONC = JSON with // and /* */ comments):
 \`\`\`
 
 Read it in your script with \`api.settings.get('myKey', defaultValue)\`.
+Values written later with \`api.settings.set('myKey', value)\` persist back into
+\`~/.config/yash/scripts/<scriptId>/config.jsonc\`.
 
 ## Notes
 
@@ -256,9 +351,15 @@ Configure in \`~/.config/yash/scripts/obs-shutdown/config.jsonc\`:
   // Whether to stop the OBS stream when the countdown reaches zero
   "stopStream": true,
   // OBS text source to update with remaining time on each tick (optional)
+  // Accepts either "<source>" or "<scene>.<source>" when the source name needs scene-based disambiguation
   "source": "CountdownText",
   // Text source template — {remaining} is replaced by seconds left
-  "sourceText": "{remaining}s"
+  "sourceText": "{remaining}s",
+  // Optional source refs to hide during the countdown
+  // Plain "<source>" searches all scenes; explicit "<scene>.<source>" only touches that scene item
+  "hideSources": ["Gameplay.Camera"],
+  // Optional OBS inputs to mute during the countdown
+  "muteSources": ["Mic/Aux"]
 }
 \`\`\`
 
@@ -267,8 +368,10 @@ Configure in \`~/.config/yash/scripts/obs-shutdown/config.jsonc\`:
 - \`message\` — chat message template; \`{remaining}\` is replaced by seconds left (default: "Stream ending in {remaining}s!")
 - \`chatInterval\` — how often to post a countdown message, in seconds (default: 10)
 - \`stopStream\` — whether to stop the OBS stream when the countdown reaches zero (default: true)
-- \`source\` — OBS text source name to update with the remaining time on each tick (optional; leave empty to disable)
+- \`source\` — OBS text source name to update with the remaining time on each tick (optional; accepts \`<source>\` or \`<scene>.<source>\`; the scene qualifier only resolves the intended source name)
 - \`sourceText\` — text source template; \`{remaining}\` is replaced by seconds left (default: "{remaining}")
+- \`hideSources\` — optional source refs to hide during the countdown; plain \`<source>\` searches every scene, explicit \`<scene>.<source>\` targets one scene item
+- \`muteSources\` — optional OBS inputs to mute during the countdown
 
 All settings can also be overridden per-call via action args (e.g. \`obs.shutdown.initiate scene="BRB" delay=60\`).
 `;
@@ -293,25 +396,52 @@ export type UserScriptAction = {
   title: string;
   description: string;
   domain: string;
+  ipcEnabled?: boolean;
   readOnly?: boolean;
   voiceHint?: boolean;
+  argMode?: 'schema' | 'kv_pairs';
   args?: Record<string, UserScriptArgSchema>;
   examples?: Array<{ args: Record<string, unknown>; description?: string }>;
-  invoke: (args: Record<string, unknown>) => Promise<UserScriptResult>;
+  invoke: (args: Record<string, unknown>, ctx?: UserScriptActionContext) => Promise<UserScriptResult>;
+};
+
+export type UserScriptActionContext = {
+  emit?: (line: string) => void;
+  ui?: {
+    openScriptConfigModal?: (spec: {
+      title: string;
+      intro: string;
+      prefix: string;
+      fields: Array<
+        | { key: string; kind: 'text'; label: string; description: string; value: string; placeholder?: string }
+        | { key: string; kind: 'toggle'; label: string; description: string; value: boolean }
+      >;
+      onSave: (values: Record<string, unknown>) => Promise<{ changedKeys: string[]; errors?: string[] }>;
+    }) => void;
+  };
 };
 
 export type ScriptApi = {
   registerAction: (action: UserScriptAction) => void;
   obs: {
     isConnected: () => boolean;
+    getSceneList: () => Promise<{ scenes: Array<{ sceneName: string }>; currentProgramSceneName?: string }>;
+    getCurrentScene: () => Promise<string>;
     setCurrentScene: (name: string) => Promise<void>;
+    getInputSettings: (inputName: string) => Promise<Record<string, unknown>>;
+    getSceneItemList: (sceneName: string) => Promise<Array<{ sceneItemId: number; sourceName: string; sourceType?: string }>>;
     setInputSettings: (inputName: string, inputSettings: Record<string, unknown>) => Promise<void>;
     setInputMute: (inputName: string, muted: boolean) => Promise<void>;
     getSceneItemId: (sceneName: string, sourceName: string) => Promise<number>;
+    getSceneItemEnabled: (sceneName: string, sceneItemId: number) => Promise<boolean>;
+    getSceneItemTransform: (sceneName: string, sceneItemId: number) => Promise<Record<string, unknown>>;
+    getSceneItemState: (sceneName: string, sourceName: string) => Promise<{ sceneItemId: number; sceneItemEnabled: boolean; sceneItemTransform: Record<string, unknown> }>;
+    setSceneItemTransform: (sceneName: string, sceneItemId: number, sceneItemTransform: Record<string, unknown>) => Promise<void>;
     setSceneItemEnabled: (sceneName: string, sceneItemId: number, enabled: boolean) => Promise<void>;
     stopStream: () => Promise<void>;
     startStream: () => Promise<void>;
     subscribeToStatusChanges: (cb: (connected: boolean) => void) => () => void;
+    subscribeToSceneChanges: (cb: (sceneName: string, event: unknown) => void) => () => void;
   };
   chat: {
     sendMessage: (msg: string, platforms?: string[]) => Promise<void>;
@@ -328,8 +458,14 @@ export type ScriptApi = {
 };
 `;
 
-function writeFileIfMissing(filePath: string, content: string): void {
-  if (fs.existsSync(filePath)) return;
+function writeGeneratedFile(filePath: string, content: string): void {
+  if (fs.existsSync(filePath)) {
+    try {
+      if (fs.readFileSync(filePath, 'utf8') === content) return;
+    } catch {
+      // fall through and rewrite
+    }
+  }
   try {
     fs.writeFileSync(filePath, content, 'utf8');
   } catch {
@@ -343,8 +479,8 @@ export async function loadUserScripts(dataDir: string): Promise<void> {
   const dir = path.join(dataDir, 'scripts');
 
   fs.mkdirSync(dir, { recursive: true });
-  writeFileIfMissing(path.join(dir, 'README.md'), README_CONTENT);
-  writeFileIfMissing(path.join(dir, 'types.d.ts'), TYPES_DTS_CONTENT);
+  writeGeneratedFile(path.join(dir, 'README.md'), README_CONTENT);
+  writeGeneratedFile(path.join(dir, 'types.d.ts'), TYPES_DTS_CONTENT);
 
   let entries: fs.Dirent[];
   try {

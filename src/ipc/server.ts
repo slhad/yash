@@ -62,7 +62,7 @@ export function startIpcServer(
     }
   };
 
-  process.on('exit', cleanup);
+  process.once('exit', cleanup);
 }
 
 export async function handleRequest(

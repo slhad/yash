@@ -156,6 +156,38 @@ export class ActionRegistry {
 
     return def.invoke(args, ctx);
   }
+
+  async invokeLocalAction(
+    id: string,
+    args: Record<string, unknown>,
+    ctx: ActionContext,
+  ): Promise<ActionResult> {
+    const def = this.actions.get(id);
+
+    if (!def) {
+      throw new IpcActionError(IPC_ERROR_CODES.UNKNOWN_ACTION, `Unknown action: ${id}`);
+    }
+
+    if (def.safety === 'blocked') {
+      throw new IpcActionError(IPC_ERROR_CODES.ACTION_BLOCKED, `Action "${id}" is blocked`);
+    }
+
+    if (def.safety === 'confirm') {
+      throw new IpcActionError(
+        IPC_ERROR_CODES.REQUIRES_CONFIRMATION,
+        `Action "${id}" requires confirmation before it can be invoked`,
+      );
+    }
+
+    const { valid, errors } = this.validateArgs(def, args);
+    if (!valid) {
+      throw new IpcActionError(IPC_ERROR_CODES.INVALID_ARGS, 'Invalid args', {
+        errors,
+      });
+    }
+
+    return def.invoke(args, ctx);
+  }
 }
 
 export const registry = new ActionRegistry();

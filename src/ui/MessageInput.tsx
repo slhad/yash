@@ -20,6 +20,34 @@ const btnStyle: React.CSSProperties = {
   borderRadius: '3px',
 };
 
+const MAX_SENT_HISTORY = 100;
+const MESSAGE_HISTORY_STORAGE_KEY = 'yash_web_message_history';
+
+function loadStoredMessageHistory(): string[] {
+  try {
+    const raw = window.localStorage.getItem(MESSAGE_HISTORY_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((entry): entry is string => typeof entry === 'string')
+      .map((entry) => entry.trim())
+      .filter(Boolean)
+      .slice(-MAX_SENT_HISTORY);
+  } catch {
+    return [];
+  }
+}
+
+function saveStoredMessageHistory(entries: string[]): void {
+  try {
+    window.localStorage.setItem(
+      MESSAGE_HISTORY_STORAGE_KEY,
+      JSON.stringify(entries.slice(-MAX_SENT_HISTORY)),
+    );
+  } catch {}
+}
+
 export const MessageInput: React.FC<MessageInputProps> = ({
   onSendMessage,
   platforms,
@@ -30,15 +58,21 @@ export const MessageInput: React.FC<MessageInputProps> = ({
   placeholder = 'Type a message or /help for commands…',
 }) => {
   const [message, setMessage] = useState('');
-  const historyRef = useRef<string[]>([]);
+  const historyRef = useRef<string[]>(loadStoredMessageHistory());
   const historyIdxRef = useRef(-1);
+  const draftBeforeHistoryRef = useRef('');
 
   const hint = getWebAutocomplete(message);
 
   const handleSend = async () => {
     if (message.trim()) {
       historyRef.current.push(message.trim());
+      if (historyRef.current.length > MAX_SENT_HISTORY) {
+        historyRef.current.splice(0, historyRef.current.length - MAX_SENT_HISTORY);
+      }
+      saveStoredMessageHistory(historyRef.current);
       historyIdxRef.current = -1;
+      draftBeforeHistoryRef.current = '';
       await onSendMessage(message, sendToAll ? [] : selectedPlatforms);
       setMessage('');
     }
@@ -53,8 +87,10 @@ export const MessageInput: React.FC<MessageInputProps> = ({
       e.preventDefault();
       const history = historyRef.current;
       if (history.length === 0) return;
-      if (historyIdxRef.current === -1) historyIdxRef.current = history.length - 1;
-      else if (historyIdxRef.current > 0) historyIdxRef.current--;
+      if (historyIdxRef.current === -1) {
+        draftBeforeHistoryRef.current = message;
+        historyIdxRef.current = history.length - 1;
+      } else if (historyIdxRef.current > 0) historyIdxRef.current--;
       setMessage(history[historyIdxRef.current] ?? '');
       return;
     }
@@ -65,7 +101,7 @@ export const MessageInput: React.FC<MessageInputProps> = ({
       historyIdxRef.current++;
       if (historyIdxRef.current >= history.length) {
         historyIdxRef.current = -1;
-        setMessage('');
+        setMessage(draftBeforeHistoryRef.current);
       } else {
         setMessage(history[historyIdxRef.current] ?? '');
       }
@@ -136,6 +172,7 @@ export const MessageInput: React.FC<MessageInputProps> = ({
         value={message}
         onChange={(e) => {
           historyIdxRef.current = -1;
+          draftBeforeHistoryRef.current = '';
           setMessage(e.target.value);
         }}
         placeholder={placeholder}

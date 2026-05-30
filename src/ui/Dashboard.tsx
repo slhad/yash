@@ -120,56 +120,86 @@ export const Dashboard: React.FC<DashboardProps> = ({
   }, [platforms]);
 
   useEffect(() => {
+    let cancelled = false;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
     const updateStatuses = async () => {
-      const newAuthStatus: Record<string, boolean> = {};
-      const newStreamStatus: Record<string, string> = {};
-      const newConnectionStatus: Record<string, string> = {};
-      const newLastError: Record<string, string | undefined> = {};
-
-      for (const platform of platforms) {
-        try {
-          const status = getPlatformStatus(platform);
-          newAuthStatus[platform] = status.authenticated;
-          newStreamStatus[platform] = status.streamStatus;
-          newConnectionStatus[platform] = status.connectionStatus;
-          newLastError[platform] = status.lastError;
-        } catch (error) {
-          newAuthStatus[platform] = false;
-          newStreamStatus[platform] = 'ERROR';
-          newConnectionStatus[platform] = 'disconnected';
-          newLastError[platform] =
-            (error instanceof Error ? error.message : null) || 'Unknown error';
-        }
-      }
-
-      setAuthStatus(newAuthStatus);
-      setStreamStatus(newStreamStatus);
-      setConnectionStatus(newConnectionStatus);
-      setLastError(newLastError);
-
+      if (cancelled) return;
       try {
-        setObsConnected(getObsStatus());
-      } catch {
-        setObsConnected(false);
+        const newAuthStatus: Record<string, boolean> = {};
+        const newStreamStatus: Record<string, string> = {};
+        const newConnectionStatus: Record<string, string> = {};
+        const newLastError: Record<string, string | undefined> = {};
+
+        for (const platform of platforms) {
+          try {
+            const status = getPlatformStatus(platform);
+            newAuthStatus[platform] = status.authenticated;
+            newStreamStatus[platform] = status.streamStatus;
+            newConnectionStatus[platform] = status.connectionStatus;
+            newLastError[platform] = status.lastError;
+          } catch (error) {
+            newAuthStatus[platform] = false;
+            newStreamStatus[platform] = 'ERROR';
+            newConnectionStatus[platform] = 'disconnected';
+            newLastError[platform] =
+              (error instanceof Error ? error.message : null) || 'Unknown error';
+          }
+        }
+
+        setAuthStatus(newAuthStatus);
+        setStreamStatus(newStreamStatus);
+        setConnectionStatus(newConnectionStatus);
+        setLastError(newLastError);
+
+        try {
+          setObsConnected(getObsStatus());
+        } catch {
+          setObsConnected(false);
+        }
+      } finally {
+        if (!cancelled) {
+          timeoutId = setTimeout(() => {
+            void updateStatuses();
+          }, 5000);
+        }
       }
     };
 
-    const interval = setInterval(updateStatuses, 5000);
-    updateStatuses();
+    void updateStatuses();
 
-    return () => clearInterval(interval);
+    return () => {
+      cancelled = true;
+      if (timeoutId) clearTimeout(timeoutId);
+    };
   }, [platforms, getPlatformStatus, getObsStatus]);
 
   useEffect(() => {
+    let cancelled = false;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
     const updateMessages = async () => {
-      const msgs = await getChatMessages();
-      setMessages(msgs);
+      if (cancelled) return;
+      try {
+        const msgs = await getChatMessages();
+        if (!cancelled) {
+          setMessages(msgs);
+        }
+      } finally {
+        if (!cancelled) {
+          timeoutId = setTimeout(() => {
+            void updateMessages();
+          }, 2000);
+        }
+      }
     };
 
-    const interval = setInterval(updateMessages, 2000);
-    updateMessages();
+    void updateMessages();
 
-    return () => clearInterval(interval);
+    return () => {
+      cancelled = true;
+      if (timeoutId) clearTimeout(timeoutId);
+    };
   }, [getChatMessages]);
 
   useEffect(() => {
@@ -178,6 +208,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   useEffect(() => {
     let cancelled = false;
+    let retryTimeout: ReturnType<typeof setTimeout> | null = null;
+    let refreshTimeout: ReturnType<typeof setTimeout> | null = null;
 
     const loadFfzEmotes = async () => {
       try {
@@ -192,19 +224,40 @@ export const Dashboard: React.FC<DashboardProps> = ({
       } catch {}
     };
 
+    const retryLoop = async () => {
+      if (cancelled) return;
+      if (Object.keys(ffzEmotesRef.current).length === 0) {
+        await loadFfzEmotes();
+      }
+      if (!cancelled) {
+        retryTimeout = setTimeout(() => {
+          void retryLoop();
+        }, FFZ_RETRY_INTERVAL_MS);
+      }
+    };
+
+    const refreshLoop = async () => {
+      if (cancelled) return;
+      await loadFfzEmotes();
+      if (!cancelled) {
+        refreshTimeout = setTimeout(() => {
+          void refreshLoop();
+        }, FFZ_REFRESH_INTERVAL_MS);
+      }
+    };
+
     void loadFfzEmotes();
-    const retryInterval = setInterval(() => {
-      if (Object.keys(ffzEmotesRef.current).length > 0) return;
-      void loadFfzEmotes();
+    retryTimeout = setTimeout(() => {
+      void retryLoop();
     }, FFZ_RETRY_INTERVAL_MS);
-    const refreshInterval = setInterval(() => {
-      void loadFfzEmotes();
+    refreshTimeout = setTimeout(() => {
+      void refreshLoop();
     }, FFZ_REFRESH_INTERVAL_MS);
 
     return () => {
       cancelled = true;
-      clearInterval(retryInterval);
-      clearInterval(refreshInterval);
+      if (retryTimeout) clearTimeout(retryTimeout);
+      if (refreshTimeout) clearTimeout(refreshTimeout);
     };
   }, []);
 
