@@ -48,18 +48,19 @@ export function parseActionArgs(
     }
     const def = schema[key] as ActionArgSchema;
     const value = raw[key] as string;
+    const normalizedValue = unquoteString(value);
 
     if (def.type === 'string') {
-      args[key] = unquoteString(value);
+      args[key] = normalizedValue;
     } else if (def.type === 'number') {
-      const n = parseFloat(value);
+      const n = parseFloat(normalizedValue);
       if (Number.isNaN(n)) {
         errors.push(`Argument "${key}" must be a number, got: ${value}`);
       } else {
         args[key] = n;
       }
     } else if (def.type === 'boolean') {
-      const lower = value.toLowerCase();
+      const lower = normalizedValue.toLowerCase();
       if (lower === 'true' || lower === '1' || lower === 'yes') {
         args[key] = true;
       } else if (lower === 'false' || lower === '0' || lower === 'no') {
@@ -68,8 +69,8 @@ export function parseActionArgs(
         errors.push(`Argument "${key}" must be a boolean (true/false/1/0/yes/no), got: ${value}`);
       }
     } else if (def.type === 'enum') {
-      if (def.values.includes(value)) {
-        args[key] = value;
+      if (def.values.includes(normalizedValue)) {
+        args[key] = normalizedValue;
       } else {
         errors.push(`Argument "${key}" must be one of: ${def.values.join(', ')}, got: ${value}`);
       }

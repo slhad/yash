@@ -1,5 +1,5 @@
 import * as path from 'node:path';
-import type { ScriptApi, UserScriptAction } from './types';
+import type { ScriptApi, UserScriptAction, UserScriptArgSchema } from './types';
 
 type SceneItemTransform = Record<string, unknown>;
 type InputSettings = Record<string, unknown>;
@@ -62,6 +62,30 @@ const PAUSED_KEY = 'paused';
 const TRIGGERS_KEY = 'triggers';
 const DEFAULT_STATE: StoredState = { paused: false, triggers: {} };
 const DEFAULT_CONFIG: SourceRecallerConfig = { startPaused: false };
+
+const OBS_SOURCE_AUTOCOMPLETE_REQUIRED_ARG = {
+  type: 'string',
+  required: true,
+  minLength: 1,
+  maxLength: 200,
+  autocomplete: {
+    type: 'provider',
+    providerId: 'obs.sceneSources',
+    params: {
+      includeQualifiedRefs: true,
+    },
+  },
+} as const satisfies UserScriptArgSchema;
+const OBS_SCENE_AUTOCOMPLETE_OPTIONAL_ARG = {
+  type: 'string',
+  required: false,
+  minLength: 1,
+  maxLength: 200,
+  autocomplete: {
+    type: 'provider',
+    providerId: 'obs.scenes',
+  },
+} as const satisfies UserScriptArgSchema;
 
 function getDataDir(): string {
   return (
@@ -628,7 +652,7 @@ export default function setup(api: ScriptApi): () => void {
         'Capture the active scene, source settings, scene-item enabled state, and scene-item transform for one source.',
       domain: 'obs',
       args: {
-        source: { type: 'string', required: true, minLength: 1, maxLength: 200 },
+        source: OBS_SOURCE_AUTOCOMPLETE_REQUIRED_ARG,
         stage: {
           type: 'enum',
           required: false,
@@ -686,7 +710,7 @@ export default function setup(api: ScriptApi): () => void {
         'Restore a previously-saved source snapshot for the current program scene, if one exists.',
       domain: 'obs',
       args: {
-        source: { type: 'string', required: true, minLength: 1, maxLength: 200 },
+        source: OBS_SOURCE_AUTOCOMPLETE_REQUIRED_ARG,
       },
       examples: [
         { args: { source: 'Camera' }, description: 'Restore Camera in the active scene' },
@@ -787,7 +811,7 @@ export default function setup(api: ScriptApi): () => void {
       domain: 'obs',
       readOnly: true,
       args: {
-        scene: { type: 'string', required: false, minLength: 1, maxLength: 200 },
+        scene: OBS_SCENE_AUTOCOMPLETE_OPTIONAL_ARG,
       },
       examples: [
         { args: {}, description: 'List sources in the active OBS scene' },

@@ -127,6 +127,62 @@ describe('obs.shutdown bundled script', () => {
     expect(statusResult.data).toEqual({ active: false, remaining: null });
   });
 
+  test('registers OBS scene/source autocomplete metadata on shutdown actions', async () => {
+    tempDir = await loadObsShutdownScript();
+
+    const initiate = getAction('obs.shutdown.initiate');
+    const config = getAction('obs.shutdown.config');
+
+    expect(initiate.args.scene).toMatchObject({
+      type: 'string',
+      autocomplete: {
+        type: 'provider',
+        providerId: 'obs.scenes',
+      },
+    });
+    expect(initiate.args.source).toMatchObject({
+      type: 'string',
+      autocomplete: {
+        type: 'provider',
+        providerId: 'obs.sceneSources',
+        params: {
+          includeQualifiedRefs: true,
+          sceneArg: 'scene',
+        },
+      },
+    });
+    expect(config.args.scene).toMatchObject({
+      type: 'string',
+      autocomplete: {
+        type: 'provider',
+        providerId: 'obs.scenes',
+      },
+    });
+    expect(config.args.source).toMatchObject({
+      type: 'string',
+      autocomplete: {
+        type: 'provider',
+        providerId: 'obs.sceneSources',
+        params: {
+          includeQualifiedRefs: true,
+          sceneArg: 'scene',
+        },
+      },
+    });
+    expect(config.args.hideSources).toMatchObject({
+      type: 'string',
+      autocomplete: {
+        type: 'provider',
+        providerId: 'obs.sceneSources',
+        params: {
+          includeQualifiedRefs: true,
+          sceneArg: 'scene',
+          valueMode: 'csv',
+        },
+      },
+    });
+  });
+
   test('countdown end skips OBS stopStream when stopStream=false in script config', async () => {
     tempDir = await loadObsShutdownScript({ stopStream: false });
 

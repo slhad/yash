@@ -342,7 +342,7 @@ describe('getAutocomplete', () => {
   test('/scripts install obs-startup  → hints repair flags', () => {
     const result = getAutocomplete('/scripts install obs-startup ');
     expect(result.completion).toBeNull();
-    expect(result.hints).toEqual(['repair', 'force']);
+    expect(result.hints).toEqual(['repair', 'force', 'copy', 'link']);
   });
 
   test('/scripts install obs-startup r → completes to repair', () => {
@@ -350,5 +350,17 @@ describe('getAutocomplete', () => {
     expect(result.completion).toBe('/scripts install obs-startup repair');
     expect(result.hints[0]).toBe('repair');
     expect(result.hints).toContain('force');
+  });
+
+  test('/scripts install obs-startup repair  → hints remaining strategy flags', () => {
+    const result = getAutocomplete('/scripts install obs-startup repair ');
+    expect(result.completion).toBeNull();
+    expect(result.hints).toEqual(['force', 'copy', 'link']);
+  });
+
+  test('/scripts install obs-startup copy l → completes to link', () => {
+    const result = getAutocomplete('/scripts install obs-startup copy l');
+    expect(result.completion).toBe('/scripts install obs-startup copy link');
+    expect(result.hints).toEqual(['link']);
   });
 });

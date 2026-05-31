@@ -29,11 +29,28 @@ export type BundledExampleScriptInstallResult = {
   installedFiles: string[];
   warnings: string[];
   mode: 'install' | 'repair';
+  strategy: 'copy' | 'link';
+  fileActions: Array<{ path: string; action: 'copied' | 'linked' | 'merged' }>;
 };
 
 type InstallBundledExampleScriptOptions = {
   force?: boolean;
+  strategy?: 'auto' | 'copy' | 'link';
 };
+
+function shouldKeepLocalConfig(file: string): boolean {
+  return file === 'config.jsonc';
+}
+
+function isPackagedRuntime(): boolean {
+  return Boolean(process.env.APPIMAGE || process.env.APPDIR);
+}
+
+function resolveInstallStrategy(options: InstallBundledExampleScriptOptions): 'copy' | 'link' {
+  if (options.strategy === 'copy') return 'copy';
+  if (options.strategy === 'link') return 'link';
+  return isPackagedRuntime() ? 'copy' : 'link';
+}
 
 function parseJsonc(text: string): unknown {
   let result = '';
@@ -90,6 +107,7 @@ export function installBundledExampleScript(
 
   const sourceDir = resolveBundledExampleScriptSourceDir(script);
   const targetDir = getBundledExampleScriptTargetDir(dataDir, script.id);
+  const strategy = resolveInstallStrategy(options);
   const missingSources = script.files
     .map((file) => path.join(sourceDir, file))
     .filter((filePath) => !fs.existsSync(filePath));
@@ -118,6 +136,7 @@ export function installBundledExampleScript(
 
   const installedFiles: string[] = [];
   const warnings: string[] = [];
+  const fileActions: Array<{ path: string; action: 'copied' | 'linked' | 'merged' }> = [];
   for (const file of script.files) {
     const sourcePath = path.join(sourceDir, file);
     const targetPath = path.join(targetDir, file);
@@ -132,6 +151,7 @@ export function installBundledExampleScript(
         warnings.push(
           `merged config.jsonc with current values preserved; backups written as ${targetPath}.bak and ${targetPath}.new`,
         );
+        fileActions.push({ path: targetPath, action: 'merged' });
       } catch (error) {
         throw new BundledExampleScriptInstallError(
           'TARGET_CONFIG_INVALID',
@@ -140,7 +160,24 @@ export function installBundledExampleScript(
         );
       }
     } else {
-      fs.copyFileSync(sourcePath, targetPath);
+      if (options.force && fs.existsSync(targetPath)) {
+        fs.rmSync(targetPath, { recursive: true, force: true });
+      }
+
+      const shouldLink = strategy === 'link' && !shouldKeepLocalConfig(file);
+      if (shouldLink) {
+        try {
+          fs.symlinkSync(sourcePath, targetPath);
+          fileActions.push({ path: targetPath, action: 'linked' });
+        } catch (error) {
+          fs.copyFileSync(sourcePath, targetPath);
+          fileActions.push({ path: targetPath, action: 'copied' });
+          warnings.push(`failed to symlink ${targetPath}; copied file instead (${String(error)})`);
+        }
+      } else {
+        fs.copyFileSync(sourcePath, targetPath);
+        fileActions.push({ path: targetPath, action: 'copied' });
+      }
     }
     installedFiles.push(targetPath);
   }
@@ -151,5 +188,7 @@ export function installBundledExampleScript(
     installedFiles,
     warnings,
     mode: options.force ? 'repair' : 'install',
+    strategy,
+    fileActions,
   };
 }

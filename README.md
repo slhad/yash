@@ -76,20 +76,24 @@ Commands invoked over IPC are also echoed into the live TUI chat pane before the
 
 ### Bundled example scripts
 
-YASH ships a small catalog of tracked example user scripts under `examples/scripts/`, and the live TUI/IPC command surface can copy them into your runtime script directory without manual symlinks:
+YASH ships a small catalog of tracked example user scripts under `examples/scripts/`, and the live TUI/IPC command surface can install them into your runtime script directory:
 
 ```sh
 bun run cmd /scripts list
 bun run cmd /scripts install obs-startup
 bun run cmd /scripts install obs-source-recaller
 bun run cmd /scripts install obs-source-recaller repair
+bun run cmd /scripts install obs-source-recaller copy
 ```
 
 - Install target: `${YASH_DATA_DIR}/scripts/<example-id>/`
 - Existing files are never overwritten; install aborts if any target file already exists
+- Local dev installs default to `link` mode: tracked script files are symlinked from the repo, while `config.jsonc` is still copied so script-local settings stay user-owned
+- AppImage / packaged installs default to `copy` mode because the bundled example sources are not expected to be edited in place
+- Pass `copy` to force copied tracked files in local dev, or `link` to request symlinked tracked files explicitly
 - Use `repair` (or `force`) to refresh tracked files intentionally for a partial or outdated install
 - Repair merges the shipped `config.jsonc` defaults with your current `config.jsonc`, preserving your existing values and unknown keys
-- Restart YASH after install so the copied script is loaded at startup
+- Restart YASH after install so the script is loaded at startup
 
 ### `/action` command
 
@@ -110,6 +114,8 @@ bun run cmd /action obs.startup.config countdownDelay=60 startStream=true
 - `/action <id> key=value ...` parses typed args and invokes the action
 
 The TUI autocomplete also understands `/action`, including action ids, `key=` argument names, and enum values. Matches are fuzzy-ranked: prefix matches win, then substring matches, then subsequence matches.
+
+Bundled OBS actions also publish scene/source arg metadata for dynamic autocomplete providers. `obs.shutdown.*` exposes `scene=` plus scene-qualified `source=` / `hideSources=` suggestions, and `obs.source-recaller.*` exposes dynamic `source=` / `scene=` suggestions for OBS scene exploration and restore flows.
 
 **Stale socket cleanup:** the server removes any pre-existing socket file at startup, so a leftover socket from a crash does not block a new TUI launch.
 

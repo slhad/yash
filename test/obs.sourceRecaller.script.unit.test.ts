@@ -255,6 +255,46 @@ describe('obs-source-recaller example script', () => {
     });
   });
 
+  test('registers OBS scene/source autocomplete metadata on source recaller actions', async () => {
+    const setup = await loadScriptApi();
+    const ctx = createMockApi();
+    cleanup = setup(ctx.api);
+
+    const save = getAction(ctx.actions, 'obs.source-recaller.save');
+    const load = getAction(ctx.actions, 'obs.source-recaller.load');
+    const explore = getAction(ctx.actions, 'obs.source-recaller.explore');
+
+    expect(save.args?.source).toMatchObject({
+      type: 'string',
+      required: true,
+      autocomplete: {
+        type: 'provider',
+        providerId: 'obs.sceneSources',
+        params: {
+          includeQualifiedRefs: true,
+        },
+      },
+    });
+    expect(load.args?.source).toMatchObject({
+      type: 'string',
+      required: true,
+      autocomplete: {
+        type: 'provider',
+        providerId: 'obs.sceneSources',
+        params: {
+          includeQualifiedRefs: true,
+        },
+      },
+    });
+    expect(explore.args?.scene).toMatchObject({
+      type: 'string',
+      autocomplete: {
+        type: 'provider',
+        providerId: 'obs.scenes',
+      },
+    });
+  });
+
   test('save with stage persists only the requested stage and preserves the others', async () => {
     const setup = await loadScriptApi();
     const ctx = createMockApi({

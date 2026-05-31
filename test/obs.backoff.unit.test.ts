@@ -67,7 +67,14 @@ describe('ObsService backoff', () => {
     expect(second.attempt).toBe(2);
     expect(second.delay).toBe(baseMs * multiplier); // exponential growth
 
-    // cleanup
+    // cleanup: this test intentionally leaves the service disconnected, so clear
+    // any outstanding reconnect timer before Bun runs another OBS suite in
+    // parallel.
+    const reconnectTimer = (obs as any).reconnectTimer as ReturnType<typeof setTimeout> | null;
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      (obs as any).reconnectTimer = null;
+    }
     loggerSpy.mockRestore();
   });
 });

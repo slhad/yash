@@ -17,7 +17,7 @@ describe('shared help metadata', () => {
       usage: '/connect <youtube|twitch|kick>',
     });
     expect(commands.find((entry) => entry.command === '/scripts')).toMatchObject({
-      usage: '/scripts [list|install <example-id> [repair|force]]',
+      usage: '/scripts [list|install <example-id> [repair|force] [copy|link]]',
       example: '/scripts install obs-startup repair',
     });
   });
@@ -38,7 +38,7 @@ describe('shared help metadata', () => {
       '[help]   /markers restore twitch [limit] | clear [all|ids] | edit <id> | [all|youtube|twitch|kick] [limit]  — List, restore, edit, or clear YouTube chapters',
     );
     expect(lines).toContain(
-      '[help]   /scripts [list|install <example-id> [repair|force]]  — List, install, or repair bundled example scripts',
+      '[help]   /scripts [list|install <example-id> [repair|force] [copy|link]]  — List, install, or repair bundled example scripts',
     );
   });
 });

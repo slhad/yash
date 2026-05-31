@@ -12,6 +12,26 @@ function isForceToken(token: string | undefined): boolean {
   return normalized === 'force' || normalized === 'repair' || normalized === '--force';
 }
 
+function parseInstallStrategy(tokens: string[]): {
+  strategy?: 'copy' | 'link';
+  invalidTokens: string[];
+} {
+  let strategy: 'copy' | 'link' | undefined;
+  const invalidTokens: string[] = [];
+
+  for (const token of tokens) {
+    const normalized = token.toLowerCase();
+    if (normalized === 'copy' || normalized === 'link') {
+      strategy = normalized;
+      continue;
+    }
+    if (isForceToken(normalized)) continue;
+    invalidTokens.push(token);
+  }
+
+  return { strategy, invalidTokens };
+}
+
 export function renderScriptsHelpLines(dataDir: string): string[] {
   const scripts = listBundledExampleScripts(dataDir);
   const lines = ['[scripts] Bundled example scripts:'];
@@ -23,7 +43,10 @@ export function renderScriptsHelpLines(dataDir: string): string[] {
   }
 
   lines.push(
-    '[scripts] Usage: /scripts | /scripts list | /scripts install <example-id> [repair|force]',
+    '[scripts] Usage: /scripts | /scripts list | /scripts install <example-id> [repair|force] [copy|link]',
+  );
+  lines.push(
+    '[scripts] Local installs default to symlinking tracked script files and copying config.jsonc; AppImage installs default to copy mode.',
   );
   lines.push(
     '[scripts] Repair/force refreshes tracked files and merges config.jsonc with your current values preserved.',
@@ -46,26 +69,37 @@ export async function handleScriptsCommand(
 
   if (subcommand !== 'install') {
     emit(
-      '[scripts] Usage: /scripts | /scripts list | /scripts install <example-id> [repair|force]',
+      '[scripts] Usage: /scripts | /scripts list | /scripts install <example-id> [repair|force] [copy|link]',
     );
     return;
   }
 
   const scriptId = (parts[2] ?? '').toLowerCase();
   if (!scriptId) {
-    emit('[scripts] Usage: /scripts install <example-id> [repair|force]');
+    emit('[scripts] Usage: /scripts install <example-id> [repair|force] [copy|link]');
+    return;
+  }
+
+  const optionTokens = parts.slice(3);
+  const { strategy, invalidTokens } = parseInstallStrategy(optionTokens);
+  if (invalidTokens.length > 0) {
+    emit('[scripts] Usage: /scripts install <example-id> [repair|force] [copy|link]');
+    for (const token of invalidTokens) {
+      emit(`[scripts]   Unknown install option: ${token}`);
+    }
     return;
   }
 
   try {
     const result = installBundledExampleScript(dataDir, scriptId, {
-      force: isForceToken(parts[3]),
+      force: optionTokens.some((token) => isForceToken(token)),
+      strategy,
     });
     emit(
-      `[scripts] ${result.mode === 'repair' ? 'repaired' : 'installed'} ${result.scriptId} into ${result.targetDir}`,
+      `[scripts] ${result.mode === 'repair' ? 'repaired' : 'installed'} ${result.scriptId} into ${result.targetDir} (${result.strategy})`,
     );
-    for (const filePath of result.installedFiles) {
-      emit(`[scripts]   ${result.mode === 'repair' ? 'refreshed' : 'copied'} ${filePath}`);
+    for (const fileResult of result.fileActions) {
+      emit(`[scripts]   ${fileResult.action} ${fileResult.path}`);
     }
     for (const warning of result.warnings) emit(`[scripts]   ${warning}`);
     emit('[scripts] Restart yash to load the new script.');
@@ -75,7 +109,7 @@ export async function handleScriptsCommand(
       for (const detail of error.details) emit(`[scripts]   ${detail}`);
       if (error.code === 'TARGET_EXISTS') {
         emit(
-          '[scripts] Re-run with /scripts install <example-id> repair to refresh files and merge config.',
+          '[scripts] Re-run with /scripts install <example-id> repair [copy|link] to refresh files and merge config.',
         );
       }
       return;

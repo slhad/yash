@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { ActionRegistry } from '../../actions/registry';
 import type { YashActionDefinition } from '../../actions/types';
+import { clearActionAutocompleteCaches, setActionAutocompleteRuntime } from '../actionAutocomplete';
 import { getAutocomplete, setActionRegistry } from '../tuiCommands';
 
 // ---------------------------------------------------------------------------
@@ -36,7 +37,27 @@ function buildRegistry(): ActionRegistry {
       safety: 'safe',
       args: {
         delay: { type: 'number', min: 10, max: 3600 },
-        scene: { type: 'string', maxLength: 200 },
+        scene: {
+          type: 'string',
+          maxLength: 200,
+          autocomplete: {
+            type: 'provider',
+            providerId: 'obs.scenes',
+          },
+        },
+        hideSources: {
+          type: 'string',
+          maxLength: 2000,
+          autocomplete: {
+            type: 'provider',
+            providerId: 'obs.sceneSources',
+            params: {
+              includeQualifiedRefs: true,
+              sceneArg: 'scene',
+              valueMode: 'csv',
+            },
+          },
+        },
       },
     }),
   );
@@ -85,6 +106,32 @@ function buildRegistry(): ActionRegistry {
   );
 
   reg.registerAction(
+    makeAction('obs.source-recaller.save', {
+      domain: 'obs',
+      visibility: 'public',
+      safety: 'safe',
+      args: {
+        source: {
+          type: 'string',
+          required: true,
+          maxLength: 200,
+          autocomplete: {
+            type: 'provider',
+            providerId: 'obs.sceneSources',
+            params: {
+              includeQualifiedRefs: true,
+            },
+          },
+        },
+        stage: {
+          type: 'enum',
+          values: ['inputSettings', 'sceneItemTransform', 'sceneItemEnabled'],
+        },
+      },
+    }),
+  );
+
+  reg.registerAction(
     makeAction('internal.thing', {
       domain: 'system',
       visibility: 'internal',
@@ -110,6 +157,18 @@ function buildRegistry(): ActionRegistry {
 describe('getAutocomplete /action branch', () => {
   beforeEach(() => {
     setActionRegistry(buildRegistry());
+    clearActionAutocompleteCaches();
+    setActionAutocompleteRuntime({
+      getObsConnectionState: () => true,
+      getObsCurrentScene: async () => '[PS] PrimaryScreen',
+      getObsSceneList: async () => ({
+        scenes: [{ sceneName: '[PS] PrimaryScreen' }, { sceneName: '[SS] Common' }],
+      }),
+      getObsSceneItemList: async (sceneName: string) =>
+        sceneName === '[SS] Common'
+          ? [{ sourceName: 'Browser' }, { sourceName: 'Overlay' }]
+          : [{ sourceName: 'Browser' }, { sourceName: 'Chat Box' }],
+    });
   });
 
   // ── Registry not injected ─────────────────────────────────────────────────
@@ -176,6 +235,13 @@ describe('getAutocomplete /action branch', () => {
       const result = getAutocomplete('/action xyz');
       expect(result).toEqual({ completion: null, hints: [], completions: [] });
     });
+
+    test('/action obs.source-recaller.save → transitions into arg completion without requiring a trailing space', () => {
+      const result = getAutocomplete('/action obs.source-recaller.save');
+      expect(result.completion).toBe('/action obs.source-recaller.save ');
+      expect(result.hints).toContain('source=');
+      expect(result.hints).toContain('stage=');
+    });
   });
 
   // ── Sub-case B: completing arg names ──────────────────────────────────────
@@ -190,7 +256,8 @@ describe('getAutocomplete /action branch', () => {
     test('/action obs.shutdown.initiate de → completes to delay=, single hint', () => {
       const result = getAutocomplete('/action obs.shutdown.initiate de');
       expect(result.completion).toBe('/action obs.shutdown.initiate delay=');
-      expect(result.hints).toEqual(['delay=']);
+      expect(result.hints[0]).toBe('delay=');
+      expect(result.hints).toContain('hideSources=');
     });
 
     test('/action obs.shutdown.initiate dly → completes to delay= via fuzzy subsequence match', () => {
@@ -244,6 +311,43 @@ describe('getAutocomplete /action branch', () => {
     });
   });
 
+  describe('dynamic provider value completion', () => {
+    test('/action obs.source-recaller.save source= loads OBS source suggestions asynchronously', async () => {
+      const initial = getAutocomplete('/action obs.source-recaller.save source=');
+      expect(initial.hints).toContain('<loading…>');
+
+      await Bun.sleep(0);
+
+      const resolved = getAutocomplete('/action obs.source-recaller.save source=');
+      expect(resolved.hints).toContain('Browser');
+      expect(resolved.hints).toContain('Chat Box');
+      expect(resolved.hints).toContain('[PS] PrimaryScreen.Browser');
+    });
+
+    test('/action obs.source-recaller.save source=[PS] PrimaryScreen.B filters dynamic suggestions with spaces in the active token', async () => {
+      getAutocomplete('/action obs.source-recaller.save source=[PS] PrimaryScreen.B');
+      await Bun.sleep(0);
+
+      const resolved = getAutocomplete(
+        '/action obs.source-recaller.save source=[PS] PrimaryScreen.B',
+      );
+      expect(resolved.hints).toContain('[PS] PrimaryScreen.Browser');
+    });
+
+    test('/action obs.shutdown.initiate scene=[SS] Common hideSources=Browser,Ov completes the CSV tail only', async () => {
+      getAutocomplete('/action obs.shutdown.initiate scene=[SS] Common hideSources=Browser,Ov');
+      await Bun.sleep(0);
+
+      const resolved = getAutocomplete(
+        '/action obs.shutdown.initiate scene=[SS] Common hideSources=Browser,Ov',
+      );
+      expect(resolved.hints).toContain('Overlay');
+      expect(resolved.completions).toContain(
+        '/action obs.shutdown.initiate scene=[SS] Common hideSources=Browser,Overlay',
+      );
+    });
+  });
+
   // ── Non-enum type hints ───────────────────────────────────────────────────
 
   describe('non-enum type hints', () => {
@@ -253,9 +357,9 @@ describe('getAutocomplete /action branch', () => {
       expect(result.completion).toBeNull();
     });
 
-    test('/action obs.shutdown.initiate scene= → hints is [<string>], completion is null', () => {
+    test('/action obs.shutdown.initiate scene= → provider-backed scene suggestions begin loading', () => {
       const result = getAutocomplete('/action obs.shutdown.initiate scene=');
-      expect(result.hints).toEqual(['<string>']);
+      expect(result.hints).toEqual(['<loading…>']);
       expect(result.completion).toBeNull();
     });
   });
