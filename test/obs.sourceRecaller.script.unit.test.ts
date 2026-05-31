@@ -164,6 +164,19 @@ function createMockApi(options?: {
     actions,
     api,
     currentScene,
+    setCurrentInputSettings: (inputName: string, nextValue: Record<string, unknown>) => {
+      inputSettings.set(inputName, nextValue);
+    },
+    setCurrentSceneItemEnabled: (sceneName: string, sceneItemId: number, enabled: boolean) => {
+      sceneItemEnabled.set(`${sceneName}::${sceneItemId}`, enabled);
+    },
+    setCurrentSceneItemTransform: (
+      sceneName: string,
+      sceneItemId: number,
+      transform: Record<string, unknown>,
+    ) => {
+      sceneItemTransform.set(`${sceneName}::${sceneItemId}`, transform);
+    },
     emitSceneChange: async (sceneName: string) => {
       currentScene.value = sceneName;
       sceneChangeCallback?.(sceneName, { eventType: 'CurrentProgramSceneChanged' });
@@ -195,6 +208,16 @@ function getAction(actions: RegisteredActionMap, id: string): UserScriptAction {
   const action = actions.get(id);
   expect(action).toBeDefined();
   return action as UserScriptAction;
+}
+
+function createDeferred<T = void>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
 }
 
 describe('obs-source-recaller example script', () => {
@@ -236,18 +259,21 @@ describe('obs-source-recaller example script', () => {
             sourceRef: 'Scene A.Camera',
             stage: 'inputSettings',
             priority: 10,
+            checkIfChangedToApply: true,
             data: { zoom: 150, color: 'warm' },
           },
           {
             sourceRef: 'Scene A.Camera',
             stage: 'sceneItemTransform',
             priority: 20,
+            checkIfChangedToApply: true,
             data: { positionX: 10, scaleX: 1.2 },
           },
           {
             sourceRef: 'Scene A.Camera',
             stage: 'sceneItemEnabled',
             priority: 30,
+            checkIfChangedToApply: true,
             data: true,
           },
         ],
@@ -345,18 +371,21 @@ describe('obs-source-recaller example script', () => {
             sourceRef: 'Scene A.Camera',
             stage: 'inputSettings',
             priority: 10,
+            checkIfChangedToApply: true,
             data: { zoom: 80 },
           },
           {
             sourceRef: 'Scene A.Camera',
             stage: 'sceneItemEnabled',
             priority: 30,
+            checkIfChangedToApply: true,
             data: false,
           },
           {
             sourceRef: 'Scene A.Camera',
             stage: 'sceneItemTransform',
             priority: 20,
+            checkIfChangedToApply: true,
             data: { positionX: 10, scaleX: 1.2 },
           },
         ],
@@ -528,15 +557,23 @@ describe('obs-source-recaller example script', () => {
             sourceRef: 'Scene B.Camera',
             stage: 'inputSettings',
             priority: 10,
+            checkIfChangedToApply: true,
             data: { zoom: 222 },
           },
           {
             sourceRef: 'Scene B.Camera',
             stage: 'sceneItemTransform',
             priority: 20,
+            checkIfChangedToApply: true,
             data: { positionX: 42 },
           },
-          { sourceRef: 'Scene B.Camera', stage: 'sceneItemEnabled', priority: 30, data: false },
+          {
+            sourceRef: 'Scene B.Camera',
+            stage: 'sceneItemEnabled',
+            priority: 30,
+            checkIfChangedToApply: true,
+            data: false,
+          },
         ],
       },
       $ui: {
@@ -558,15 +595,23 @@ describe('obs-source-recaller example script', () => {
             sourceRef: 'Scene B.Camera',
             stage: 'inputSettings',
             priority: 10,
+            checkIfChangedToApply: true,
             data: { zoom: 222 },
           },
           {
             sourceRef: 'Scene B.Camera',
             stage: 'sceneItemTransform',
             priority: 20,
+            checkIfChangedToApply: true,
             data: { positionX: 42 },
           },
-          { sourceRef: 'Scene B.Camera', stage: 'sceneItemEnabled', priority: 30, data: false },
+          {
+            sourceRef: 'Scene B.Camera',
+            stage: 'sceneItemEnabled',
+            priority: 30,
+            checkIfChangedToApply: true,
+            data: false,
+          },
         ],
       },
     });
@@ -613,6 +658,226 @@ describe('obs-source-recaller example script', () => {
       'transform:Scene A::7',
       'enabled:Scene A::7',
     ]);
+  });
+
+  test('load reports a partial restore and skips later stages for the source when transform apply fails', async () => {
+    const setup = await loadScriptApi();
+    const ctx = createMockApi({
+      initialState: {
+        paused: false,
+        triggers: {
+          'Scene A': [
+            {
+              sourceRef: 'Scene A.Camera',
+              stage: 'inputSettings',
+              priority: 10,
+              data: { zoom: 200 },
+            },
+            {
+              sourceRef: 'Scene A.Camera',
+              stage: 'sceneItemTransform',
+              priority: 20,
+              data: { positionX: 42 },
+            },
+            { sourceRef: 'Scene A.Camera', stage: 'sceneItemEnabled', priority: 30, data: false },
+          ],
+        },
+      },
+    });
+    cleanup = setup(ctx.api);
+    ctx.mocks.setSceneItemTransform.mockImplementationOnce(async () => {
+      ctx.operationLog.push('transform:Scene A::7');
+      throw new Error('boundsWidth must be >= 1');
+    });
+
+    const result = await getAction(ctx.actions, 'obs.source-recaller.load').invoke({
+      source: 'Camera',
+    });
+
+    expect(result.output).toEqual([
+      '[obs-source-recaller] partial restore for "Scene A.Camera" in trigger scene "Scene A"',
+    ]);
+    expect(result.warnings).toEqual([
+      '[obs-source-recaller] stage "sceneItemTransform" failed for "Scene A.Camera": Error: boundsWidth must be >= 1',
+    ]);
+    expect(result.data).toMatchObject({
+      sourceRef: 'Scene A.Camera',
+      restored: false,
+      waitBehavior: 'sequential_obs_request_ack',
+    });
+    expect(ctx.mocks.setSceneItemEnabled).not.toHaveBeenCalled();
+    expect(ctx.operationLog).toEqual(['input:Camera', 'transform:Scene A::7']);
+  });
+
+  test('load waits for each OBS request ACK before starting the next restore stage', async () => {
+    const setup = await loadScriptApi();
+    const ctx = createMockApi({
+      initialState: {
+        paused: false,
+        triggers: {
+          'Scene A': [
+            {
+              sourceRef: 'Scene A.Camera',
+              stage: 'inputSettings',
+              priority: 10,
+              data: { zoom: 200 },
+            },
+            {
+              sourceRef: 'Scene A.Camera',
+              stage: 'sceneItemTransform',
+              priority: 20,
+              data: { positionX: 42 },
+            },
+            { sourceRef: 'Scene A.Camera', stage: 'sceneItemEnabled', priority: 30, data: false },
+          ],
+        },
+      },
+    });
+    cleanup = setup(ctx.api);
+    const deferred = createDeferred<void>();
+    ctx.mocks.setSceneItemTransform.mockImplementationOnce(async () => {
+      ctx.operationLog.push('transform:Scene A::7');
+      await deferred.promise;
+    });
+
+    let settled = false;
+    const pending = getAction(ctx.actions, 'obs.source-recaller.load')
+      .invoke({
+        source: 'Camera',
+      })
+      .then((value) => {
+        settled = true;
+        return value;
+      });
+
+    await Bun.sleep(0);
+    expect(settled).toBe(false);
+    expect(ctx.operationLog).toEqual(['input:Camera', 'transform:Scene A::7']);
+    expect(ctx.mocks.setSceneItemEnabled).not.toHaveBeenCalled();
+
+    deferred.resolve();
+    const result = await pending;
+    expect(settled).toBe(true);
+    expect(result.output).toEqual([
+      '[obs-source-recaller] restored "Scene A.Camera" for trigger scene "Scene A"',
+    ]);
+    expect(ctx.operationLog).toEqual([
+      'input:Camera',
+      'transform:Scene A::7',
+      'enabled:Scene A::7',
+    ]);
+  });
+
+  test('load skips unchanged stages when checkIfChangedToApply is true but still applies changed ones', async () => {
+    const setup = await loadScriptApi();
+    const ctx = createMockApi({
+      initialState: {
+        paused: false,
+        triggers: {
+          'Scene A': [
+            {
+              sourceRef: 'Scene A.Camera',
+              stage: 'inputSettings',
+              priority: 10,
+              checkIfChangedToApply: true,
+              data: { zoom: 150, color: 'warm' },
+            },
+            {
+              sourceRef: 'Scene A.Camera',
+              stage: 'sceneItemTransform',
+              priority: 20,
+              checkIfChangedToApply: true,
+              data: { positionX: 42 },
+            },
+            {
+              sourceRef: 'Scene A.Camera',
+              stage: 'sceneItemEnabled',
+              priority: 30,
+              checkIfChangedToApply: true,
+              data: false,
+            },
+          ],
+        },
+      },
+      inputSettings: {
+        Camera: { zoom: 150, color: 'warm', untouched: true },
+      },
+      sceneItemEnabled: {
+        'Scene A::7': true,
+      },
+      sceneItemTransform: {
+        'Scene A::7': { positionX: 10, scaleX: 1.2 },
+      },
+    });
+    cleanup = setup(ctx.api);
+
+    const result = await getAction(ctx.actions, 'obs.source-recaller.load').invoke({
+      source: 'Camera',
+    });
+
+    expect(result.output).toEqual([
+      '[obs-source-recaller] restored "Scene A.Camera" for trigger scene "Scene A"',
+    ]);
+    expect(result.warnings).toEqual([
+      '[obs-source-recaller] skipped "inputSettings" for "Scene A.Camera" because current OBS state already matched the saved value',
+    ]);
+    expect(ctx.mocks.setInputSettings).not.toHaveBeenCalled();
+    expect(ctx.mocks.setSceneItemTransform).toHaveBeenCalledWith('Scene A', 7, { positionX: 42 });
+    expect(ctx.mocks.setSceneItemEnabled).toHaveBeenCalledWith('Scene A', 7, false);
+    expect(ctx.operationLog).toEqual(['transform:Scene A::7', 'enabled:Scene A::7']);
+  });
+
+  test('load still applies an unchanged stage when checkIfChangedToApply is false', async () => {
+    const setup = await loadScriptApi();
+    const ctx = createMockApi({
+      initialState: {
+        paused: false,
+        triggers: {
+          'Scene A': [
+            {
+              sourceRef: 'Scene A.Camera',
+              stage: 'inputSettings',
+              priority: 10,
+              checkIfChangedToApply: false,
+              data: { zoom: 150, color: 'warm' },
+            },
+            {
+              sourceRef: 'Scene A.Camera',
+              stage: 'sceneItemTransform',
+              priority: 20,
+              checkIfChangedToApply: true,
+              data: { positionX: 10, scaleX: 1.2 },
+            },
+            {
+              sourceRef: 'Scene A.Camera',
+              stage: 'sceneItemEnabled',
+              priority: 30,
+              checkIfChangedToApply: true,
+              data: true,
+            },
+          ],
+        },
+      },
+      inputSettings: {
+        Camera: { zoom: 150, color: 'warm' },
+      },
+      sceneItemEnabled: {
+        'Scene A::7': true,
+      },
+      sceneItemTransform: {
+        'Scene A::7': { positionX: 10, scaleX: 1.2 },
+      },
+    });
+    cleanup = setup(ctx.api);
+
+    await getAction(ctx.actions, 'obs.source-recaller.load').invoke({
+      source: 'Camera',
+    });
+
+    expect(ctx.mocks.setInputSettings).toHaveBeenCalledWith('Camera', { zoom: 150, color: 'warm' });
+    expect(ctx.mocks.setSceneItemTransform).not.toHaveBeenCalled();
+    expect(ctx.mocks.setSceneItemEnabled).not.toHaveBeenCalled();
+    expect(ctx.operationLog).toEqual(['input:Camera']);
   });
 
   test('save and load support explicit <scene>.<source> targets while keeping the active scene as trigger', async () => {
@@ -669,23 +934,30 @@ describe('obs-source-recaller example script', () => {
             sourceRef: 'Scene B.Camera',
             stage: 'inputSettings',
             priority: 10,
+            checkIfChangedToApply: true,
             data: { zoom: 333, crop: 'tight' },
           },
           {
             sourceRef: 'Scene B.Camera',
             stage: 'sceneItemTransform',
             priority: 20,
+            checkIfChangedToApply: true,
             data: { positionX: 64, positionY: 18 },
           },
           {
             sourceRef: 'Scene B.Camera',
             stage: 'sceneItemEnabled',
             priority: 30,
+            checkIfChangedToApply: true,
             data: false,
           },
         ],
       },
     });
+
+    ctx.setCurrentInputSettings('Camera', { zoom: 90, crop: 'wide' });
+    ctx.setCurrentSceneItemTransform('Scene B', 8, { positionX: 0, positionY: 0 });
+    ctx.setCurrentSceneItemEnabled('Scene B', 8, true);
 
     const loadResult = await getAction(ctx.actions, 'obs.source-recaller.load').invoke({
       source: 'Scene B.Camera',
@@ -760,23 +1032,100 @@ describe('obs-source-recaller example script', () => {
             sourceRef: 'Scene B.Camera',
             stage: 'inputSettings',
             priority: 10,
+            checkIfChangedToApply: true,
             data: { zoom: 80 },
           },
           {
             sourceRef: 'Scene B.Camera',
             stage: 'sceneItemTransform',
             priority: 20,
+            checkIfChangedToApply: true,
             data: { positionX: 5 },
           },
           {
             sourceRef: 'Scene B.Camera',
             stage: 'sceneItemEnabled',
             priority: 30,
+            checkIfChangedToApply: true,
             data: true,
           },
         ],
       },
     });
+  });
+
+  test('resume waits for the full OBS ACK chain before reporting auto-load output', async () => {
+    const setup = await loadScriptApi();
+    const ctx = createMockApi({
+      currentScene: 'Scene A',
+      sceneItemIds: {
+        'Scene B::Camera': 8,
+      },
+      initialState: {
+        paused: true,
+        triggers: {
+          'Scene B': [
+            {
+              sourceRef: 'Scene B.Camera',
+              stage: 'inputSettings',
+              priority: 10,
+              data: { zoom: 80 },
+            },
+            {
+              sourceRef: 'Scene B.Camera',
+              stage: 'sceneItemTransform',
+              priority: 20,
+              data: { positionX: 5 },
+            },
+            { sourceRef: 'Scene B.Camera', stage: 'sceneItemEnabled', priority: 30, data: true },
+          ],
+        },
+      },
+      sceneItemEnabled: {
+        'Scene B::8': false,
+      },
+      sceneItemTransform: {
+        'Scene B::8': { positionX: 0 },
+      },
+    });
+    cleanup = setup(ctx.api);
+    const deferred = createDeferred<void>();
+    ctx.mocks.setSceneItemTransform.mockImplementationOnce(async () => {
+      ctx.operationLog.push('transform:Scene B::8');
+      await deferred.promise;
+    });
+
+    await ctx.emitSceneChange('Scene B');
+    ctx.mocks.setInputSettings.mockClear();
+    ctx.mocks.setSceneItemTransform.mockClear();
+    ctx.mocks.setSceneItemEnabled.mockClear();
+    ctx.operationLog.length = 0;
+
+    let settled = false;
+    const pending = getAction(ctx.actions, 'obs.source-recaller.resume')
+      .invoke({})
+      .then((value) => {
+        settled = true;
+        return value;
+      });
+
+    await Bun.sleep(0);
+    expect(settled).toBe(false);
+    expect(ctx.mocks.setSceneItemEnabled).not.toHaveBeenCalled();
+    expect(ctx.operationLog).toEqual(['input:Camera', 'transform:Scene B::8']);
+
+    deferred.resolve();
+    const result = await pending;
+    expect(settled).toBe(true);
+    expect(result.output).toEqual([
+      '[obs-source-recaller] automatic scene recalls resumed',
+      '[obs-source-recaller] auto-loaded Camera for scene "Scene B"',
+    ]);
+    expect(ctx.operationLog).toEqual([
+      'input:Camera',
+      'transform:Scene B::8',
+      'enabled:Scene B::8',
+    ]);
   });
 
   test('scene-change watcher applies all entries by stage priority then saved source order', async () => {
@@ -825,12 +1174,12 @@ describe('obs-source-recaller example script', () => {
         Overlay: { file: 'a.png' },
       },
       sceneItemEnabled: {
-        'Scene B::8': true,
-        'Scene B::9': false,
+        'Scene B::8': false,
+        'Scene B::9': true,
       },
       sceneItemTransform: {
-        'Scene B::8': { positionX: 5 },
-        'Scene B::9': { positionY: 25 },
+        'Scene B::8': { positionX: 1 },
+        'Scene B::9': { positionY: 1 },
       },
     });
     cleanup = setup(ctx.api);
@@ -847,6 +1196,89 @@ describe('obs-source-recaller example script', () => {
     ]);
     expect(ctx.mocks.loggerInfo).toHaveBeenCalledWith(
       '[obs-source-recaller] auto-loaded Overlay, Camera for scene "Scene B"',
+    );
+  });
+
+  test('scene-change watcher continues restoring other sources after one source transform fails', async () => {
+    const setup = await loadScriptApi();
+    const ctx = createMockApi({
+      currentScene: 'Scene A',
+      sceneItemIds: {
+        'Scene B::Overlay': 9,
+        'Scene B::Camera': 8,
+      },
+      initialState: {
+        paused: false,
+        triggers: {
+          'Scene B': [
+            {
+              sourceRef: 'Scene B.Overlay',
+              stage: 'inputSettings',
+              priority: 10,
+              data: { file: 'b.png' },
+            },
+            {
+              sourceRef: 'Scene B.Overlay',
+              stage: 'sceneItemTransform',
+              priority: 20,
+              data: { positionY: 25 },
+            },
+            { sourceRef: 'Scene B.Overlay', stage: 'sceneItemEnabled', priority: 30, data: false },
+            {
+              sourceRef: 'Scene B.Camera',
+              stage: 'inputSettings',
+              priority: 10,
+              data: { zoom: 80 },
+            },
+            {
+              sourceRef: 'Scene B.Camera',
+              stage: 'sceneItemTransform',
+              priority: 20,
+              data: { positionX: 5 },
+            },
+            { sourceRef: 'Scene B.Camera', stage: 'sceneItemEnabled', priority: 30, data: true },
+          ],
+        },
+      },
+      inputSettings: {
+        Camera: { zoom: 0 },
+        Overlay: { file: 'a.png' },
+      },
+      sceneItemEnabled: {
+        'Scene B::8': false,
+        'Scene B::9': true,
+      },
+      sceneItemTransform: {
+        'Scene B::8': { positionX: 1 },
+        'Scene B::9': { positionY: 1 },
+      },
+    });
+    cleanup = setup(ctx.api);
+    ctx.mocks.setSceneItemTransform.mockImplementation(
+      async (sceneName: string, sceneItemId: number) => {
+        ctx.operationLog.push(`transform:${sceneName}::${sceneItemId}`);
+        if (sceneItemId === 9) {
+          throw new Error('boundsWidth must be >= 1');
+        }
+      },
+    );
+
+    await ctx.emitSceneChange('Scene B');
+
+    expect(ctx.mocks.setSceneItemEnabled).toHaveBeenCalledTimes(1);
+    expect(ctx.mocks.setSceneItemEnabled).toHaveBeenCalledWith('Scene B', 8, true);
+    expect(ctx.operationLog).toEqual([
+      'input:Overlay',
+      'input:Camera',
+      'transform:Scene B::9',
+      'transform:Scene B::8',
+      'enabled:Scene B::8',
+    ]);
+    expect(ctx.mocks.loggerWarn).toHaveBeenCalledWith(
+      '[obs-source-recaller] failed to auto-load stage "sceneItemTransform" for "Overlay" in "Scene B": Error: boundsWidth must be >= 1',
+    );
+    expect(ctx.mocks.loggerInfo).toHaveBeenCalledWith(
+      '[obs-source-recaller] auto-loaded Camera for scene "Scene B"',
     );
   });
 
