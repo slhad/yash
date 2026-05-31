@@ -44,12 +44,33 @@ type ActionAutocompleteRuntime = {
   getObsSceneItemList: (sceneName: string) => Promise<ObsSceneItem[]>;
 };
 
+type CacheEntry = {
+  suggestions: string[];
+  expiresAt: number;
+};
+
 const providers = new Map<string, ActionAutocompleteProvider>();
-const cache = new Map<string, string[]>();
+const cache = new Map<string, CacheEntry>();
 const inflight = new Map<string, Promise<void>>();
 const refreshListeners = new Set<ActionAutocompleteRefreshListener>();
 
+const ACTION_AUTOCOMPLETE_CACHE_MAX_ENTRIES = 100;
+const ACTION_AUTOCOMPLETE_CACHE_TTL_MS = 10_000;
+const OBS_AUTOCOMPLETE_INVALIDATION_EVENTS = new Set([
+  'CurrentProgramSceneChanged',
+  'SceneCreated',
+  'SceneRemoved',
+  'SceneNameChanged',
+  'SceneItemCreated',
+  'SceneItemRemoved',
+  'SceneItemListReindexed',
+  'InputCreated',
+  'InputRemoved',
+  'InputNameChanged',
+]);
+
 let runtime: ActionAutocompleteRuntime | null = null;
+let cacheGeneration = 0;
 
 type LegacyObsAutocompleteSchema = ActionArgSchema & {
   autocompleteProvider?: 'obs.scenes' | 'obs.sources';
@@ -117,6 +138,36 @@ function normalizeSceneSourceSuggestions(
 
 function emitRefresh(): void {
   for (const listener of refreshListeners) listener();
+}
+
+function pruneAutocompleteCache(): void {
+  while (cache.size > ACTION_AUTOCOMPLETE_CACHE_MAX_ENTRIES) {
+    const oldestKey = cache.keys().next().value;
+    if (typeof oldestKey !== 'string') break;
+    cache.delete(oldestKey);
+  }
+}
+
+function setCachedSuggestions(cacheKey: string, suggestions: string[], generation: number): void {
+  if (generation !== cacheGeneration) return;
+  cache.delete(cacheKey);
+  cache.set(cacheKey, {
+    suggestions,
+    expiresAt: Date.now() + ACTION_AUTOCOMPLETE_CACHE_TTL_MS,
+  });
+  pruneAutocompleteCache();
+}
+
+function getCachedSuggestions(cacheKey: string): string[] | null {
+  const entry = cache.get(cacheKey);
+  if (!entry) return null;
+  if (entry.expiresAt <= Date.now()) {
+    cache.delete(cacheKey);
+    return null;
+  }
+  cache.delete(cacheKey);
+  cache.set(cacheKey, entry);
+  return entry.suggestions;
 }
 
 function buildCacheKey(options: ActionAutocompleteOptions): string | null {
@@ -193,6 +244,7 @@ function requestSuggestions(cacheKey: string, options: ActionAutocompleteOptions
   if (inflight.has(cacheKey)) return;
   const spec = getAutocompleteSpec(options.schema);
   if (!spec) return;
+  const requestGeneration = cacheGeneration;
 
   const request = resolveSuggestions(
     {
@@ -205,11 +257,13 @@ function requestSuggestions(cacheKey: string, options: ActionAutocompleteOptions
     spec,
   )
     .then((suggestions) => {
-      cache.set(cacheKey, suggestions);
+      setCachedSuggestions(cacheKey, suggestions, requestGeneration);
       emitRefresh();
     })
     .finally(() => {
-      inflight.delete(cacheKey);
+      if (inflight.get(cacheKey) === request) {
+        inflight.delete(cacheKey);
+      }
     });
 
   inflight.set(cacheKey, request);
@@ -282,12 +336,13 @@ export function getDynamicActionArgAutocomplete(
   const cacheKey = buildCacheKey(options);
   if (!cacheKey) return null;
 
-  if (!cache.has(cacheKey)) {
+  const cachedSuggestions = getCachedSuggestions(cacheKey);
+  if (!cachedSuggestions) {
     requestSuggestions(cacheKey, options);
     return { hints: [], completions: [], loading: true };
   }
 
-  const suggestions = filterSuggestions(cache.get(cacheKey) ?? [], filterPartial);
+  const suggestions = filterSuggestions(cachedSuggestions, filterPartial);
   const base = `/action ${options.actionIdToken} ${options.tokens.slice(0, -1).join(' ')}${
     options.tokens.length > 1 ? ' ' : ''
   }${options.argName}=`;
@@ -301,7 +356,10 @@ export function getDynamicActionArgAutocomplete(
   };
 }
 
-export function parseActionAutocompleteContext(argsPart: string): {
+export function parseActionAutocompleteContext(
+  argsPart: string,
+  argDefs?: Record<string, ActionArgSchema>,
+): {
   tokens: string[];
   currentArgs: Record<string, string>;
 } {
@@ -317,6 +375,22 @@ export function parseActionAutocompleteContext(argsPart: string): {
       continue;
     }
     if (currentIndex >= 0) {
+      const currentToken = tokens[currentIndex] ?? '';
+      const currentEqIdx = currentToken.indexOf('=');
+      const currentArgName = currentEqIdx === -1 ? '' : currentToken.slice(0, currentEqIdx);
+      const currentSchema = currentArgName ? argDefs?.[currentArgName] : undefined;
+      const looksLikeArgName =
+        token.length > 0 &&
+        /^[A-Za-z][A-Za-z0-9.-]*$/.test(token) &&
+        Object.keys(argDefs ?? {}).some(
+          (argName) =>
+            argName !== currentArgName && argName.toLowerCase().startsWith(token.toLowerCase()),
+        );
+      if (currentSchema && currentSchema.type !== 'string' && looksLikeArgName) {
+        tokens.push(token);
+        currentIndex = -1;
+        continue;
+      }
       tokens[currentIndex] = `${tokens[currentIndex]} ${token}`;
       continue;
     }
@@ -335,6 +409,28 @@ export function parseActionAutocompleteContext(argsPart: string): {
 }
 
 export function clearActionAutocompleteCaches(): void {
+  cacheGeneration++;
   cache.clear();
   inflight.clear();
+}
+
+export function invalidateActionAutocompleteForObsEvent(event: unknown): boolean {
+  const eventType = (event as { eventType?: unknown } | null)?.eventType;
+  if (typeof eventType !== 'string' || !OBS_AUTOCOMPLETE_INVALIDATION_EVENTS.has(eventType)) {
+    return false;
+  }
+  clearActionAutocompleteCaches();
+  return true;
+}
+
+export function __getActionAutocompleteDebugState(): {
+  cacheKeys: string[];
+  inflightKeys: string[];
+  cacheGeneration: number;
+} {
+  return {
+    cacheKeys: [...cache.keys()],
+    inflightKeys: [...inflight.keys()],
+    cacheGeneration,
+  };
 }

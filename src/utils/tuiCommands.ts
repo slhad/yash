@@ -509,7 +509,7 @@ export function getAutocomplete(input: string): {
     const argNames = Object.keys(argsDef);
 
     // Parse already-provided args (key=value tokens before the last one).
-    const { tokens, currentArgs } = parseActionAutocompleteContext(argsPart);
+    const { tokens, currentArgs } = parseActionAutocompleteContext(argsPart, argsDef);
     const lastToken = tokens[tokens.length - 1] ?? '';
     const previousTokens = tokens.slice(0, -1);
     const usedArgNames = previousTokens

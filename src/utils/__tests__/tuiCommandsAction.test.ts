@@ -272,6 +272,13 @@ describe('getAutocomplete /action branch', () => {
       expect(result.hints).not.toContain('delay=');
     });
 
+    test('/action obs.shutdown.initiate delay=30 sc → treats trailing token as next arg name', () => {
+      const result = getAutocomplete('/action obs.shutdown.initiate delay=30 sc');
+      expect(result.completion).toBe('/action obs.shutdown.initiate delay=30 scene=');
+      expect(result.hints).toContain('scene=');
+      expect(result.hints).not.toContain('<number>');
+    });
+
     test('/action obs.shutdown.cancel <space> → empty hints (no args)', () => {
       const result = getAutocomplete('/action obs.shutdown.cancel ');
       expect(result.hints).toEqual([]);

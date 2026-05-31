@@ -34,6 +34,7 @@ import { messageLog, type StreamSummary } from './services/message-log';
 import { formatActionHelp, parseActionArgs, parseLooseActionArgs } from './utils/actionArgs';
 import {
   clearActionAutocompleteCaches,
+  invalidateActionAutocompleteForObsEvent,
   setActionAutocompleteRuntime,
   subscribeToActionAutocompleteRefresh,
 } from './utils/actionAutocomplete';
@@ -7042,6 +7043,7 @@ async function main() {
   });
 
   obsService.subscribeToMessages((event) => {
+    invalidateActionAutocompleteForObsEvent(event);
     const type = event?.eventType as string | undefined;
     if (type === 'CurrentProgramSceneChanged') {
       const scene = (event?.eventData?.sceneName as string) ?? 'unknown';
