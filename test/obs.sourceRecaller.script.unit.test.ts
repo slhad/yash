@@ -64,16 +64,33 @@ function createMockApi(options?: {
   const setInputSettings = mock(async (inputName: string, _settings: Record<string, unknown>) => {
     operationLog.push(`input:${inputName}`);
   });
+  const getInputSettings = mock(async (inputName: string) => {
+    const value = inputSettings.get(inputName);
+    if (!value) throw new Error(`missing input settings for ${inputName}`);
+    return value;
+  });
   const setSceneItemTransform = mock(
     async (sceneName: string, sceneItemId: number, _transform: Record<string, unknown>) => {
       operationLog.push(`transform:${sceneName}::${sceneItemId}`);
     },
   );
+  const getSceneItemTransform = mock(async (sceneName: string, sceneItemId: number) => {
+    const key = `${sceneName}::${sceneItemId}`;
+    const value = sceneItemTransform.get(key);
+    if (!value) throw new Error(`missing scene item transform for ${key}`);
+    return value;
+  });
   const setSceneItemEnabled = mock(
     async (sceneName: string, sceneItemId: number, _enabled: boolean) => {
       operationLog.push(`enabled:${sceneName}::${sceneItemId}`);
     },
   );
+  const getSceneItemEnabled = mock(async (sceneName: string, sceneItemId: number) => {
+    const key = `${sceneName}::${sceneItemId}`;
+    const value = sceneItemEnabled.get(key);
+    if (value === undefined) throw new Error(`missing scene item enabled for ${key}`);
+    return value;
+  });
   const loggerInfo = mock((_msg: string) => {});
   const loggerWarn = mock((_msg: string) => {});
   const loggerError = mock((_msg: string) => {});
@@ -92,11 +109,7 @@ function createMockApi(options?: {
       }),
       getCurrentScene: async () => currentScene.value,
       setCurrentScene: async () => {},
-      getInputSettings: async (inputName) => {
-        const value = inputSettings.get(inputName);
-        if (!value) throw new Error(`missing input settings for ${inputName}`);
-        return value;
-      },
+      getInputSettings,
       getSceneItemList: async (sceneName) => sceneItems.get(sceneName) ?? [],
       setInputSettings,
       setInputMute: async () => {},
@@ -106,19 +119,9 @@ function createMockApi(options?: {
         if (value === undefined) throw new Error(`missing scene item id for ${key}`);
         return value;
       },
-      getSceneItemEnabled: async (sceneName, sceneItemId) => {
-        const key = `${sceneName}::${sceneItemId}`;
-        const value = sceneItemEnabled.get(key);
-        if (value === undefined) throw new Error(`missing scene item enabled for ${key}`);
-        return value;
-      },
+      getSceneItemEnabled,
       setSceneItemEnabled,
-      getSceneItemTransform: async (sceneName, sceneItemId) => {
-        const key = `${sceneName}::${sceneItemId}`;
-        const value = sceneItemTransform.get(key);
-        if (!value) throw new Error(`missing scene item transform for ${key}`);
-        return value;
-      },
+      getSceneItemTransform,
       getSceneItemState: async (sceneName, sourceName) => {
         const sceneItemId = await api.obs.getSceneItemId(sceneName, sourceName);
         const [enabled, transform] = await Promise.all([
@@ -188,6 +191,9 @@ function createMockApi(options?: {
     }),
     operationLog,
     mocks: {
+      getInputSettings,
+      getSceneItemTransform,
+      getSceneItemEnabled,
       setInputSettings,
       setSceneItemTransform,
       setSceneItemEnabled,
@@ -880,6 +886,64 @@ describe('obs-source-recaller example script', () => {
     expect(ctx.operationLog).toEqual(['input:Camera']);
   });
 
+  test('load reports a partial restore when checkIfChangedToApply readback fails', async () => {
+    const setup = await loadScriptApi();
+    const ctx = createMockApi({
+      initialState: {
+        paused: false,
+        triggers: {
+          'Scene A': [
+            {
+              sourceRef: 'Scene A.Camera',
+              stage: 'inputSettings',
+              priority: 10,
+              checkIfChangedToApply: true,
+              data: { zoom: 200 },
+            },
+            {
+              sourceRef: 'Scene A.Camera',
+              stage: 'sceneItemTransform',
+              priority: 20,
+              checkIfChangedToApply: true,
+              data: { positionX: 42 },
+            },
+            {
+              sourceRef: 'Scene A.Camera',
+              stage: 'sceneItemEnabled',
+              priority: 30,
+              checkIfChangedToApply: true,
+              data: false,
+            },
+          ],
+        },
+      },
+    });
+    cleanup = setup(ctx.api);
+    ctx.mocks.getInputSettings.mockImplementationOnce(async () => {
+      throw new Error('temporary obs read failure');
+    });
+
+    const result = await getAction(ctx.actions, 'obs.source-recaller.load').invoke({
+      source: 'Camera',
+    });
+
+    expect(result.output).toEqual([
+      '[obs-source-recaller] partial restore for "Scene A.Camera" in trigger scene "Scene A"',
+    ]);
+    expect(result.warnings).toEqual([
+      '[obs-source-recaller] stage "inputSettings" failed for "Scene A.Camera": Error: temporary obs read failure',
+    ]);
+    expect(result.data).toMatchObject({
+      sourceRef: 'Scene A.Camera',
+      restored: false,
+      waitBehavior: 'sequential_obs_request_ack',
+    });
+    expect(ctx.mocks.setInputSettings).not.toHaveBeenCalled();
+    expect(ctx.mocks.setSceneItemTransform).not.toHaveBeenCalled();
+    expect(ctx.mocks.setSceneItemEnabled).not.toHaveBeenCalled();
+    expect(ctx.operationLog).toEqual([]);
+  });
+
   test('save and load support explicit <scene>.<source> targets while keeping the active scene as trigger', async () => {
     const setup = await loadScriptApi();
     const ctx = createMockApi({
@@ -1276,6 +1340,98 @@ describe('obs-source-recaller example script', () => {
     ]);
     expect(ctx.mocks.loggerWarn).toHaveBeenCalledWith(
       '[obs-source-recaller] failed to auto-load stage "sceneItemTransform" for "Overlay" in "Scene B": Error: boundsWidth must be >= 1',
+    );
+    expect(ctx.mocks.loggerInfo).toHaveBeenCalledWith(
+      '[obs-source-recaller] auto-loaded Camera for scene "Scene B"',
+    );
+  });
+
+  test('scene-change watcher continues restoring other sources after a checkIfChangedToApply read fails', async () => {
+    const setup = await loadScriptApi();
+    const ctx = createMockApi({
+      currentScene: 'Scene A',
+      sceneItemIds: {
+        'Scene B::Overlay': 9,
+        'Scene B::Camera': 8,
+      },
+      initialState: {
+        paused: false,
+        triggers: {
+          'Scene B': [
+            {
+              sourceRef: 'Scene B.Overlay',
+              stage: 'inputSettings',
+              priority: 10,
+              checkIfChangedToApply: true,
+              data: { file: 'b.png' },
+            },
+            {
+              sourceRef: 'Scene B.Overlay',
+              stage: 'sceneItemTransform',
+              priority: 20,
+              checkIfChangedToApply: true,
+              data: { positionY: 25 },
+            },
+            {
+              sourceRef: 'Scene B.Overlay',
+              stage: 'sceneItemEnabled',
+              priority: 30,
+              checkIfChangedToApply: true,
+              data: false,
+            },
+            {
+              sourceRef: 'Scene B.Camera',
+              stage: 'inputSettings',
+              priority: 10,
+              checkIfChangedToApply: true,
+              data: { zoom: 80 },
+            },
+            {
+              sourceRef: 'Scene B.Camera',
+              stage: 'sceneItemTransform',
+              priority: 20,
+              checkIfChangedToApply: true,
+              data: { positionX: 5 },
+            },
+            {
+              sourceRef: 'Scene B.Camera',
+              stage: 'sceneItemEnabled',
+              priority: 30,
+              checkIfChangedToApply: true,
+              data: true,
+            },
+          ],
+        },
+      },
+      inputSettings: {
+        Camera: { zoom: 0 },
+        Overlay: { file: 'a.png' },
+      },
+      sceneItemEnabled: {
+        'Scene B::8': false,
+        'Scene B::9': true,
+      },
+      sceneItemTransform: {
+        'Scene B::8': { positionX: 1 },
+        'Scene B::9': { positionY: 1 },
+      },
+    });
+    cleanup = setup(ctx.api);
+    ctx.mocks.getInputSettings.mockImplementation(async (inputName: string) => {
+      if (inputName === 'Overlay') {
+        throw new Error('temporary obs read failure');
+      }
+      return { zoom: 0 };
+    });
+
+    await ctx.emitSceneChange('Scene B');
+
+    expect(ctx.mocks.setInputSettings).toHaveBeenCalledTimes(1);
+    expect(ctx.mocks.setInputSettings).toHaveBeenCalledWith('Camera', { zoom: 80 });
+    expect(ctx.mocks.setSceneItemTransform).toHaveBeenCalledWith('Scene B', 8, { positionX: 5 });
+    expect(ctx.mocks.setSceneItemEnabled).toHaveBeenCalledWith('Scene B', 8, true);
+    expect(ctx.mocks.loggerWarn).toHaveBeenCalledWith(
+      '[obs-source-recaller] failed to auto-load stage "inputSettings" for "Overlay" in "Scene B": Error: temporary obs read failure',
     );
     expect(ctx.mocks.loggerInfo).toHaveBeenCalledWith(
       '[obs-source-recaller] auto-loaded Camera for scene "Scene B"',

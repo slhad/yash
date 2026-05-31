@@ -606,21 +606,21 @@ export default function setup(api: ScriptApi): () => void {
         continue;
       }
 
-      const shouldApply = await operation.shouldApply();
-      if (!shouldApply) {
-        outcomes.push({
-          sourceRef: operation.sourceRef,
-          sceneName: operation.sceneName,
-          sourceName: operation.sourceName,
-          stage: operation.stage,
-          action: 'skipped',
-          checkIfChangedToApply: operation.checkIfChangedToApply,
-          reason: 'current OBS state already matches the saved value',
-        });
-        continue;
-      }
-
       try {
+        const shouldApply = await operation.shouldApply();
+        if (!shouldApply) {
+          outcomes.push({
+            sourceRef: operation.sourceRef,
+            sceneName: operation.sceneName,
+            sourceName: operation.sourceName,
+            stage: operation.stage,
+            action: 'skipped',
+            checkIfChangedToApply: operation.checkIfChangedToApply,
+            reason: 'current OBS state already matches the saved value',
+          });
+          continue;
+        }
+
         await operation.apply();
         outcomes.push({
           sourceRef: operation.sourceRef,
