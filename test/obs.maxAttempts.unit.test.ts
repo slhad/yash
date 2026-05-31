@@ -30,6 +30,11 @@ describe('ObsService maxAttempts', () => {
     await waitFor(() => emitted === true, baseMs * 2 ** (maxAttempts + 1) + 2000);
     expect(emitted).toBe(true);
 
+    const reconnectTimer = (obs as any).reconnectTimer as ReturnType<typeof setTimeout> | null;
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      (obs as any).reconnectTimer = null;
+    }
     loggerSpy.mockRestore();
   });
 });

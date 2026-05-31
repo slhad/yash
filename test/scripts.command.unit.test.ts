@@ -44,9 +44,12 @@ describe('bundled example script helpers', () => {
     const result = installBundledExampleScript(tempDir, 'obs-startup');
     expect(result.scriptId).toBe('obs-startup');
     expect(result.installedFiles).toHaveLength(5);
+    expect(result.strategy).toBe('link');
 
-    const installedIndex = await fs.readFile(path.join(result.targetDir, 'index.ts'), 'utf8');
-    const installedReadme = await fs.readFile(path.join(result.targetDir, 'README.md'), 'utf8');
+    const installedIndexPath = path.join(result.targetDir, 'index.ts');
+    const installedReadmePath = path.join(result.targetDir, 'README.md');
+    const installedIndex = await fs.readFile(installedIndexPath, 'utf8');
+    const installedReadme = await fs.readFile(installedReadmePath, 'utf8');
     const installedConfig = await fs.readFile(path.join(result.targetDir, 'config.jsonc'), 'utf8');
     const installedHelper = await fs.readFile(path.join(result.targetDir, 'config.ts'), 'utf8');
     const installedTypes = await fs.readFile(path.join(result.targetDir, 'types.d.ts'), 'utf8');
@@ -56,6 +59,20 @@ describe('bundled example script helpers', () => {
     expect(installedConfig).toContain('"prepareScene"');
     expect(installedHelper).toContain('OBS_STARTUP_SCRIPT_ID');
     expect(installedTypes).toContain('export type { ScriptApi, UserScriptAction }');
+    expect((await fs.lstat(installedIndexPath)).isSymbolicLink()).toBe(true);
+    expect((await fs.lstat(installedReadmePath)).isSymbolicLink()).toBe(true);
+    expect((await fs.lstat(path.join(result.targetDir, 'config.jsonc'))).isSymbolicLink()).toBe(
+      false,
+    );
+  });
+
+  test('install can force copy mode for local development installs', async () => {
+    tempDir = await makeRepoTempDir('yash-scripts-install-copy');
+
+    const result = installBundledExampleScript(tempDir, 'obs-startup', { strategy: 'copy' });
+    expect(result.strategy).toBe('copy');
+    expect((await fs.lstat(path.join(result.targetDir, 'index.ts'))).isSymbolicLink()).toBe(false);
+    expect((await fs.lstat(path.join(result.targetDir, 'README.md'))).isSymbolicLink()).toBe(false);
   });
 
   test('install aborts without overwriting when any target file already exists', async () => {
@@ -97,7 +114,7 @@ describe('/scripts command helper', () => {
       '[scripts]   obs-source-recaller  — Per-scene OBS source snapshot saver with automatic scene-change restores. [not installed]',
     );
     expect(lines).toContain(
-      '[scripts] Usage: /scripts | /scripts list | /scripts install <example-id> [repair|force]',
+      '[scripts] Usage: /scripts | /scripts list | /scripts install <example-id> [repair|force] [copy|link]',
     );
   });
 
@@ -112,10 +129,39 @@ describe('/scripts command helper', () => {
     );
 
     expect(lines[0]).toBe(
-      `[scripts] installed obs-startup into ${path.join(tempDir, 'scripts', 'obs-startup')}`,
+      `[scripts] installed obs-startup into ${path.join(tempDir, 'scripts', 'obs-startup')} (link)`,
     );
-    expect(lines.some((line) => line.endsWith('/scripts/obs-startup/index.ts'))).toBe(true);
+    expect(
+      lines.some(
+        (line) => line.includes('linked') && line.endsWith('/scripts/obs-startup/index.ts'),
+      ),
+    ).toBe(true);
+    expect(
+      lines.some(
+        (line) => line.includes('copied') && line.endsWith('/scripts/obs-startup/config.jsonc'),
+      ),
+    ).toBe(true);
     expect(lines).toContain('[scripts] Restart yash to load the new script.');
+  });
+
+  test('install command accepts explicit copy mode', async () => {
+    tempDir = await makeRepoTempDir('yash-scripts-command-copy');
+
+    const lines: string[] = [];
+    await handleScriptsCommand(
+      ['/scripts', 'install', 'obs-startup', 'copy'],
+      (line) => lines.push(line),
+      tempDir,
+    );
+
+    expect(lines[0]).toBe(
+      `[scripts] installed obs-startup into ${path.join(tempDir, 'scripts', 'obs-startup')} (copy)`,
+    );
+    expect(
+      lines.some(
+        (line) => line.includes('copied') && line.endsWith('/scripts/obs-startup/index.ts'),
+      ),
+    ).toBe(true);
   });
 
   test('install command reports conflicting files instead of overwriting', async () => {
@@ -136,7 +182,7 @@ describe('/scripts command helper', () => {
     );
     expect(lines[1]).toBe(`[scripts]   ${path.join(targetDir, 'index.ts')}`);
     expect(lines[2]).toBe(
-      '[scripts] Re-run with /scripts install <example-id> repair to refresh files and merge config.',
+      '[scripts] Re-run with /scripts install <example-id> repair [copy|link] to refresh files and merge config.',
     );
     expect(await fs.readFile(path.join(targetDir, 'index.ts'), 'utf8')).toBe('// existing');
   });
@@ -165,7 +211,7 @@ describe('/scripts command helper', () => {
     );
 
     expect(lines[0]).toBe(
-      `[scripts] repaired obs-startup into ${path.join(tempDir, 'scripts', 'obs-startup')}`,
+      `[scripts] repaired obs-startup into ${path.join(tempDir, 'scripts', 'obs-startup')} (link)`,
     );
     expect(
       lines.some((line) => line.includes('merged config.jsonc with current values preserved')),

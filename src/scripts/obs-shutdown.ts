@@ -1,5 +1,10 @@
 import { IpcActionError, registry } from '../actions/registry';
-import { type ActionContext, type ActionResult, IPC_ERROR_CODES } from '../actions/types';
+import {
+  type ActionArgSchema,
+  type ActionContext,
+  type ActionResult,
+  IPC_ERROR_CODES,
+} from '../actions/types';
 import { obsService } from '../services';
 import {
   applyObsShutdownConfigPatch,
@@ -34,6 +39,52 @@ type SourceTargetRef = {
   sceneName: string | null;
   sourceName: string;
 };
+
+const OBS_SCENE_AUTOCOMPLETE_ARG = {
+  type: 'string',
+  required: false,
+  maxLength: 200,
+  autocomplete: {
+    type: 'provider',
+    providerId: 'obs.scenes',
+  },
+} as const satisfies ActionArgSchema;
+
+const OBS_SOURCE_AUTOCOMPLETE_ARG = {
+  type: 'string',
+  required: false,
+  maxLength: 200,
+  autocomplete: {
+    type: 'provider',
+    providerId: 'obs.sceneSources',
+    params: {
+      includeQualifiedRefs: true,
+      sceneArg: 'scene',
+    },
+  },
+} as const satisfies ActionArgSchema;
+
+const OBS_SOURCE_LIST_AUTOCOMPLETE_ARG = {
+  type: 'string',
+  required: false,
+  maxLength: 2000,
+  autocomplete: {
+    type: 'provider',
+    providerId: 'obs.sceneSources',
+    params: {
+      includeQualifiedRefs: true,
+      sceneArg: 'scene',
+      valueMode: 'csv',
+    },
+  },
+} as const satisfies ActionArgSchema;
+
+const OBS_SHUTDOWN_CONFIG_ACTION_ARGS = {
+  ...OBS_SHUTDOWN_ACTION_ARG_SCHEMA,
+  scene: OBS_SCENE_AUTOCOMPLETE_ARG,
+  source: OBS_SOURCE_AUTOCOMPLETE_ARG,
+  hideSources: OBS_SOURCE_LIST_AUTOCOMPLETE_ARG,
+} as const;
 
 function resolveSourceTargetRefFromSceneNames(
   rawTarget: string,
@@ -226,9 +277,9 @@ registry.registerAction({
   voiceHint: true,
   args: {
     delay: { type: 'number', required: false, min: 10, max: 3600 },
-    scene: { type: 'string', required: false, maxLength: 200 },
+    scene: OBS_SCENE_AUTOCOMPLETE_ARG,
     message: { type: 'string', required: false, maxLength: 500 },
-    source: { type: 'string', required: false, maxLength: 200 },
+    source: OBS_SOURCE_AUTOCOMPLETE_ARG,
     sourceText: { type: 'string', required: false, maxLength: 200 },
   },
   examples: [
@@ -353,7 +404,7 @@ registry.registerAction({
   visibility: 'public',
   voiceHint: true,
   argMode: 'kv_pairs',
-  args: OBS_SHUTDOWN_ACTION_ARG_SCHEMA,
+  args: OBS_SHUTDOWN_CONFIG_ACTION_ARGS,
   examples: [
     { args: {}, description: 'Show the effective obs-shutdown settings' },
     { args: { delay: 45, stopStream: false }, description: 'Update delay and stop behavior' },

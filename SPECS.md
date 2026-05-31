@@ -31,11 +31,13 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
     * Command /msg <all|youtube|twitch|kick> <text> - sends a message to the specified platform(s)
     * Command `/action [action-id] [key=value ...]` - lists public IPC-safe actions, invokes actions directly when all args are optional, and shows help/examples when required args still need values
         * Autocomplete is fuzzy-ranked for command names, `/action` ids, arg names, and enum values: prefix matches first, then substring matches, then subsequence matches
+        * Action arg schemas may also advertise dynamic autocomplete providers; bundled OBS actions publish `obs.scenes` / `obs.sources` metadata for `scene=` and scene-qualified `source=` suggestions
         * The live TUI may also invoke visible non-IPC actions through `/action`; modal-only actions such as `obs.shutdown.configTUI`, `obs.startup.configTUI`, and `obs.source-recaller.configTUI` remain blocked over IPC (`bun run cmd`)
-    * Command `/scripts | /scripts list | /scripts install <example-id> [repair|force]` - list bundled example scripts and copy one into `YASH_DATA_DIR/scripts/<example-id>` without overwriting existing files unless repair/force is requested explicitly
+    * Command `/scripts | /scripts list | /scripts install <example-id> [repair|force] [copy|link]` - list bundled example scripts and install one into `YASH_DATA_DIR/scripts/<example-id>` without overwriting existing files unless repair/force is requested explicitly
         * Intended for AppImage and packaged installs so users can install tracked example scripts without manually extracting repo files
         * Bundled examples currently include `obs-startup` and `obs-source-recaller`
         * `YASH_DATA_DIR/scripts/<example-id>/config.jsonc` is the single source of truth owned by that script; do not split normal script settings across a separate runtime settings file
+        * Default install strategy is `link` for local dev checkouts and `copy` for AppImage/packaged runtimes; `link` symlinks immutable tracked files while still copying `config.jsonc` so script-local settings stay user-owned
         * Every bundled script or bundled example script must expose both `/action <prefix>.config` and `/action <prefix>.configTUI`
         * `<prefix>.config` must show/update the script-local settings stored in `YASH_DATA_DIR/scripts/<scriptId>/config.jsonc` and remain callable over IPC
         * `<prefix>.configTUI` must edit the same `config.jsonc` surface from the live TUI and stay blocked over IPC
@@ -45,6 +47,7 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
         * Bundled `obs-startup` actions: `begin`, `cancel`, `status`, `config`, and `configTUI`; all persisted startup settings now live in `YASH_DATA_DIR/scripts/obs-startup/config.jsonc`
         * Bundled `obs-shutdown` exposes `/action obs.shutdown.config` and `/action obs.shutdown.configTUI` against `YASH_DATA_DIR/scripts/obs-shutdown/config.jsonc`
         * `repair`/`force` refreshes tracked files and merges shipped `config.jsonc` defaults with the user's current `config.jsonc`, preserving existing values and unknown keys
+        * Explicit `copy` forces copied tracked files even in local dev; explicit `link` forces symlinked tracked files when the runtime supports it
         * `obs-source-recaller` actions: `config [startPaused=<true|false>]`, `configTUI`, `save source=<source|scene.source> [stage=<inputSettings|sceneItemTransform|sceneItemEnabled>]`, `load source=<source|scene.source>`, `list`, `explore [scene=<scene>]`, `pause`, and `resume`
         * For `save` and `load`, the active OBS program scene is always the trigger scene; an explicit `scene.source` only changes the targeted source path so nested/keyed sources can be captured or restored under the active trigger
         * `obs-source-recaller.save` without `stage=` refreshes all three restore stages for the target source; with `stage=...` it replaces only that stored stage and leaves the other saved stages for that source unchanged

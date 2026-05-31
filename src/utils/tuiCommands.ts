@@ -1,5 +1,10 @@
 import type { ActionRegistry } from '../actions/registry';
+import type { ActionArgSchema } from '../actions/types';
 import { BUNDLED_EXAMPLE_SCRIPT_IDS } from '../scripts/examples';
+import {
+  getDynamicActionArgAutocomplete,
+  parseActionAutocompleteContext,
+} from './actionAutocomplete';
 import { CHAT_CLEAR_TARGETS } from './chatClear';
 
 /**
@@ -78,7 +83,7 @@ const SETTINGS_KEYS = [
 const CHAT_ARGS = ['clear'];
 const LOGS_ARGS = ['clear', 'tail', 'visible'];
 const SCRIPTS_ARGS = ['list', 'install'];
-const SCRIPTS_INSTALL_ARGS = ['repair', 'force'];
+const SCRIPTS_INSTALL_ARGS = ['repair', 'force', 'copy', 'link'];
 const SETTINGS_OPS = ['get', 'set'];
 
 /** Longest common prefix of an array of strings. */
@@ -327,6 +332,12 @@ export function getAutocomplete(input: string): {
       return { completion: null, hints: [...SCRIPTS_INSTALL_ARGS], completions: [] };
     }
 
+    if (rest.endsWith(' ') && first === 'install' && parts.length >= 3) {
+      const usedOptions = new Set(parts.slice(2));
+      const remainingOptions = SCRIPTS_INSTALL_ARGS.filter((option) => !usedOptions.has(option));
+      return { completion: null, hints: remainingOptions, completions: [] };
+    }
+
     if (first === 'install' && parts.length === 2) {
       const partial = parts[1] ?? '';
       const ranked = rankCandidates([...BUNDLED_EXAMPLE_SCRIPT_IDS], partial);
@@ -345,21 +356,24 @@ export function getAutocomplete(input: string): {
       };
     }
 
-    if (first === 'install' && parts.length === 3) {
-      const partial = parts[2] ?? '';
-      const ranked = rankCandidates([...SCRIPTS_INSTALL_ARGS], partial);
+    if (first === 'install' && parts.length >= 3) {
+      const usedOptions = new Set(parts.slice(2, -1));
+      const partial = parts[parts.length - 1] ?? '';
+      const remainingOptions = SCRIPTS_INSTALL_ARGS.filter((option) => !usedOptions.has(option));
+      const ranked = rankCandidates([...remainingOptions], partial);
       if (ranked.length === 0) return { completion: null, hints: [], completions: [] };
       const hints = ranked.map((match) => match.candidate);
       const prefixMatches = ranked.filter((match) => match.lower.startsWith(partial.toLowerCase()));
+      const prefix = ['install', ...parts.slice(1, -1)].join(' ');
       return {
         completion:
           prefixMatches.length === 1
-            ? `${cmd} install ${parts[1]} ${prefixMatches[0]?.candidate ?? ''}`
+            ? `${cmd} ${prefix} ${prefixMatches[0]?.candidate ?? ''}`
             : ranked.length === 1
-              ? `${cmd} install ${parts[1]} ${ranked[0]?.candidate ?? ''}`
+              ? `${cmd} ${prefix} ${ranked[0]?.candidate ?? ''}`
               : null,
         hints,
-        completions: hints.map((arg) => `${cmd} install ${parts[1]} ${arg}`),
+        completions: hints.map((arg) => `${cmd} ${prefix} ${arg}`),
       };
     }
 
@@ -454,13 +468,31 @@ export function getAutocomplete(input: string): {
         id: string;
         visibility: string;
         safety: string;
-        args: Record<string, { type: string; values?: string[] }>;
+        args: Record<string, ActionArgSchema>;
       }>
     ).filter((a) => a.visibility === 'public' && a.safety !== 'blocked');
     const allIds = allActions.map((a) => a.id);
 
     // Sub-case A: completing the action id (rest has no space).
     if (!rest.includes(' ')) {
+      const exactAction = allActions.find((action) => action.id === rest);
+      if (exactAction) {
+        const argNames = Object.keys(exactAction.args ?? {});
+        if (argNames.length === 0) {
+          return { completion: null, hints: [], completions: [] };
+        }
+        const hints = rankCandidates(
+          argNames.map((name) => `${name}=`),
+          '',
+        ).map((match) => match.candidate);
+        const base = `${cmd} ${rest} `;
+        return {
+          completion: base,
+          hints,
+          completions: hints.map((hint) => `${base}${hint}`),
+        };
+      }
+
       const partial = rest; // preserve original case
       return buildTokenAutocomplete(cmd, allIds, partial);
     }
@@ -477,7 +509,7 @@ export function getAutocomplete(input: string): {
     const argNames = Object.keys(argsDef);
 
     // Parse already-provided args (key=value tokens before the last one).
-    const tokens = argsPart.split(' ');
+    const { tokens, currentArgs } = parseActionAutocompleteContext(argsPart, argsDef);
     const lastToken = tokens[tokens.length - 1] ?? '';
     const previousTokens = tokens.slice(0, -1);
     const usedArgNames = previousTokens
@@ -491,6 +523,25 @@ export function getAutocomplete(input: string): {
       const valuePartial = lastToken.slice(eqIdx + 1);
       const schema = argsDef[argName];
       if (!schema) return { completion: null, hints: [], completions: [] };
+
+      const dynamic = getDynamicActionArgAutocomplete({
+        actionId,
+        argName,
+        schema,
+        rawInput: input,
+        actionIdToken: actionId,
+        tokens,
+        currentArgs,
+        valuePartial,
+      });
+      if (dynamic) {
+        const hints = dynamic.loading ? [...dynamic.hints, '<loading…>'] : dynamic.hints;
+        return {
+          completion: dynamic.completions.length === 1 ? (dynamic.completions[0] ?? null) : null,
+          hints,
+          completions: dynamic.completions,
+        };
+      }
 
       if (schema.type === 'enum' && schema.values) {
         const ranked = rankCandidates(schema.values, valuePartial);

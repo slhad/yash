@@ -32,6 +32,12 @@ import {
 import { ChatterCache } from './services/chatter-cache';
 import { messageLog, type StreamSummary } from './services/message-log';
 import { formatActionHelp, parseActionArgs, parseLooseActionArgs } from './utils/actionArgs';
+import {
+  clearActionAutocompleteCaches,
+  invalidateActionAutocompleteForObsEvent,
+  setActionAutocompleteRuntime,
+  subscribeToActionAutocompleteRefresh,
+} from './utils/actionAutocomplete';
 import { type ChatClearLineKind, runChatClearCommand } from './utils/chatClear';
 import { buildChatHistoryMessages } from './utils/chatHistoryLoader';
 import {
@@ -3553,6 +3559,18 @@ const commandHandlers: Record<
 };
 initTuiCommands(Object.keys(commandHandlers).sort());
 setActionRegistry(registry);
+setActionAutocompleteRuntime({
+  getObsConnectionState: () => obsService.isConnected(),
+  getObsCurrentScene: () => obsService.getCurrentScene(),
+  getObsSceneList: () => obsService.getSceneList(),
+  getObsSceneItemList: (sceneName) => obsService.getSceneItemList(sceneName),
+});
+obsService.subscribeToCurrentSceneChanges(() => {
+  clearActionAutocompleteCaches();
+});
+obsService.subscribeToStatusChanges(() => {
+  clearActionAutocompleteCaches();
+});
 
 async function handleCommand(trimmed: string): Promise<void> {
   if (!trimmed.startsWith('/')) {
@@ -7025,6 +7043,7 @@ async function main() {
   });
 
   obsService.subscribeToMessages((event) => {
+    invalidateActionAutocompleteForObsEvent(event);
     const type = event?.eventType as string | undefined;
     if (type === 'CurrentProgramSceneChanged') {
       const scene = (event?.eventData?.sceneName as string) ?? 'unknown';
@@ -7109,6 +7128,11 @@ async function main() {
   // Build UI tree once — no flicker on periodic updates
   uiNodes = initUI(renderer, lastMessages);
   void refreshTuiFfzEmotes('startup');
+  subscribeToActionAutocompleteRefresh(() => {
+    if (!uiNodes) return;
+    updateInputAssist();
+    updateUI(lastMessages);
+  });
 
   // Focus input and wire ENTER + INPUT handlers once
   ensureMainInputFocus();

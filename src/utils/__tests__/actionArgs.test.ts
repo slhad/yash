@@ -107,6 +107,15 @@ describe('parseActionArgs', () => {
     expect(errors).toEqual([]);
   });
 
+  test('enum valid quoted value is unwrapped and accepted', () => {
+    const schema: Record<string, ActionArgSchema> = {
+      mode: { type: 'enum', values: ['live', 'vod', 'clip'] },
+    };
+    const { args, errors } = parseActionArgs(["mode='vod'"], schema);
+    expect(args).toEqual({ mode: 'vod' });
+    expect(errors).toEqual([]);
+  });
+
   test('enum invalid value produces an error', () => {
     const schema: Record<string, ActionArgSchema> = {
       mode: { type: 'enum', values: ['live', 'vod', 'clip'] },

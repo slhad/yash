@@ -1,11 +1,21 @@
 import type { PlatformProvider } from '../platforms/base';
 import type { ChatService } from '../services/chat.service';
+import type { ActionArgAutocompleteSpec } from './autocomplete';
+
+type ActionArgSchemaBase = {
+  autocomplete?: ActionArgAutocompleteSpec;
+};
 
 export type ActionArgSchema =
-  | { type: 'string'; required?: boolean; minLength?: number; maxLength: number }
-  | { type: 'boolean'; required?: boolean }
-  | { type: 'number'; required?: boolean; min?: number; max?: number }
-  | { type: 'enum'; required?: boolean; values: string[] };
+  | (ActionArgSchemaBase & {
+      type: 'string';
+      required?: boolean;
+      minLength?: number;
+      maxLength: number;
+    })
+  | (ActionArgSchemaBase & { type: 'boolean'; required?: boolean })
+  | (ActionArgSchemaBase & { type: 'number'; required?: boolean; min?: number; max?: number })
+  | (ActionArgSchemaBase & { type: 'enum'; required?: boolean; values: string[] });
 
 export type ActionSafety = 'safe' | 'confirm' | 'dangerous' | 'blocked';
 export type ActionVisibility = 'public' | 'internal';

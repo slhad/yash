@@ -2,6 +2,7 @@
 // Bundled scripts (src/scripts/*.ts) use internal imports and register directly.
 // User scripts (~/.config/yash/scripts/*.ts) use the ScriptApi passed to their setup function.
 
+import type { ActionArgAutocompleteSpec } from '../actions/autocomplete';
 import type { ActionArgMode, ScriptConfigModalSpec, YashActionDefinition } from '../actions/types';
 
 // ─── Bundled script convention ────────────────────────────────────────────────
@@ -23,11 +24,20 @@ export type UserScriptResult = {
   warnings?: string[];
 };
 
+type UserScriptArgSchemaBase = {
+  autocomplete?: ActionArgAutocompleteSpec;
+};
+
 export type UserScriptArgSchema =
-  | { type: 'string'; required?: boolean; minLength?: number; maxLength: number }
-  | { type: 'boolean'; required?: boolean }
-  | { type: 'number'; required?: boolean; min?: number; max?: number }
-  | { type: 'enum'; required?: boolean; values: string[] };
+  | (UserScriptArgSchemaBase & {
+      type: 'string';
+      required?: boolean;
+      minLength?: number;
+      maxLength: number;
+    })
+  | (UserScriptArgSchemaBase & { type: 'boolean'; required?: boolean })
+  | (UserScriptArgSchemaBase & { type: 'number'; required?: boolean; min?: number; max?: number })
+  | (UserScriptArgSchemaBase & { type: 'enum'; required?: boolean; values: string[] });
 
 export type UserScriptAction = {
   id: string;

@@ -1,5 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import type { ActionArgAutocompleteSpec } from '../actions/autocomplete';
 import { IpcActionError, registry } from '../actions/registry';
 import {
   type ActionArgMode,
@@ -19,11 +20,20 @@ export type UserScriptResult = {
   warnings?: string[];
 };
 
+type UserScriptArgSchemaBase = {
+  autocomplete?: ActionArgAutocompleteSpec;
+};
+
 export type UserScriptArgSchema =
-  | { type: 'string'; required?: boolean; minLength?: number; maxLength: number }
-  | { type: 'boolean'; required?: boolean }
-  | { type: 'number'; required?: boolean; min?: number; max?: number }
-  | { type: 'enum'; required?: boolean; values: string[] };
+  | (UserScriptArgSchemaBase & {
+      type: 'string';
+      required?: boolean;
+      minLength?: number;
+      maxLength: number;
+    })
+  | (UserScriptArgSchemaBase & { type: 'boolean'; required?: boolean })
+  | (UserScriptArgSchemaBase & { type: 'number'; required?: boolean; min?: number; max?: number })
+  | (UserScriptArgSchemaBase & { type: 'enum'; required?: boolean; values: string[] });
 
 export type UserScriptAction = {
   id: string;
@@ -385,11 +395,32 @@ export type UserScriptResult = {
   warnings?: string[];
 };
 
+export type ActionArgAutocompleteSpec =
+  | { type: 'static'; values: string[]; valueHint?: string }
+  | {
+      type: 'provider';
+      providerId: string;
+      values?: string[];
+      valueHint?: string;
+      params?: Record<string, unknown>;
+    };
+
 export type UserScriptArgSchema =
-  | { type: 'string'; required?: boolean; minLength?: number; maxLength: number }
-  | { type: 'boolean'; required?: boolean }
-  | { type: 'number'; required?: boolean; min?: number; max?: number }
-  | { type: 'enum'; required?: boolean; values: string[] };
+  | {
+      type: 'string';
+      required?: boolean;
+      minLength?: number;
+      maxLength: number;
+      autocomplete?: ActionArgAutocompleteSpec;
+    }
+  | { type: 'boolean'; required?: boolean; autocomplete?: ActionArgAutocompleteSpec }
+  | { type: 'number'; required?: boolean; min?: number; max?: number; autocomplete?: ActionArgAutocompleteSpec }
+  | {
+      type: 'enum';
+      required?: boolean;
+      values: string[];
+      autocomplete?: ActionArgAutocompleteSpec;
+    };
 
 export type UserScriptAction = {
   id: string;
