@@ -17,18 +17,21 @@ type StoredOperation =
       stage: 'inputSettings';
       priority: 10;
       data: InputSettings;
+      checkIfChangedToApply: boolean;
     }
   | {
       sourceRef: string;
       stage: 'sceneItemTransform';
       priority: 20;
       data: SceneItemTransform;
+      checkIfChangedToApply: boolean;
     }
   | {
       sourceRef: string;
       stage: 'sceneItemEnabled';
       priority: 30;
       data: boolean;
+      checkIfChangedToApply: boolean;
     };
 
 type StoredState = {
@@ -45,12 +48,31 @@ type TargetRef = {
 type ApplyStageKey = 'inputSettings' | 'sceneItemTransform' | 'sceneItemEnabled';
 
 type ApplyOperation = {
+  sourceRef: string;
   sceneName: string;
   sourceName: string;
   sceneItemId: number;
   stage: ApplyStageKey;
   priority: number;
+  checkIfChangedToApply: boolean;
+  shouldApply: () => Promise<boolean>;
   apply: () => Promise<void>;
+};
+
+type ApplyOperationOutcome = {
+  sourceRef: string;
+  sceneName: string;
+  sourceName: string;
+  stage: ApplyStageKey;
+  action: 'applied' | 'skipped' | 'failed';
+  checkIfChangedToApply: boolean;
+  reason?: string;
+};
+
+type ApplyOperationsSummary = {
+  outcomes: ApplyOperationOutcome[];
+  fullyRestoredSourceRefs: string[];
+  failedSourceRefs: string[];
 };
 
 type SourceRecallerConfig = {
@@ -113,11 +135,18 @@ const APPLY_STAGE_ORDER: Array<{
     key: 'inputSettings',
     priority: 10,
     build: (api, sceneName, sourceName, sceneItemId, operation) => ({
+      sourceRef: operation.sourceRef,
       sceneName,
       sourceName,
       sceneItemId,
       stage: 'inputSettings',
       priority: 10,
+      checkIfChangedToApply: operation.checkIfChangedToApply,
+      shouldApply: async () => {
+        if (!operation.checkIfChangedToApply) return true;
+        const current = await api.obs.getInputSettings(sourceName);
+        return !matchesDesiredSubset(current, operation.data);
+      },
       apply: async () => {
         await api.obs.setInputSettings(sourceName, operation.data);
       },
@@ -127,11 +156,20 @@ const APPLY_STAGE_ORDER: Array<{
     key: 'sceneItemTransform',
     priority: 20,
     build: (api, sceneName, sourceName, sceneItemId, operation) => ({
+      sourceRef: operation.sourceRef,
       sceneName,
       sourceName,
       sceneItemId,
       stage: 'sceneItemTransform',
       priority: 20,
+      checkIfChangedToApply: operation.checkIfChangedToApply,
+      shouldApply: async () => {
+        if (!operation.checkIfChangedToApply) return true;
+        const current = sanitizeSceneItemTransform(
+          await api.obs.getSceneItemTransform(sceneName, sceneItemId),
+        );
+        return !matchesDesiredSubset(current, operation.data);
+      },
       apply: async () => {
         await api.obs.setSceneItemTransform(sceneName, sceneItemId, operation.data);
       },
@@ -141,11 +179,18 @@ const APPLY_STAGE_ORDER: Array<{
     key: 'sceneItemEnabled',
     priority: 30,
     build: (api, sceneName, sourceName, sceneItemId, operation) => ({
+      sourceRef: operation.sourceRef,
       sceneName,
       sourceName,
       sceneItemId,
       stage: 'sceneItemEnabled',
       priority: 30,
+      checkIfChangedToApply: operation.checkIfChangedToApply,
+      shouldApply: async () => {
+        if (!operation.checkIfChangedToApply) return true;
+        const current = await api.obs.getSceneItemEnabled(sceneName, sceneItemId);
+        return current !== operation.data;
+      },
       apply: async () => {
         await api.obs.setSceneItemEnabled(sceneName, sceneItemId, operation.data);
       },
@@ -159,6 +204,36 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function cloneRecord(value: Record<string, unknown>): Record<string, unknown> {
   return JSON.parse(JSON.stringify(value)) as Record<string, unknown>;
+}
+
+function sanitizeSceneItemTransform(value: Record<string, unknown>): Record<string, unknown> {
+  const sanitized = cloneRecord(value);
+  delete sanitized.sourceWidth;
+  delete sanitized.sourceHeight;
+  delete sanitized.width;
+  delete sanitized.height;
+
+  if (sanitized.boundsType === 'OBS_BOUNDS_NONE') {
+    delete sanitized.boundsWidth;
+    delete sanitized.boundsHeight;
+  } else {
+    if (sanitized.boundsWidth === 0) delete sanitized.boundsWidth;
+    if (sanitized.boundsHeight === 0) delete sanitized.boundsHeight;
+  }
+
+  return sanitized;
+}
+
+function matchesDesiredSubset(current: unknown, desired: unknown): boolean {
+  if (Array.isArray(desired)) {
+    if (!Array.isArray(current) || current.length !== desired.length) return false;
+    return desired.every((entry, index) => matchesDesiredSubset(current[index], entry));
+  }
+  if (isRecord(desired)) {
+    if (!isRecord(current)) return false;
+    return Object.entries(desired).every(([key, value]) => matchesDesiredSubset(current[key], value));
+  }
+  return Object.is(current, desired);
 }
 
 function buildSourceRef(sceneName: string, sourceName: string): string {
@@ -197,18 +272,21 @@ function buildStoredOperations(sceneName: string, entry: SourceSnapshotEntry): S
       sourceRef,
       stage: 'inputSettings',
       priority: 10,
+      checkIfChangedToApply: true,
       data: cloneRecord(entry.inputSettings),
     },
     {
       sourceRef,
       stage: 'sceneItemTransform',
       priority: 20,
-      data: cloneRecord(entry.sceneItemTransform),
+      checkIfChangedToApply: true,
+      data: sanitizeSceneItemTransform(entry.sceneItemTransform),
     },
     {
       sourceRef,
       stage: 'sceneItemEnabled',
       priority: 30,
+      checkIfChangedToApply: true,
       data: entry.sceneItemEnabled,
     },
   ];
@@ -231,6 +309,8 @@ function normalizeOperation(value: unknown): StoredOperation | null {
       sourceRef: value.sourceRef,
       stage: 'inputSettings',
       priority: 10,
+      checkIfChangedToApply:
+        typeof value.checkIfChangedToApply === 'boolean' ? value.checkIfChangedToApply : true,
       data: cloneRecord(value.data),
     };
   }
@@ -239,7 +319,9 @@ function normalizeOperation(value: unknown): StoredOperation | null {
       sourceRef: value.sourceRef,
       stage: 'sceneItemTransform',
       priority: 20,
-      data: cloneRecord(value.data),
+      checkIfChangedToApply:
+        typeof value.checkIfChangedToApply === 'boolean' ? value.checkIfChangedToApply : true,
+      data: sanitizeSceneItemTransform(value.data),
     };
   }
   if (value.stage === 'sceneItemEnabled' && typeof value.data === 'boolean' && value.priority === 30) {
@@ -247,6 +329,8 @@ function normalizeOperation(value: unknown): StoredOperation | null {
       sourceRef: value.sourceRef,
       stage: 'sceneItemEnabled',
       priority: 30,
+      checkIfChangedToApply:
+        typeof value.checkIfChangedToApply === 'boolean' ? value.checkIfChangedToApply : true,
       data: value.data,
     };
   }
@@ -346,7 +430,7 @@ const DEFAULT_CONFIG_UI = {
     description: 'JSON map of trigger scenes to ordered restore operations',
     order: 30,
     placeholder:
-      '{"[PS] PrimaryScreen":[{"sourceRef":"[SS] Common.Camera","stage":"inputSettings","priority":10,"data":{}}]}',
+      '{"[PS] PrimaryScreen":[{"sourceRef":"[SS] Common.Camera","stage":"inputSettings","priority":10,"checkIfChangedToApply":true,"data":{}}]}',
   },
 } as const;
 
@@ -501,11 +585,71 @@ export default function setup(api: ScriptApi): () => void {
       .map((entry) => entry.operation);
   }
 
-  async function applySourceOperations(operations: StoredOperation[]): Promise<void> {
+  async function applySourceOperations(operations: StoredOperation[]): Promise<ApplyOperationsSummary> {
     const applyOperations = await buildApplyOperations(operations);
+    const failedSourceRefs = new Set<string>();
+    const fullyRestoredSourceRefs = new Set(applyOperations.map((operation) => operation.sourceRef));
+    const outcomes: ApplyOperationOutcome[] = [];
+
     for (const operation of applyOperations) {
-      await operation.apply();
+      if (failedSourceRefs.has(operation.sourceRef)) {
+        fullyRestoredSourceRefs.delete(operation.sourceRef);
+        outcomes.push({
+          sourceRef: operation.sourceRef,
+          sceneName: operation.sceneName,
+          sourceName: operation.sourceName,
+          stage: operation.stage,
+          action: 'skipped',
+          checkIfChangedToApply: operation.checkIfChangedToApply,
+          reason: 'skipped after earlier stage failure for this source',
+        });
+        continue;
+      }
+
+      try {
+        const shouldApply = await operation.shouldApply();
+        if (!shouldApply) {
+          outcomes.push({
+            sourceRef: operation.sourceRef,
+            sceneName: operation.sceneName,
+            sourceName: operation.sourceName,
+            stage: operation.stage,
+            action: 'skipped',
+            checkIfChangedToApply: operation.checkIfChangedToApply,
+            reason: 'current OBS state already matches the saved value',
+          });
+          continue;
+        }
+
+        await operation.apply();
+        outcomes.push({
+          sourceRef: operation.sourceRef,
+          sceneName: operation.sceneName,
+          sourceName: operation.sourceName,
+          stage: operation.stage,
+          action: 'applied',
+          checkIfChangedToApply: operation.checkIfChangedToApply,
+        });
+      } catch (err) {
+        failedSourceRefs.add(operation.sourceRef);
+        fullyRestoredSourceRefs.delete(operation.sourceRef);
+        outcomes.push({
+          sourceRef: operation.sourceRef,
+          sceneName: operation.sceneName,
+          sourceName: operation.sourceName,
+          stage: operation.stage,
+          action: 'failed',
+          checkIfChangedToApply: operation.checkIfChangedToApply,
+          reason: String(err),
+        });
+      }
     }
+
+    return {
+      outcomes,
+      fullyRestoredSourceRefs: [...fullyRestoredSourceRefs],
+      failedSourceRefs: [...failedSourceRefs],
+    };
   }
 
   async function autoLoadForScene(sceneName: string): Promise<string[]> {
@@ -515,34 +659,28 @@ export default function setup(api: ScriptApi): () => void {
     const operationsForScene = [...(state.triggers[sceneName] ?? [])];
     if (operationsForScene.length === 0) return [];
 
-    let applyOperations: ApplyOperation[];
     try {
-      applyOperations = await buildApplyOperations(operationsForScene);
+      const summary = await applySourceOperations(operationsForScene);
+      for (const outcome of summary.outcomes) {
+        if (outcome.action !== 'failed') continue;
+        api.logger.warn(
+          `[obs-source-recaller] failed to auto-load stage "${outcome.stage}" for "${outcome.sourceName}" in "${sceneName}": ${outcome.reason}`,
+        );
+      }
+
+      const applied = describeSceneEntries(summary.fullyRestoredSourceRefs, sceneName);
+      if (applied.length > 0) {
+        api.logger.info(
+          `[obs-source-recaller] auto-loaded ${applied.join(', ')} for scene "${sceneName}"`,
+        );
+      }
+      return applied;
     } catch (err) {
       api.logger.warn(
         `[obs-source-recaller] failed to prepare auto-load for "${sceneName}": ${String(err)}`,
       );
       return [];
     }
-
-    for (const operation of applyOperations) {
-      try {
-        await operation.apply();
-      } catch (err) {
-        api.logger.warn(
-          `[obs-source-recaller] failed to auto-load stage "${operation.stage}" for "${operation.sourceName}" in "${sceneName}": ${String(err)}`,
-        );
-        return [];
-      }
-    }
-
-    const applied = describeSceneEntries(listSourceRefsForTriggerScene(state, sceneName), sceneName);
-    if (applied.length > 0) {
-      api.logger.info(
-        `[obs-source-recaller] auto-loaded ${applied.join(', ')} for scene "${sceneName}"`,
-      );
-    }
-    return applied;
   }
 
   let autoLoadChain: Promise<void> = Promise.resolve();
@@ -743,17 +881,40 @@ export default function setup(api: ScriptApi): () => void {
           };
         }
 
-        await applySourceOperations(operations);
+        const summary = await applySourceOperations(operations);
+        const failedOutcomes = summary.outcomes.filter((outcome) => outcome.action === 'failed');
+        const warnings = [
+          ...failedOutcomes.map(
+            (outcome) =>
+              `[obs-source-recaller] stage "${outcome.stage}" failed for "${sourceRef}": ${outcome.reason}`,
+          ),
+          ...summary.outcomes
+            .filter(
+              (outcome) =>
+                outcome.action === 'skipped' &&
+                outcome.reason === 'current OBS state already matches the saved value',
+            )
+            .map(
+              (outcome) =>
+                `[obs-source-recaller] skipped "${outcome.stage}" for "${sourceRef}" because current OBS state already matched the saved value`,
+            ),
+        ];
+        const restored = summary.fullyRestoredSourceRefs.includes(sourceRef);
         return {
-          output: [
-            `[obs-source-recaller] restored "${sourceRef}" for trigger scene "${target.triggerSceneName}"`,
-          ],
+          output: restored
+            ? [`[obs-source-recaller] restored "${sourceRef}" for trigger scene "${target.triggerSceneName}"`]
+            : [
+                `[obs-source-recaller] partial restore for "${sourceRef}" in trigger scene "${target.triggerSceneName}"`,
+              ],
+          warnings: warnings.length > 0 ? warnings : undefined,
           data: {
             source: target.sourceName,
             sourceRef,
             scene: target.triggerSceneName,
             targetScene: target.targetSceneName,
-            restored: true,
+            restored,
+            waitBehavior: 'sequential_obs_request_ack',
+            outcomes: summary.outcomes,
             paused: state.paused,
           },
         };

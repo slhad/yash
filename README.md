@@ -273,6 +273,9 @@ Notes:
 
 - `load` restores the saved snapshot for the current OBS trigger scene; an explicit `scene.source` changes the targeted source rather than the trigger scene
 - `save` without `stage=` refreshes all three restore stages; with `stage=...` it replaces only that stored stage for the target source and leaves the other saved stages untouched
+- Restores wait for each OBS request ACK before starting the next stage; there is no extra sleep, but the script does not mark the restore complete until the full sequential ACK chain finishes
+- Saved and edited trigger operations support `checkIfChangedToApply`; when true, a stage is skipped if the current OBS state already matches the saved value
+- Automatic scene recalls keep stage order per source, skip later stages for a source after that source fails, and continue restoring unrelated sources in the same scene
 - `pause` disables automatic scene-change recalls without deleting saved snapshots
 - `resume` re-enables recalls and, when OBS is connected, immediately reapplies any matching snapshots for the current scene
 - `config` updates the script-local `startPaused` default, while `configTUI` can also edit top-level `paused` and the `triggers` JSON map in `YASH_DATA_DIR/scripts/obs-source-recaller/config.jsonc`
