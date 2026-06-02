@@ -81,6 +81,10 @@ const REQUIRED_WEBHOOK_EVENTS = [
   { name: 'channel.subscription.gifted', version: 1 },
 ] as const;
 
+function isTruthyEnv(value: string | undefined): boolean {
+  return value === '1' || value === 'true';
+}
+
 export class KickProvider implements PlatformProvider {
   // ---- config ----------------------------------------------------------------
   private clientId: string = '';
@@ -104,7 +108,15 @@ export class KickProvider implements PlatformProvider {
   private lastError: string | null = null;
   private viewerCount = 0;
   private streamStartTime: Date | null = null;
-  private pollTimer: ReturnType<typeof setInterval> | null = null;
+  private pollTimer: ReturnType<typeof setTimeout> | null = null;
+  private pollEnabled = false;
+  private pollGeneration = 0;
+  private pollCount = 0;
+  private pollOverlapCount = 0;
+  private pollInFlight = 0;
+  private pollInFlightHighWater = 0;
+  private pollLastDurationMs = 0;
+  private pollMaxDurationMs = 0;
 
   // ---- chat ------------------------------------------------------------------
   private messageCallbacks: ((msg: ChatMessage) => void)[] = [];
@@ -126,6 +138,7 @@ export class KickProvider implements PlatformProvider {
   // ---- smee webhook relay ----------------------------------------------------
   private smeeRelay: SmeeRelay | null = null;
   private webhookUrl: string | null = null;
+  private runtimeDisabled = false;
 
   // ---- token file ------------------------------------------------------------
   private static getDataDir(): string {
@@ -155,6 +168,7 @@ export class KickProvider implements PlatformProvider {
     this.clientSecret = cfg.clientSecret || process.env.KICK_CLIENT_SECRET || '';
     this.redirectUri =
       cfg.redirectUri || process.env.KICK_REDIRECT_URI || 'http://localhost:3000/api/kick/callback';
+    this.runtimeDisabled = isTruthyEnv(process.env.YASH_DISABLE_KICK_RUNTIME);
   }
 
   private buildClient(): KickClientInstance {
@@ -261,23 +275,39 @@ export class KickProvider implements PlatformProvider {
   private async _initFromToken(token: KickTokenFile, client?: KickClientInstance): Promise<void> {
     this.client = client ?? this.buildClient();
     this.client.setToken(token);
+    const validatedAccessToken = await (this.client as any).getAccessToken();
+    const activeToken = (this.client as any).token as OAuthToken | null;
+    if (!validatedAccessToken || !activeToken) {
+      throw new Error('Kick token validation failed');
+    }
 
-    if (!token.broadcasterId) {
+    const hydratedToken: KickTokenFile = {
+      ...token,
+      ...activeToken,
+      broadcasterId: token.broadcasterId,
+      channelSlug: token.channelSlug,
+    };
+
+    if (!hydratedToken.broadcasterId) {
       const { id, slug } = await this._fetchSelfChannel(this.client);
-      token.broadcasterId = id;
-      token.channelSlug = slug;
-      await this.writeTokenFile(token);
+      hydratedToken.broadcasterId = id;
+      hydratedToken.channelSlug = slug;
       defaultLogger.info('[Kick] broadcasterId missing from token file — fetched and persisted');
     }
 
-    this.broadcasterId = token.broadcasterId;
-    this.channelSlug = token.channelSlug;
+    this.broadcasterId = hydratedToken.broadcasterId;
+    this.channelSlug = hydratedToken.channelSlug;
     this.isAuthenticatedFlag = true;
     this.connectionStatus = 'connected';
 
-    this._watchClientToken(this.client, token.expiresAt);
+    this._watchClientToken(this.client, hydratedToken.expiresAt);
+    await this.writeTokenFile(hydratedToken);
 
-    this._startPoll();
+    if (this.runtimeDisabled) {
+      defaultLogger.info('[Kick] runtime hooks disabled by env');
+    } else {
+      this._startPoll();
+    }
     defaultLogger.info(`[Kick] authenticated as ${this.channelSlug} (id: ${this.broadcasterId})`);
   }
 
@@ -747,20 +777,49 @@ export class KickProvider implements PlatformProvider {
   // ---------------------------------------------------------------------------
   private _startPoll() {
     this._stopPoll();
-    this.pollTimer = setInterval(() => this._pollStatus(), 60_000);
-    // Run immediately to seed initial state
-    this._pollStatus().catch(() => {});
+    this.pollEnabled = true;
+    this.pollGeneration += 1;
+    const generation = this.pollGeneration;
+    const runPoll = async (delayMs: number) => {
+      this.pollTimer = setTimeout(async () => {
+        this.pollTimer = null;
+        await this._pollStatus();
+        if (!this.pollEnabled || this.pollGeneration !== generation) return;
+        void runPoll(60_000);
+      }, delayMs);
+    };
+    if (this.pollInFlight > 0) {
+      this.pollTimer = setTimeout(() => {
+        if (!this.pollEnabled || this.pollGeneration !== generation || this.pollInFlight > 0) {
+          return;
+        }
+        void runPoll(0);
+      }, 50);
+      return;
+    }
+    void runPoll(0);
   }
 
   private _stopPoll() {
+    this.pollEnabled = false;
+    this.pollGeneration += 1;
     if (this.pollTimer) {
-      clearInterval(this.pollTimer);
+      clearTimeout(this.pollTimer);
       this.pollTimer = null;
     }
   }
 
   private async _pollStatus() {
     if (!this.client || !this.broadcasterId) return;
+    this.pollCount += 1;
+    this.pollInFlight += 1;
+    if (this.pollInFlight > 1) {
+      this.pollOverlapCount += 1;
+    }
+    if (this.pollInFlight > this.pollInFlightHighWater) {
+      this.pollInFlightHighWater = this.pollInFlight;
+    }
+    const startedAt = performance.now();
     try {
       const streams = await this.client.livestreams.getLivestreams({
         broadcaster_user_id: [this.broadcasterId],
@@ -777,6 +836,13 @@ export class KickProvider implements PlatformProvider {
       }
     } catch {
       /* ignore poll errors — connection issues shouldn't crash the app */
+    } finally {
+      const durationMs = performance.now() - startedAt;
+      this.pollLastDurationMs = durationMs;
+      if (durationMs > this.pollMaxDurationMs) {
+        this.pollMaxDurationMs = durationMs;
+      }
+      this.pollInFlight = Math.max(0, this.pollInFlight - 1);
     }
   }
 
@@ -957,6 +1023,25 @@ export class KickProvider implements PlatformProvider {
     } catch {
       return partial;
     }
+  }
+
+  getDebugState(): Record<string, number | boolean> {
+    return {
+      authenticated: this.isAuthenticatedFlag,
+      runtimeDisabled: this.runtimeDisabled,
+      pollTimerActive: this.pollTimer !== null,
+      smeeRelayActive: this.smeeRelay !== null,
+      messageCallbacks: this.messageCallbacks.length,
+      activityCallbacks: this.activityCallbacks.length,
+      viewerCount: this.viewerCount,
+      streamOnline: this.streamStatus === StreamStatus.ONLINE,
+      pollCount: this.pollCount,
+      pollOverlapCount: this.pollOverlapCount,
+      pollInFlight: this.pollInFlight,
+      pollInFlightHighWater: this.pollInFlightHighWater,
+      pollLastDurationMs: this.pollLastDurationMs,
+      pollMaxDurationMs: this.pollMaxDurationMs,
+    };
   }
 
   // ---------------------------------------------------------------------------

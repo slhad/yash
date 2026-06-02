@@ -238,6 +238,30 @@ describe('obs-startup bundled example script', () => {
     expect(beginResult.output).toContain('[obs-startup] start stream → yes');
   });
 
+  test('live switches directly to the configured live scene and reapplies live outputs', async () => {
+    const harness = await createActionHarness({
+      config: {
+        showSources: ['[LS] Live.Nested.[SC] Brio.NB'],
+        unmuteSources: ['Mic/Aux'],
+        liveMessage: "We're live!",
+      },
+    });
+    tempDir = harness.tempDir;
+    const live = harness.getAction('obs.startup.live');
+
+    const result = await live.invoke({});
+
+    expect(result.output).toContain('[obs-startup] live scene → [LS] Live');
+    expect(result.output).toContain('[obs-startup] show → [LS] Live.Nested.[SC] Brio.NB');
+    expect(result.output).toContain('[obs-startup] unmute → Mic/Aux');
+    expect(result.output).toContain("[obs-startup] live message → We're live!");
+    expect(harness.spies.setCurrentScene).toHaveBeenCalledWith('[LS] Live');
+    expect(harness.spies.getSceneItemId).toHaveBeenCalledWith('[LS] Live.Nested', '[SC] Brio.NB');
+    expect(harness.spies.setSceneItemEnabled).toHaveBeenCalledWith('[LS] Live.Nested', 3, true);
+    expect(harness.spies.setInputMute).toHaveBeenCalledWith('Mic/Aux', false);
+    expect(harness.spies.sendMessage).toHaveBeenCalledWith("We're live!");
+  });
+
   test('configTUI opens the generic script config modal and stays TUI-only', async () => {
     const openScriptConfigModal = mock(() => {});
     const harness = await createActionHarness({

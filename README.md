@@ -41,6 +41,7 @@ bun run cmd /settings get stream.title
 bun run cmd /settings set demo true
 bun run cmd /connect youtube
 bun run cmd /msg all Hello chat
+bun run cmd /memory
 bun run cmd /help
 bun run cmd /scripts list
 bun run cmd /scripts install obs-source-recaller
@@ -53,6 +54,10 @@ Both forms are accepted — `bun run cmd marker` and `bun run cmd /marker` are e
 `/markers restore twitch [limit]` imports recent Twitch markers into persisted YouTube chapters, but only when that marker text is missing from YouTube already. Persisted YouTube chapters stay sorted by timestamp so `/markers`, edit, and clear IDs remain stable after imports.
 
 Commands invoked over IPC are also echoed into the live TUI chat pane before their output, using an `[ipc → cmd] /...` line. The same command echo exists for typed slash commands inside the TUI as `[you → cmd] /...`.
+
+`/memory` prints a live process snapshot from inside YASH itself: RSS, heap/external usage, recent growth windows, and retention probe counts for major long-lived buffers/caches. The same data is also available over HTTP at `GET /api/runtime/status`, while `/api/metrics` and `/metrics` expose the numeric gauges for scraping. For TUI leak triage, the payload includes refresh-loop counters such as `updateUiLoopRefreshCount`, `updateLoopEnabled`, and `updateLoopSkippedRefreshCount` so you can confirm whether the periodic 2s loop is actually rebuilding the UI or idling.
+
+Inside the live TUI, `/memory modal` opens the same memory status overlay as clicking the `MEM:` status-bar segment. That subcommand is TUI-only and is rejected over IPC and the WebUI command box.
 
 **Exit behaviour:**
 - Exits `0` with stdout output on success
@@ -70,6 +75,7 @@ Commands invoked over IPC are also echoed into the live TUI chat pane before the
 | `/activity` | Requires TUI modal interaction |
 | `/chatter` | Requires TUI modal interaction |
 | `/inject` | TUI-only dev/testing helper |
+| `/memory modal` | Requires TUI modal interaction |
 | `/settings` (bare) | Requires TUI settings modal |
 
 `/settings get <key>` and `/settings set <key> <value>` work normally over IPC.
@@ -113,7 +119,7 @@ bun run cmd /action obs.startup.config countdownDelay=60 startStream=true
 - `/action <id>` shows help and examples when required args are still missing
 - `/action <id> key=value ...` parses typed args and invokes the action
 
-The TUI autocomplete also understands `/action`, including action ids, `key=` argument names, and enum values. Matches are fuzzy-ranked: prefix matches win, then substring matches, then subsequence matches.
+The TUI autocomplete also understands `/action`, including action ids, `key=` argument names, and enum values. Matches are fuzzy-ranked: prefix matches win, then substring matches, then subsequence matches. `Tab` cycles forward through the current completion set, and `Shift+Tab` cycles backward.
 
 Bundled OBS actions also publish scene/source arg metadata for dynamic autocomplete providers. `obs.shutdown.*` exposes `scene=` plus scene-qualified `source=` / `hideSources=` suggestions, and `obs.source-recaller.*` exposes dynamic `source=` / `scene=` suggestions for OBS scene exploration and restore flows.
 
@@ -407,7 +413,15 @@ YASH keeps retrying OBS websocket connections both after an established connecti
 | `YASH_OBS_RECONNECT_MAX_MS` | Maximum backoff cap in ms | `300000` (5 min) |
 | `YASH_OBS_RECONNECT_MULTIPLIER` | Exponential multiplier | `2` |
 | `YASH_OBS_RECONNECT_MAX_ATTEMPTS` | Maximum retry attempts | unlimited |
+| `YASH_OBS_DISABLE_RECONNECT` | Disable reconnect retries after an OBS disconnect/failure (`1`/`true`) | disabled |
 | `YASH_OBS_CONNECT_DELAY_MS` | Simulated connect delay in ms (testing) | `1000` |
+| `YASH_DISABLE_AUTH_AUTO_REFRESH` | Skip AuthService token refresh loop for soak/A-B runs (`1`/`true`) | disabled |
+| `YASH_DISABLE_YOUTUBE_STARTUP` | Skip YouTube startup hooks/poll setup for soak/A-B runs (`1`/`true`) | disabled |
+| `YASH_DISABLE_TWITCH_STARTUP` | Skip Twitch startup hooks/listener setup for soak/A-B runs (`1`/`true`) | disabled |
+| `YASH_DISABLE_KICK_STARTUP` | Skip Kick startup hooks/poll/relay setup for soak/A-B runs (`1`/`true`) | disabled |
+| `YASH_DISABLE_TWITCH_RUNTIME` | Skip Twitch auth-restored chat/viewer runtime startup for soak/A-B runs (`1`/`true`) | disabled |
+| `YASH_DISABLE_KICK_RUNTIME` | Skip Kick auth-restored poll runtime startup for soak/A-B runs (`1`/`true`) | disabled |
+| `YASH_DISABLE_TUI_UPDATE_LOOP` | Skip the 2s periodic TUI refresh loop for soak/A-B runs (`1`/`true`) | disabled |
 
 **Example (env):**
 
@@ -415,6 +429,16 @@ YASH keeps retrying OBS websocket connections both after an established connecti
 export YASH_OBS_RECONNECT_BASE_MS=10000
 export YASH_OBS_RECONNECT_MULTIPLIER=2
 export YASH_OBS_RECONNECT_MAX_ATTEMPTS=10
+# disable retries entirely for OBS-down soak runs
+export YASH_OBS_DISABLE_RECONNECT=1
+# disable all non-chat startup loops for leak A/B runs
+export YASH_DISABLE_AUTH_AUTO_REFRESH=1
+export YASH_DISABLE_YOUTUBE_STARTUP=1
+export YASH_DISABLE_TWITCH_STARTUP=1
+export YASH_DISABLE_KICK_STARTUP=1
+export YASH_DISABLE_TWITCH_RUNTIME=1
+export YASH_DISABLE_KICK_RUNTIME=1
+export YASH_DISABLE_TUI_UPDATE_LOOP=1
 ```
 
 **Example (`~/.config/yash/config.json`):**
@@ -427,13 +451,16 @@ export YASH_OBS_RECONNECT_MAX_ATTEMPTS=10
       "port": "4455",
       "reconnectBaseMs": 10000,
       "reconnectMultiplier": 2,
-      "reconnectMaxAttempts": 10
+      "reconnectMaxAttempts": 10,
+      "disableReconnect": true
     }
   }
 }
 ```
 
 > **Note:** Values supplied via environment variables are parsed as strings and cast to numbers by the app where applicable.
+> Set `YASH_OBS_DISABLE_RECONNECT=1` only for leak/soak A/B runs where you want one initial connect attempt and no automatic retries afterward.
+> The `YASH_DISABLE_*_STARTUP`, `YASH_DISABLE_*_RUNTIME`, `YASH_DISABLE_TUI_UPDATE_LOOP`, and `YASH_DISABLE_AUTH_AUTO_REFRESH` switches are intended only for controlled leak-isolation runs; they intentionally prevent the related background loops from starting.
 
 ## Kick webhook relay
 

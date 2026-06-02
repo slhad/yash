@@ -1,5 +1,6 @@
 import { describe, expect, test, vi } from 'bun:test';
 import { ObsService } from '../src/services/obs.service';
+import { reloadConfig } from '../src/utils/config';
 import { defaultLogger } from '../src/utils/logger';
 
 describe('ObsService backoff', () => {
@@ -76,5 +77,59 @@ describe('ObsService backoff', () => {
       (obs as any).reconnectTimer = null;
     }
     loggerSpy.mockRestore();
+  });
+
+  test('reconnect logging is throttled after repeated failures', async () => {
+    const infoSpy = vi.spyOn(defaultLogger, 'info').mockImplementation(() => {});
+    const warnSpy = vi.spyOn(defaultLogger, 'warn').mockImplementation(() => {});
+
+    class AlwaysFailObs extends ObsService {
+      override async connect(): Promise<void> {
+        return Promise.reject(new Error('connect-failed'));
+      }
+    }
+
+    const obs = new AlwaysFailObs('localhost', 4455, null, false, 5, 0, 60000, 2, 6, () => 1);
+    (obs as any).scheduleReconnectAttempt();
+
+    const { waitFor } = await import('./_helpers/waitFor');
+    await waitFor(
+      () => infoSpy.mock.calls.some(([message]) => String(message).includes('will not retry')),
+      4000,
+    );
+
+    const infoMessages = infoSpy.mock.calls.map(([message]) => String(message));
+    const warnMessages = warnSpy.mock.calls.map(([message]) => String(message));
+
+    expect(infoMessages.some((message) => message.includes('attempt 4'))).toBe(false);
+    expect(warnMessages.some((message) => message.includes('reconnection 4 failed'))).toBe(false);
+    expect(infoMessages.some((message) => message.includes('attempt 5'))).toBe(true);
+    expect(warnMessages.some((message) => message.includes('reconnection 5 failed'))).toBe(true);
+
+    const reconnectTimer = (obs as any).reconnectTimer as ReturnType<typeof setTimeout> | null;
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      (obs as any).reconnectTimer = null;
+    }
+    infoSpy.mockRestore();
+    warnSpy.mockRestore();
+  });
+
+  test('reconnect scheduling can be disabled for soak A/B runs', async () => {
+    const previous = process.env.YASH_OBS_DISABLE_RECONNECT;
+    process.env.YASH_OBS_DISABLE_RECONNECT = '1';
+    await reloadConfig();
+
+    try {
+      const obs = new ObsService('localhost', 4455, null, false, 5, 0, 60000, 2, 6, () => 1);
+      const result = (obs as any).scheduleReconnectAttempt();
+      expect(result).toBeUndefined();
+      expect((obs as any).reconnectTimer).toBeNull();
+      expect(obs.getDebugState().reconnectDisabled).toBe(true);
+    } finally {
+      if (previous === undefined) delete process.env.YASH_OBS_DISABLE_RECONNECT;
+      else process.env.YASH_OBS_DISABLE_RECONNECT = previous;
+      await reloadConfig();
+    }
   });
 });

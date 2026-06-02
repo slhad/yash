@@ -1,8 +1,21 @@
+import { Buffer } from 'node:buffer';
 import type { ChatMessage, PlatformProvider } from '../platforms/base';
 import { messageLog } from './message-log';
 
 const DEFAULT_MAX_HISTORY_SIZE = 1000;
 const MAX_HISTORY_SIZE = 5000;
+const RECENT_MESSAGE_SIZE_SAMPLE_LIMIT = 64;
+const CHAT_MESSAGE_CORE_KEYS = new Set([
+  'id',
+  'platform',
+  'userId',
+  'username',
+  'message',
+  'timestamp',
+  'badges',
+  'color',
+  'streamId',
+]);
 
 function clampHistorySize(size: number): number {
   if (!Number.isFinite(size) || size <= 0) {
@@ -16,6 +29,10 @@ export class ChatService {
   private messageHistory: ChatMessage[] = [];
   private maxHistorySize = DEFAULT_MAX_HISTORY_SIZE;
   private providerUnsubscribers: Map<string, () => void> = new Map();
+  private recentMessageBytes: number[] = [];
+  private recentExtraKeyCounts: number[] = [];
+  private maxObservedMessageBytes = 0;
+  private maxObservedExtraKeyCount = 0;
 
   // Callbacks for when new messages arrive
   private messageCallbacks: ((msg: ChatMessage) => void)[] = [];
@@ -41,6 +58,7 @@ export class ChatService {
   private handleIncomingMessage(message: ChatMessage): void {
     // Normalize the message (ensure consistent format)
     const normalizedMessage = this.normalizeMessage(message);
+    this.recordMessageShape(message, normalizedMessage);
 
     // Add to history
     this.addToHistory(normalizedMessage);
@@ -69,6 +87,41 @@ export class ChatService {
       message: message.message || '',
       timestamp: message.timestamp || Date.now(),
     };
+  }
+
+  private recordMessageShape(rawMessage: ChatMessage, normalizedMessage: ChatMessage): void {
+    const extraKeyCount = Object.keys(rawMessage).filter(
+      (key) => !CHAT_MESSAGE_CORE_KEYS.has(key),
+    ).length;
+    const approxBytes = Buffer.byteLength(JSON.stringify(normalizedMessage), 'utf8');
+
+    this.recentExtraKeyCounts.push(extraKeyCount);
+    if (this.recentExtraKeyCounts.length > RECENT_MESSAGE_SIZE_SAMPLE_LIMIT) {
+      this.recentExtraKeyCounts.splice(
+        0,
+        this.recentExtraKeyCounts.length - RECENT_MESSAGE_SIZE_SAMPLE_LIMIT,
+      );
+    }
+
+    this.recentMessageBytes.push(approxBytes);
+    if (this.recentMessageBytes.length > RECENT_MESSAGE_SIZE_SAMPLE_LIMIT) {
+      this.recentMessageBytes.splice(
+        0,
+        this.recentMessageBytes.length - RECENT_MESSAGE_SIZE_SAMPLE_LIMIT,
+      );
+    }
+
+    if (approxBytes > this.maxObservedMessageBytes) {
+      this.maxObservedMessageBytes = approxBytes;
+    }
+    if (extraKeyCount > this.maxObservedExtraKeyCount) {
+      this.maxObservedExtraKeyCount = extraKeyCount;
+    }
+  }
+
+  private average(values: number[]): number {
+    if (values.length === 0) return 0;
+    return values.reduce((sum, value) => sum + value, 0) / values.length;
   }
 
   /**
@@ -163,6 +216,32 @@ export class ChatService {
    */
   isPlatformRegistered(platform: string): boolean {
     return this.providers.has(platform);
+  }
+
+  getDebugState(): {
+    messageHistorySize: number;
+    maxHistorySize: number;
+    callbackCount: number;
+    providerCount: number;
+    providerUnsubscriberCount: number;
+    recentAvgMessageBytes: number;
+    maxObservedMessageBytes: number;
+    recentAvgExtraKeyCount: number;
+    maxObservedExtraKeyCount: number;
+    recentSamples: number;
+  } {
+    return {
+      messageHistorySize: this.messageHistory.length,
+      maxHistorySize: this.maxHistorySize,
+      callbackCount: this.messageCallbacks.length,
+      providerCount: this.providers.size,
+      providerUnsubscriberCount: this.providerUnsubscribers.size,
+      recentAvgMessageBytes: this.average(this.recentMessageBytes),
+      maxObservedMessageBytes: this.maxObservedMessageBytes,
+      recentAvgExtraKeyCount: this.average(this.recentExtraKeyCounts),
+      maxObservedExtraKeyCount: this.maxObservedExtraKeyCount,
+      recentSamples: this.recentMessageBytes.length,
+    };
   }
 
   dispose(): void {

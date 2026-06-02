@@ -86,6 +86,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [streamStatus, setStreamStatus] = useState<Record<string, string>>({});
   const [connectionStatus, setConnectionStatus] = useState<Record<string, string>>({});
   const [lastError, setLastError] = useState<Record<string, string | undefined>>({});
+  const [viewerCount, setViewerCount] = useState<Record<string, number | undefined>>({});
+  const [streamStartTime, setStreamStartTime] = useState<Record<string, string | null | undefined>>(
+    {},
+  );
   const [obsConnected, setObsConnected] = useState(false);
   const [messages, setMessages] = useState<
     Array<{
@@ -130,6 +134,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
         const newStreamStatus: Record<string, string> = {};
         const newConnectionStatus: Record<string, string> = {};
         const newLastError: Record<string, string | undefined> = {};
+        const newViewerCount: Record<string, number | undefined> = {};
+        const newStreamStartTime: Record<string, string | null | undefined> = {};
 
         for (const platform of platforms) {
           try {
@@ -138,12 +144,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
             newStreamStatus[platform] = status.streamStatus;
             newConnectionStatus[platform] = status.connectionStatus;
             newLastError[platform] = status.lastError;
+            newViewerCount[platform] = status.viewerCount;
+            newStreamStartTime[platform] = status.streamStartTime ?? null;
           } catch (error) {
             newAuthStatus[platform] = false;
             newStreamStatus[platform] = 'ERROR';
             newConnectionStatus[platform] = 'disconnected';
             newLastError[platform] =
               (error instanceof Error ? error.message : null) || 'Unknown error';
+            newViewerCount[platform] = undefined;
+            newStreamStartTime[platform] = null;
           }
         }
 
@@ -151,6 +161,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
         setStreamStatus(newStreamStatus);
         setConnectionStatus(newConnectionStatus);
         setLastError(newLastError);
+        setViewerCount(newViewerCount);
+        setStreamStartTime(newStreamStartTime);
 
         try {
           setObsConnected(getObsStatus());
@@ -276,6 +288,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
           (connectionStatus[platform] as 'connected' | 'disconnected' | 'connecting') ||
           'disconnected',
         lastError: lastError[platform],
+        viewerCount: viewerCount[platform],
+        streamStartTime: streamStartTime[platform] ?? null,
       };
       return acc;
     },

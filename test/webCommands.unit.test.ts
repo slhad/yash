@@ -341,6 +341,70 @@ describe('handleWebCommand — /help', () => {
   });
 });
 
+describe('handleWebCommand — /memory', () => {
+  test('fetches runtime status and emits summary feedback', async () => {
+    const { calls } = mockFetch((url) => {
+      if (url === '/api/runtime/status') {
+        return {
+          ok: true,
+          body: {
+            memory: {
+              rssBytes: 512 * 1024 * 1024,
+              heapUsedBytes: 64 * 1024 * 1024,
+              heapTotalBytes: 128 * 1024 * 1024,
+              externalBytes: 8 * 1024 * 1024,
+              arrayBuffersBytes: 2 * 1024 * 1024,
+            },
+            growth: {
+              rss: { '5m': { bytes: 16 * 1024 * 1024 } },
+              heapUsed: { '5m': { bytes: 4 * 1024 * 1024 } },
+            },
+            warnings: ['rss climbed'],
+          },
+        };
+      }
+      return { ok: false };
+    });
+
+    const feedback: Array<[string, string]> = [];
+    const result = await handleWebCommand('/memory', {
+      platforms: [],
+      feedback: (label, text) => feedback.push([label, text]),
+    });
+
+    expect(result).toBe(true);
+    expect(calls.some((call) => call.url === '/api/runtime/status')).toBe(true);
+    expect(feedback.some(([label, text]) => label === 'memory' && text.includes('rss='))).toBe(
+      true,
+    );
+    expect(
+      feedback.some(([label, text]) => label === 'memory' && text.includes('arrayBuffers=2.0 MiB')),
+    ).toBe(true);
+    expect(feedback.some(([label, text]) => label === 'memory' && text.includes('5m growth'))).toBe(
+      true,
+    );
+    expect(
+      feedback.some(([label, text]) => label === 'memory' && text.includes('rss climbed')),
+    ).toBe(true);
+  });
+
+  test('/memory modal → reports TUI-only guidance without fetch', async () => {
+    const { calls } = mockFetch(() => ({ ok: true, body: {} }));
+    const feedback: Array<[string, string]> = [];
+
+    const result = await handleWebCommand('/memory modal', {
+      platforms: [],
+      feedback: (label, text) => feedback.push([label, text]),
+    });
+
+    expect(result).toBe(true);
+    expect(calls).toHaveLength(0);
+    expect(feedback).toEqual([
+      ['memory', 'The memory modal is TUI-only. Use /memory modal in YASH.'],
+    ]);
+  });
+});
+
 // ── /msg ──────────────────────────────────────────────────────────────────────
 
 describe('handleWebCommand — /msg', () => {

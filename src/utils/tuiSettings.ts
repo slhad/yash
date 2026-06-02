@@ -8,6 +8,14 @@ export interface TuiSettingsDraftInput {
   titleVisible: boolean;
   viewersVisible: boolean;
   viewersMode: string;
+  platformIconsVisible: boolean;
+  platformIconsYoutubeSizePx: string;
+  platformIconsTwitchSizePx: string;
+  platformIconsKickSizePx: string;
+  memoryStatusVisible: boolean;
+  memoryStatusGreenMaxMb: string;
+  memoryStatusOrangeMinMb: string;
+  memoryStatusRedMinMb: string;
   messagesPosition: string;
   chatTimestampsVisible: boolean;
   tuiEmotesScale: string;
@@ -31,6 +39,14 @@ export interface TuiSettingsValues {
   titleVisible: boolean;
   viewersVisible: boolean;
   viewersMode: (typeof SETTINGS_VIEWER_MODES)[number];
+  platformIconsVisible: boolean;
+  platformIconsYoutubeSizePx: number;
+  platformIconsTwitchSizePx: number;
+  platformIconsKickSizePx: number;
+  memoryStatusVisible: boolean;
+  memoryStatusGreenMaxMb: number;
+  memoryStatusOrangeMinMb: number;
+  memoryStatusRedMinMb: number;
   messagesPosition: (typeof SETTINGS_MESSAGE_POSITIONS)[number];
   chatTimestampsVisible: boolean;
   tuiEmotesScale: number;
@@ -74,6 +90,36 @@ export function validateTuiSettingsDraft(draft: TuiSettingsDraftInput): {
     'chat.maxHistorySize',
     errors,
   );
+  const platformIconsYoutubeSizePx = parsePositiveInt(
+    draft.platformIconsYoutubeSizePx,
+    'status.platformIcons.youtube.sizePx',
+    errors,
+  );
+  const platformIconsTwitchSizePx = parsePositiveInt(
+    draft.platformIconsTwitchSizePx,
+    'status.platformIcons.twitch.sizePx',
+    errors,
+  );
+  const platformIconsKickSizePx = parsePositiveInt(
+    draft.platformIconsKickSizePx,
+    'status.platformIcons.kick.sizePx',
+    errors,
+  );
+  const memoryStatusGreenMaxMb = parsePositiveInt(
+    draft.memoryStatusGreenMaxMb,
+    'memory.status.greenMaxMb',
+    errors,
+  );
+  const memoryStatusOrangeMinMb = parsePositiveInt(
+    draft.memoryStatusOrangeMinMb,
+    'memory.status.orangeMinMb',
+    errors,
+  );
+  const memoryStatusRedMinMb = parsePositiveInt(
+    draft.memoryStatusRedMinMb,
+    'memory.status.redMinMb',
+    errors,
+  );
   const eventsTail = parsePositiveInt(draft.eventsTail, 'events.tail', errors);
   const logsHeight = parsePositiveInt(draft.logsHeight, 'logs.height', errors);
   const logsTail = parsePositiveInt(draft.logsTail, 'logs.tail', errors);
@@ -103,6 +149,20 @@ export function validateTuiSettingsDraft(draft: TuiSettingsDraftInput): {
   ) {
     errors.push(`activity.mode must be one of: ${SETTINGS_ACTIVITY_MODES.join(', ')}`);
   }
+  if (
+    memoryStatusGreenMaxMb !== null &&
+    memoryStatusOrangeMinMb !== null &&
+    memoryStatusGreenMaxMb >= memoryStatusOrangeMinMb
+  ) {
+    errors.push('memory.status.greenMaxMb must be lower than memory.status.orangeMinMb.');
+  }
+  if (
+    memoryStatusOrangeMinMb !== null &&
+    memoryStatusRedMinMb !== null &&
+    memoryStatusOrangeMinMb >= memoryStatusRedMinMb
+  ) {
+    errors.push('memory.status.orangeMinMb must be lower than memory.status.redMinMb.');
+  }
 
   if (errors.length > 0) {
     return { values: null, errors };
@@ -114,6 +174,14 @@ export function validateTuiSettingsDraft(draft: TuiSettingsDraftInput): {
       titleVisible: draft.titleVisible,
       viewersVisible: draft.viewersVisible,
       viewersMode: draft.viewersMode as (typeof SETTINGS_VIEWER_MODES)[number],
+      platformIconsVisible: draft.platformIconsVisible,
+      platformIconsYoutubeSizePx: platformIconsYoutubeSizePx as number,
+      platformIconsTwitchSizePx: platformIconsTwitchSizePx as number,
+      platformIconsKickSizePx: platformIconsKickSizePx as number,
+      memoryStatusVisible: draft.memoryStatusVisible,
+      memoryStatusGreenMaxMb: memoryStatusGreenMaxMb as number,
+      memoryStatusOrangeMinMb: memoryStatusOrangeMinMb as number,
+      memoryStatusRedMinMb: memoryStatusRedMinMb as number,
       messagesPosition: draft.messagesPosition as (typeof SETTINGS_MESSAGE_POSITIONS)[number],
       chatTimestampsVisible: draft.chatTimestampsVisible,
       tuiEmotesScale: tuiEmotesScale as number,
@@ -141,6 +209,14 @@ export function buildTuiSettingsEntries(values: TuiSettingsValues): TuiSettingsE
     { key: 'title.visible', value: values.titleVisible },
     { key: 'viewers.visible', value: values.viewersVisible },
     { key: 'viewers.mode', value: values.viewersMode },
+    { key: 'status.platformIcons.visible', value: values.platformIconsVisible },
+    { key: 'status.platformIcons.youtube.sizePx', value: values.platformIconsYoutubeSizePx },
+    { key: 'status.platformIcons.twitch.sizePx', value: values.platformIconsTwitchSizePx },
+    { key: 'status.platformIcons.kick.sizePx', value: values.platformIconsKickSizePx },
+    { key: 'memory.status.visible', value: values.memoryStatusVisible },
+    { key: 'memory.status.greenMaxMb', value: values.memoryStatusGreenMaxMb },
+    { key: 'memory.status.orangeMinMb', value: values.memoryStatusOrangeMinMb },
+    { key: 'memory.status.redMinMb', value: values.memoryStatusRedMinMb },
     { key: 'messages.position', value: values.messagesPosition },
     { key: 'chat.timestamps.visible', value: values.chatTimestampsVisible },
     { key: 'tui.emotes.scale', value: values.tuiEmotesScale },

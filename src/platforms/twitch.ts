@@ -73,6 +73,10 @@ const REQUIRED_SCOPES = [
   'user:read:email',
 ];
 
+function isTruthyEnv(value: string | undefined): boolean {
+  return value === '1' || value === 'true';
+}
+
 export class TwitchProvider implements PlatformProvider {
   // ---- config ----------------------------------------------------------------
   private clientId: string = '';
@@ -93,6 +97,12 @@ export class TwitchProvider implements PlatformProvider {
   private viewerCount = 0;
   private streamStartTime: Date | null = null;
   private viewerPollTimer: ReturnType<typeof setInterval> | null = null;
+  private viewerPollCount = 0;
+  private viewerPollOverlapCount = 0;
+  private viewerPollInFlight = 0;
+  private viewerPollInFlightHighWater = 0;
+  private viewerPollLastDurationMs = 0;
+  private viewerPollMaxDurationMs = 0;
 
   // ---- chat ------------------------------------------------------------------
   private chatClient: ChatClient | null = null;
@@ -114,6 +124,7 @@ export class TwitchProvider implements PlatformProvider {
 
   // ---- EventSub --------------------------------------------------------------
   private eventSubListener: EventSubWsListener | null = null;
+  private runtimeDisabled = false;
 
   // ---- token file ------------------------------------------------------------
   private static getDataDir(): string {
@@ -138,6 +149,7 @@ export class TwitchProvider implements PlatformProvider {
     this.clientId = cfg.clientId || '';
     this.clientSecret = cfg.clientSecret || '';
     this.redirectUri = cfg.redirectUri || 'http://localhost:3000/api/twitch/callback';
+    this.runtimeDisabled = isTruthyEnv(process.env.YASH_DISABLE_TWITCH_RUNTIME);
   }
 
   private async readTokenFile(): Promise<TwitchTokenFile | null> {
@@ -339,8 +351,12 @@ export class TwitchProvider implements PlatformProvider {
     this.isAuthenticatedFlag = true;
     this.connectionStatus = 'connected';
 
-    await this._startChat();
-    this._startViewerPoll();
+    if (this.runtimeDisabled) {
+      defaultLogger.info('[Twitch] runtime hooks disabled by env');
+    } else {
+      await this._startChat();
+      this._startViewerPoll();
+    }
 
     defaultLogger.info(`[Twitch] authenticated as ${this.userLogin ?? token.userId}`);
   }
@@ -828,6 +844,15 @@ export class TwitchProvider implements PlatformProvider {
     this._stopViewerPoll();
     this.viewerPollTimer = setInterval(async () => {
       if (!this.apiClient || !this.userId) return;
+      this.viewerPollCount += 1;
+      this.viewerPollInFlight += 1;
+      if (this.viewerPollInFlight > 1) {
+        this.viewerPollOverlapCount += 1;
+      }
+      if (this.viewerPollInFlight > this.viewerPollInFlightHighWater) {
+        this.viewerPollInFlightHighWater = this.viewerPollInFlight;
+      }
+      const startedAt = performance.now();
       try {
         const stream = await this.apiClient.streams.getStreamByUserId(this.userId);
         this.viewerCount = stream?.viewers ?? 0;
@@ -839,6 +864,13 @@ export class TwitchProvider implements PlatformProvider {
         }
       } catch {
         /* ignore poll errors */
+      } finally {
+        const durationMs = performance.now() - startedAt;
+        this.viewerPollLastDurationMs = durationMs;
+        if (durationMs > this.viewerPollMaxDurationMs) {
+          this.viewerPollMaxDurationMs = durationMs;
+        }
+        this.viewerPollInFlight = Math.max(0, this.viewerPollInFlight - 1);
       }
     }, 60_000);
   }
@@ -931,6 +963,26 @@ export class TwitchProvider implements PlatformProvider {
     } catch {
       return partial;
     }
+  }
+
+  getDebugState(): Record<string, number | boolean> {
+    return {
+      authenticated: this.isAuthenticatedFlag,
+      viewerPollTimerActive: this.viewerPollTimer !== null,
+      chatClientActive: this.chatClient !== null,
+      eventSubListenerActive: this.eventSubListener !== null,
+      runtimeDisabled: this.runtimeDisabled,
+      messageCallbacks: this.messageCallbacks.length,
+      activityCallbacks: this.activityCallbacks.length,
+      viewerCount: this.viewerCount,
+      streamOnline: this.streamStatus === StreamStatus.ONLINE,
+      viewerPollCount: this.viewerPollCount,
+      viewerPollOverlapCount: this.viewerPollOverlapCount,
+      viewerPollInFlight: this.viewerPollInFlight,
+      viewerPollInFlightHighWater: this.viewerPollInFlightHighWater,
+      viewerPollLastDurationMs: this.viewerPollLastDurationMs,
+      viewerPollMaxDurationMs: this.viewerPollMaxDurationMs,
+    };
   }
 
   // ---------------------------------------------------------------------------

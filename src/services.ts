@@ -26,6 +26,10 @@ export const authService = new AuthService();
 
 export const platforms = ['youtube', 'twitch', 'kick'];
 
+function isTruthyEnv(value: string | undefined): boolean {
+  return value === '1' || value === 'true';
+}
+
 const configuredHistorySize = Number(settingsStore.get('chat.maxHistorySize', 1000));
 if (Number.isFinite(configuredHistorySize) && configuredHistorySize > 0) {
   chatService.setMaxHistorySize(configuredHistorySize);
@@ -42,18 +46,37 @@ streamService.registerProvider('kick', kick);
 export async function initializeServices() {
   await Promise.all([youtube.authenticate(), twitch.authenticate(), kick.authenticate()]);
 
+  const disableYoutubeStartup = isTruthyEnv(process.env.YASH_DISABLE_YOUTUBE_STARTUP);
+  const disableTwitchStartup = isTruthyEnv(process.env.YASH_DISABLE_TWITCH_STARTUP);
+  const disableKickStartup = isTruthyEnv(process.env.YASH_DISABLE_KICK_STARTUP);
+  const disableAuthAutoRefresh = isTruthyEnv(process.env.YASH_DISABLE_AUTH_AUTO_REFRESH);
+
   // Seed live stream status by calling setupWebhooks for authenticated platforms.
   // YouTube and Twitch only check their APIs here; Kick already polls from _initFromToken.
   const webhookCfg = { url: '', topics: [] };
   await Promise.allSettled([
-    youtube.isAuthenticated() ? youtube.setupWebhooks(webhookCfg) : Promise.resolve(),
-    twitch.isAuthenticated() ? twitch.setupWebhooks(webhookCfg) : Promise.resolve(),
-    kick.isAuthenticated() ? kick.setupWebhooks(webhookCfg) : Promise.resolve(),
+    !disableYoutubeStartup && youtube.isAuthenticated()
+      ? youtube.setupWebhooks(webhookCfg)
+      : Promise.resolve(),
+    !disableTwitchStartup && twitch.isAuthenticated()
+      ? twitch.setupWebhooks(webhookCfg)
+      : Promise.resolve(),
+    !disableKickStartup && kick.isAuthenticated()
+      ? kick.setupWebhooks(webhookCfg)
+      : Promise.resolve(),
   ]);
+  if (disableYoutubeStartup) defaultLogger.info('YouTube startup hooks disabled by env');
+  if (disableTwitchStartup) defaultLogger.info('Twitch startup hooks disabled by env');
+  if (disableKickStartup) defaultLogger.info('Kick startup hooks disabled by env');
 
   try {
-    authService.startAutoRefresh({ youtube, twitch, kick }, 60_000);
-    defaultLogger.info('AuthService auto-refresh started');
+    if (disableAuthAutoRefresh) {
+      authService.stopAutoRefresh();
+      defaultLogger.info('AuthService auto-refresh disabled by env');
+    } else {
+      authService.startAutoRefresh({ youtube, twitch, kick }, 60_000);
+      defaultLogger.info('AuthService auto-refresh started');
+    }
   } catch (err) {
     defaultLogger.warn('Failed to start AuthService auto-refresh', err);
   }

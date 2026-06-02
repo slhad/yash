@@ -16,6 +16,9 @@ export async function runIpcCommand(
 
   if (cmd === '/exit') return 'Cannot exit the TUI via IPC';
   if (TUI_ONLY_COMMANDS.has(cmd)) return 'This command requires the TUI';
+  if (cmd === '/memory' && (parts[1] ?? '').toLowerCase() === 'modal') {
+    return 'This command requires the TUI';
+  }
   if (cmd === '/settings' && !parts[1]) return 'This command requires the TUI';
   if (cmd === '/markers' && (parts[1] ?? '').toLowerCase() === 'edit') {
     return 'This command requires the TUI';

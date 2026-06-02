@@ -37,6 +37,13 @@ export class ChatterCache {
     this.cache.delete(this.key(platform, userId));
   }
 
+  getStats(): { size: number; maxEntries: number } {
+    return {
+      size: this.cache.size,
+      maxEntries: this.maxEntries,
+    };
+  }
+
   private evictIfNeeded(): void {
     while (this.cache.size > this.maxEntries) {
       const oldestKey = this.cache.keys().next().value;

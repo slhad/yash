@@ -22,6 +22,7 @@ describe('metrics HTTP handlers', () => {
     const body = await apiResp.json();
     expect(body.counters.test_counter).toBe(3);
     expect(body.gauges.test_gauge).toBe(7);
+    expect(typeof body.gauges['process.memory.rss_bytes']).toBe('number');
     expect(Number(body.timestamps.test_ts)).toBe(ts);
 
     const promResp = prometheusMetricsHandler((n) => null, '/metrics');

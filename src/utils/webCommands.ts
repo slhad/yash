@@ -10,7 +10,7 @@
  *      pre-built bundle from `GET /api/js/commands.js` at runtime.
  *
  * TUI-only commands (/exit, /logs) are intentionally absent here.
- * Available commands: /help, /msg, /marker, /markers, /connect, /settings
+ * Available commands: /help, /memory, /msg, /marker, /markers, /connect, /settings
  */
 
 /** Callback used to surface system feedback inside the page UI. */
@@ -214,6 +214,7 @@ export function parseSettingsValue(raw: string): unknown {
 const VALID_COMMANDS = [
   '/connect',
   '/help',
+  '/memory',
   '/marker',
   '/markers',
   '/msg',
@@ -297,6 +298,7 @@ export function getWebAutocomplete(input: string): string | null {
   }
 
   if (cmd === '/help') return null;
+  if (cmd === '/memory') return null;
 
   return null;
 }
@@ -314,6 +316,14 @@ const SETTINGS_KEYS = [
   'logs.tail',
   'viewers.visible',
   'viewers.mode',
+  'status.platformIcons.visible',
+  'status.platformIcons.youtube.sizePx',
+  'status.platformIcons.twitch.sizePx',
+  'status.platformIcons.kick.sizePx',
+  'memory.status.visible',
+  'memory.status.greenMaxMb',
+  'memory.status.orangeMinMb',
+  'memory.status.redMinMb',
   'messages.position',
   'chat.timestamps.visible',
   'tui.emotes.scale',
@@ -357,6 +367,53 @@ export async function handleWebCommand(text: string, ctx: WebCommandContext): Pr
       }
     } catch {
       fb('help', 'Could not fetch help.');
+    }
+    return true;
+  }
+
+  if (cmd === '/memory') {
+    if ((parts[1] ?? '').toLowerCase() === 'modal') {
+      fb('memory', 'The memory modal is TUI-only. Use /memory modal in YASH.');
+      return true;
+    }
+    try {
+      const res = await fetch('/api/runtime/status');
+      if (!res.ok) {
+        fb('memory', 'Could not fetch runtime memory status.');
+        return true;
+      }
+      const data = (await res.json()) as {
+        memory?: {
+          rssBytes?: number;
+          heapUsedBytes?: number;
+          heapTotalBytes?: number;
+          externalBytes?: number;
+          arrayBuffersBytes?: number;
+        };
+        growth?: {
+          rss?: { '5m'?: { bytes?: number } | null };
+          heapUsed?: { '5m'?: { bytes?: number } | null };
+        };
+        warnings?: string[];
+      };
+      const memory = data.memory ?? {};
+      const mib = (value: number | undefined) =>
+        typeof value === 'number' ? `${(value / (1024 * 1024)).toFixed(1)} MiB` : 'n/a';
+      fb(
+        'memory',
+        `rss=${mib(memory.rssBytes)} heap=${mib(memory.heapUsedBytes)}/${mib(memory.heapTotalBytes)} external=${mib(memory.externalBytes)} arrayBuffers=${mib(memory.arrayBuffersBytes)}`,
+      );
+      const rssGrowth = data.growth?.rss?.['5m']?.bytes;
+      const heapGrowth = data.growth?.heapUsed?.['5m']?.bytes;
+      fb(
+        'memory',
+        `5m growth: rss=${mib(typeof rssGrowth === 'number' ? rssGrowth : undefined)} heap=${mib(typeof heapGrowth === 'number' ? heapGrowth : undefined)}`,
+      );
+      for (const warning of data.warnings ?? []) {
+        fb('memory', warning);
+      }
+    } catch {
+      fb('memory', 'Could not fetch runtime memory status.');
     }
     return true;
   }

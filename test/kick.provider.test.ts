@@ -6,6 +6,8 @@
  * are absent from the config (which is the case in CI).
  */
 import { afterAll, beforeAll, describe, expect, mock, test } from 'bun:test';
+import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
 import { StreamStatus } from '../src/platforms/base';
 import { KickProvider } from '../src/platforms/kick';
 import { makeRepoTempDir, removeRepoTempDir } from './helpers/testDataDir';
@@ -33,6 +35,11 @@ function makeProvider() {
 
 function forceAuth(p: any) {
   p.isAuthenticatedFlag = true;
+}
+
+async function writeKickTokenFile(data: Record<string, unknown>) {
+  await fs.mkdir(testDataDir, { recursive: true });
+  await fs.writeFile(path.join(testDataDir, 'kick_tokens.json'), JSON.stringify(data, null, 2));
 }
 
 // ---------------------------------------------------------------------------
@@ -95,6 +102,60 @@ describe('KickProvider — mock authenticate', () => {
     };
     await p.authenticate();
     expect(p.isAuthenticated()).toBe(true);
+  });
+});
+
+describe('KickProvider — persisted token restore', () => {
+  test('refreshes an expired saved token before reporting authenticated', async () => {
+    await writeKickTokenFile({
+      accessToken: 'expired-access',
+      tokenType: 'Bearer',
+      expiresIn: 7200,
+      refreshToken: 'refresh-token',
+      scope: 'user:read channel:read channel:write chat:write events:subscribe',
+      expiresAt: Date.now() - 60_000,
+      broadcasterId: 4595287,
+      channelSlug: 'slash-the-key',
+    });
+
+    const p = makeProvider() as any;
+    const refreshedExpiresAt = Date.now() + 3_600_000;
+    const fakeClient = {
+      token: null as any,
+      setToken(token: any) {
+        this.token = token;
+      },
+      async getAccessToken() {
+        this.token = {
+          ...this.token,
+          accessToken: 'fresh-access',
+          refreshToken: 'fresh-refresh',
+          expiresIn: 3600,
+          expiresAt: refreshedExpiresAt,
+        };
+        return this.token.accessToken;
+      },
+    };
+    p.loadCfg = () => {
+      p.clientId = 'kick-client-id';
+      p.clientSecret = 'kick-client-secret';
+      p.redirectUri = 'http://localhost:3000/api/kick/callback';
+      p.runtimeDisabled = true;
+    };
+    p.buildClient = () => fakeClient;
+
+    const result = await p.authenticate();
+
+    expect(result.success).toBe(true);
+    expect(p.isAuthenticated()).toBe(true);
+    expect(fakeClient.token.accessToken).toBe('fresh-access');
+
+    const persisted = JSON.parse(
+      await fs.readFile(path.join(testDataDir, 'kick_tokens.json'), 'utf8'),
+    ) as Record<string, unknown>;
+    expect(persisted.accessToken).toBe('fresh-access');
+    expect(persisted.refreshToken).toBe('fresh-refresh');
+    expect(persisted.expiresAt).toBe(refreshedExpiresAt);
   });
 });
 

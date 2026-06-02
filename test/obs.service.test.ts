@@ -211,6 +211,21 @@ describe('ObsService', () => {
     expect(callCount).toBe(countAfterConnect);
   });
 
+  test('should only notify status callbacks on connection-state transitions', () => {
+    const statuses: boolean[] = [];
+    obsService.subscribeToStatusChanges((connected) => {
+      statuses.push(connected);
+    });
+
+    (obsService as any).notifyStatusChangeIfChanged(false);
+    (obsService as any).notifyStatusChangeIfChanged(false);
+    (obsService as any).notifyStatusChangeIfChanged(true);
+    (obsService as any).notifyStatusChangeIfChanged(true);
+    (obsService as any).notifyStatusChangeIfChanged(false);
+
+    expect(statuses).toEqual([false, true, false]);
+  });
+
   test('should use custom host and port', () => {
     const customService = new ObsService('192.168.1.100', 4444, 'secret');
     expect(customService).toBeInstanceOf(ObsService);

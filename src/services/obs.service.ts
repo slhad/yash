@@ -7,6 +7,8 @@ import { metrics } from '../utils/metrics';
 
 export class ObsService {
   private static readonly MAX_SCHEDULED_HISTORY = 100;
+  private static readonly RECONNECT_VERBOSE_ATTEMPTS = 3;
+  private static readonly RECONNECT_LOG_EVERY_N_ATTEMPTS = 5;
   private connected: boolean = false;
   private connectionPromise: Promise<void> | null = null;
   // Scheduled reconnect timer (replaces the old interval-based approach)
@@ -23,6 +25,9 @@ export class ObsService {
   // Callbacks to notify when reconnect attempts exceeded max
   private reconnectLimitExceededCallbacks: ((attempts: number) => void)[] = [];
   private reconnectLimitExceededEmitted: boolean = false;
+  private reconnectCycleActive: boolean = false;
+  private reconnectDisabled: boolean = false;
+  private lastNotifiedStatus: boolean | null = null;
   // Simulated connect delay for testability (ms)
   private connectDelayMs: number = 1000;
   // Optional WebSocket transport support
@@ -48,6 +53,13 @@ export class ObsService {
   private scheduledHistory: Array<{ delay: number; attempt: number }> = [];
   // Optional injected random function for deterministic jitter in tests
   private randomFn?: () => number;
+  private wsCreateCount: number = 0;
+  private wsOpenCount: number = 0;
+  private wsCloseCount: number = 0;
+  private wsErrorCount: number = 0;
+  private wsMessageCount: number = 0;
+  private wsIdentifyCount: number = 0;
+  private wsIdentifiedCount: number = 0;
 
   // add optional `useWebSocketTransport` flag as fourth argument (default false)
   constructor(
@@ -115,6 +127,12 @@ export class ObsService {
           const v = Number(wb.connectDelayMs);
           if (!Number.isNaN(v) && v >= 0) this.connectDelayMs = v;
         }
+        if (wb.disableReconnect !== undefined) {
+          this.reconnectDisabled =
+            wb.disableReconnect === true ||
+            wb.disableReconnect === 'true' ||
+            wb.disableReconnect === '1';
+        }
       }
     } catch {
       // Config not loaded yet, use defaults
@@ -131,7 +149,7 @@ export class ObsService {
 
     if (isDemoMode()) {
       this.connected = true;
-      this.notifyStatusChange(true);
+      this.notifyStatusChangeIfChanged(true);
       this.setupReconnection();
       defaultLogger.info('Connected to OBS (demo mode)');
       return;
@@ -141,22 +159,30 @@ export class ObsService {
     if (this.useWebSocketTransport && typeof WebSocket !== 'undefined') {
       this.connectionPromise = new Promise((resolve, reject) => {
         try {
-          defaultLogger.info(`Connecting to OBS at ws://${this.host}:${this.port}...`);
+          if (!this.reconnectCycleActive) {
+            defaultLogger.info(`Connecting to OBS at ws://${this.host}:${this.port}...`);
+          }
           const ws = new WebSocket(`ws://${this.host}:${this.port}`);
+          this.wsCreateCount++;
           this.ws = ws;
           let identified = false;
 
           ws.onopen = () => {
-            defaultLogger.info('OBS WebSocket open, waiting for Hello...');
+            this.wsOpenCount++;
+            if (!this.reconnectCycleActive) {
+              defaultLogger.info('OBS WebSocket open, waiting for Hello...');
+            }
           };
 
           ws.onmessage = (ev: any) => {
+            this.wsMessageCount++;
             try {
               const data =
                 typeof ev.data === 'string' ? ev.data : new TextDecoder().decode(ev.data);
               const msg = JSON.parse(data);
 
               if (msg.op === 0) {
+                this.wsIdentifyCount++;
                 // Hello — respond with Identify (with auth if required)
                 // eventSubscriptions bitmask: General(1) + Scenes(4) + Outputs(64) = 69
                 const identifyData: Record<string, unknown> = {
@@ -171,11 +197,12 @@ export class ObsService {
                 }
                 ws.send(JSON.stringify({ op: 1, d: identifyData }));
               } else if (msg.op === 2) {
+                this.wsIdentifiedCount++;
                 // Identified — authentication succeeded, connection ready
                 identified = true;
                 this.connected = true;
                 this.connectionPromise = null;
-                this.notifyStatusChange(true);
+                this.notifyStatusChangeIfChanged(true);
                 this.setupReconnection();
                 defaultLogger.info('Connected to OBS');
                 resolve();
@@ -208,11 +235,15 @@ export class ObsService {
           };
 
           ws.onclose = () => {
+            this.wsCloseCount++;
+            const shouldLogDisconnect = identified || this.lastNotifiedStatus === true;
             this.connected = false;
             this.ws = null;
             this.connectionPromise = null;
-            this.notifyStatusChange(false);
-            defaultLogger.info('Disconnected from OBS');
+            this.notifyStatusChangeIfChanged(false);
+            if (shouldLogDisconnect) {
+              defaultLogger.info('Disconnected from OBS');
+            }
             if (!identified) {
               if (!isDemoMode()) {
                 this.scheduleReconnectAttempt();
@@ -224,15 +255,16 @@ export class ObsService {
           };
 
           ws.onerror = (_err: any) => {
+            this.wsErrorCount++;
             // onclose fires after onerror and handles cleanup/rejection
-            defaultLogger.error(`OBS WebSocket error: ws://${this.host}:${this.port} unreachable`);
+            defaultLogger.debug(`OBS WebSocket error: ws://${this.host}:${this.port} unreachable`);
           };
         } catch (error) {
           defaultLogger.error('Failed to create WebSocket to OBS:', error);
           this.connected = false;
           this.ws = null;
           this.connectionPromise = null;
-          this.notifyStatusChange(false);
+          this.notifyStatusChangeIfChanged(false);
           if (!isDemoMode()) {
             this.scheduleReconnectAttempt();
           }
@@ -246,7 +278,9 @@ export class ObsService {
     // Fallback: simulated connection for environments without WebSocket
     this.connectionPromise = (async () => {
       try {
-        defaultLogger.info(`Connecting to OBS at ws://${this.host}:${this.port}...`);
+        if (!this.reconnectCycleActive) {
+          defaultLogger.info(`Connecting to OBS at ws://${this.host}:${this.port}...`);
+        }
 
         // Simulate connection delay (configurable for tests)
         await new Promise((resolve) => setTimeout(resolve, this.connectDelayMs));
@@ -255,7 +289,7 @@ export class ObsService {
         this.connectionPromise = null;
 
         // Notify status change
-        this.notifyStatusChange(true);
+        this.notifyStatusChangeIfChanged(true);
 
         // Clear any scheduled reconnection attempts when we've successfully connected
         this.setupReconnection();
@@ -265,7 +299,7 @@ export class ObsService {
         defaultLogger.error('Failed to connect to OBS:', error);
         this.connected = false;
         this.connectionPromise = null;
-        this.notifyStatusChange(false);
+        this.notifyStatusChangeIfChanged(false);
         throw error;
       }
     })();
@@ -298,7 +332,7 @@ export class ObsService {
     this.connectionPromise = null;
 
     // Notify status change
-    this.notifyStatusChange(false);
+    this.notifyStatusChangeIfChanged(false);
 
     defaultLogger.info('Disconnected from OBS');
 
@@ -482,8 +516,23 @@ export class ObsService {
     this.statusCallbacks.forEach((callback) => callback(connected));
   }
 
+  private notifyStatusChangeIfChanged(connected: boolean): void {
+    if (this.lastNotifiedStatus === connected) {
+      return;
+    }
+    this.lastNotifiedStatus = connected;
+    this.notifyStatusChange(connected);
+  }
+
   private notifyMessages(event: any): void {
     this.messageCallbacks.forEach((callback) => callback(event));
+  }
+
+  private shouldLogReconnectAttempt(attemptNum: number): boolean {
+    return (
+      attemptNum <= ObsService.RECONNECT_VERBOSE_ATTEMPTS ||
+      attemptNum % ObsService.RECONNECT_LOG_EVERY_N_ATTEMPTS === 0
+    );
   }
 
   /**
@@ -507,6 +556,7 @@ export class ObsService {
   private scheduleReconnectAttempt(): { delay: number; attempt: number } | undefined {
     // If already scheduled or we are connected, do nothing
     if (this.reconnectTimer || this.connected) return;
+    if (this.reconnectDisabled) return;
 
     // If a maxAttempts is configured and we've already exceeded it, emit once and stop
     if (
@@ -532,7 +582,9 @@ export class ObsService {
     const delay = Math.floor(r * maxDelay);
     const attemptNum = this.reconnectAttempt + 1;
 
-    defaultLogger.info(`Scheduling reconnection attempt in ${delay}ms (attempt ${attemptNum})`);
+    if (this.shouldLogReconnectAttempt(attemptNum)) {
+      defaultLogger.info(`Scheduling OBS reconnection attempt ${attemptNum} in ${delay}ms`);
+    }
 
     // Record last scheduled info so tests can assert deterministic backoff
     const entry = { delay, attempt: attemptNum };
@@ -553,43 +605,54 @@ export class ObsService {
         return;
       }
 
-      defaultLogger.info('Attempting to reconnect to OBS...');
-      this.connect().catch((error) => {
-        defaultLogger.error('Reconnection attempt failed:', error);
-        // record metric
-        try {
-          metrics.increment('obs.reconnect.failures');
-          metrics.increment('obs.reconnect.attempts');
-          metrics.recordTimestamp('obs.reconnect.lastAttemptTs');
-        } catch (e) {
-          // ignore metric errors
-        }
-        // increase attempt count and schedule next attempt
-        this.reconnectAttempt++;
-
-        // If we've hit max attempts, emit the limit-exceeded event and bail out
-        if (
-          this.reconnectMaxAttempts !== null &&
-          this.reconnectAttempt > this.reconnectMaxAttempts
-        ) {
-          if (!this.reconnectLimitExceededEmitted) {
-            this.reconnectLimitExceededEmitted = true;
-            this.reconnectLimitExceededCallbacks.forEach((cb) => cb(this.reconnectAttempt));
-            defaultLogger.info(
-              `Reconnect attempts exceeded max (${this.reconnectMaxAttempts}), will not retry`,
-            );
-            try {
-              metrics.increment('obs.reconnect.exhausted');
-              metrics.recordTimestamp('obs.reconnect.exhaustedTs');
-            } catch (e) {
-              // ignore
-            }
+      if (this.shouldLogReconnectAttempt(attemptNum)) {
+        defaultLogger.info(`Attempting OBS reconnection ${attemptNum}`);
+      }
+      this.reconnectCycleActive = true;
+      this.connect()
+        .then(() => {
+          this.reconnectCycleActive = false;
+        })
+        .catch((error) => {
+          this.reconnectCycleActive = false;
+          if (this.shouldLogReconnectAttempt(attemptNum)) {
+            const message = error instanceof Error ? error.message : String(error);
+            defaultLogger.warn(`OBS reconnection ${attemptNum} failed: ${message}`);
           }
-          return;
-        }
+          // record metric
+          try {
+            metrics.increment('obs.reconnect.failures');
+            metrics.increment('obs.reconnect.attempts');
+            metrics.recordTimestamp('obs.reconnect.lastAttemptTs');
+          } catch (e) {
+            // ignore metric errors
+          }
+          // increase attempt count and schedule next attempt
+          this.reconnectAttempt++;
 
-        this.scheduleReconnectAttempt();
-      });
+          // If we've hit max attempts, emit the limit-exceeded event and bail out
+          if (
+            this.reconnectMaxAttempts !== null &&
+            this.reconnectAttempt > this.reconnectMaxAttempts
+          ) {
+            if (!this.reconnectLimitExceededEmitted) {
+              this.reconnectLimitExceededEmitted = true;
+              this.reconnectLimitExceededCallbacks.forEach((cb) => cb(this.reconnectAttempt));
+              defaultLogger.info(
+                `Reconnect attempts exceeded max (${this.reconnectMaxAttempts}), will not retry`,
+              );
+              try {
+                metrics.increment('obs.reconnect.exhausted');
+                metrics.recordTimestamp('obs.reconnect.exhaustedTs');
+              } catch (e) {
+                // ignore
+              }
+            }
+            return;
+          }
+
+          this.scheduleReconnectAttempt();
+        });
     }, delay);
 
     // Return scheduling info to allow tests to assert on computed delay/attempt
@@ -740,5 +803,31 @@ export class ObsService {
 
   async getVersion(): Promise<any> {
     return this.sendRequest('GetVersion');
+  }
+
+  getDebugState(): Record<string, number | boolean> {
+    return {
+      connected: this.connected,
+      pendingRequests: this.pendingRequests.size,
+      statusCallbacks: this.statusCallbacks.length,
+      messageCallbacks: this.messageCallbacks.length,
+      reconnectLimitExceededCallbacks: this.reconnectLimitExceededCallbacks.length,
+      reconnectTimerActive: this.reconnectTimer !== null,
+      connectionPromiseActive: this.connectionPromise !== null,
+      reconnectAttempt: this.reconnectAttempt,
+      scheduledHistorySize: this.scheduledHistory.length,
+      lastScheduledDelayMs: this.lastScheduledInfo?.delay ?? 0,
+      lastScheduledAttempt: this.lastScheduledInfo?.attempt ?? 0,
+      useWebSocketTransport: this.useWebSocketTransport,
+      reconnectDisabled: this.reconnectDisabled,
+      socketActive: this.ws !== null,
+      wsCreateCount: this.wsCreateCount,
+      wsOpenCount: this.wsOpenCount,
+      wsCloseCount: this.wsCloseCount,
+      wsErrorCount: this.wsErrorCount,
+      wsMessageCount: this.wsMessageCount,
+      wsIdentifyCount: this.wsIdentifyCount,
+      wsIdentifiedCount: this.wsIdentifiedCount,
+    };
   }
 }

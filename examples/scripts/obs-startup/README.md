@@ -3,7 +3,7 @@
 A yash user script that runs your stream startup sequence as an async 5-phase pipeline:
 **prepare → pre-start wait → stream start → countdown → go live**.
 
-Registers five actions: `obs.startup.begin`, `obs.startup.cancel`, `obs.startup.status`, `obs.startup.config`, and `obs.startup.configTUI`.
+Registers six actions: `obs.startup.begin`, `obs.startup.live`, `obs.startup.cancel`, `obs.startup.status`, `obs.startup.config`, and `obs.startup.configTUI`.
 
 ## Install
 
@@ -80,6 +80,17 @@ Kicks off the startup sequence. Returns immediately after the prepare phase begi
 | `sourceText` | `countdownSourceText` |
 | `chatMessage` | `liveMessage` |
 
+### `obs.startup.live`
+
+Runs the go-live phase only. It switches directly to `liveScene`, enables `showSources`, unmutes `unmuteSources`, and optionally sends `liveMessage` to chat.
+
+**Arg overrides**:
+
+| Arg | Config key overridden |
+|---|---|
+| `liveScene` | `liveScene` |
+| `chatMessage` | `liveMessage` |
+
 ### `obs.startup.cancel`
 
 Cancels the in-progress sequence at whatever phase it is currently in. The prepare scene switch is **not** rolled back — cancelling does not restore the previous scene or re-mute sources.
@@ -116,6 +127,8 @@ From the yash TUI command bar (using `/action <id>` syntax):
 /action obs.startup.begin delay=30
 /action obs.startup.begin startStream=true
 /action obs.startup.begin prepareScene="Starting Soon" liveScene="Main"
+/action obs.startup.live
+/action obs.startup.live liveScene="[LS] Backup"
 /action obs.startup.begin delay=60 chatMessage=""
 /action obs.startup.config
 /action obs.startup.config countdownDelay=60 startStream=true
@@ -147,6 +160,8 @@ obs.startup.begin
                     Unmute unmuteSources
                     Send liveMessage to chat
 ```
+
+`obs.startup.live` runs only the final go-live block above, without the prepare, pre-start, stream-start, or countdown phases.
 
 `obs.startup.cancel` can interrupt the sequence at any phase during the countdown.
 Once the sequence reaches go-live it completes synchronously and cannot be cancelled.

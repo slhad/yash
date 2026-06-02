@@ -16,3 +16,15 @@ export function parseMessageInputBody(value: string, target: MessageTarget): str
   }
   return value;
 }
+
+export function getNextAutocompleteCycleIndex(
+  currentIndex: number,
+  suggestionCount: number,
+  direction: 1 | -1,
+): number {
+  if (suggestionCount <= 0) return -1;
+  if (currentIndex < 0 || currentIndex >= suggestionCount) {
+    return direction === -1 ? suggestionCount - 1 : 0;
+  }
+  return (currentIndex + direction + suggestionCount) % suggestionCount;
+}
