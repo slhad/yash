@@ -77,4 +77,29 @@ describe('AuthService', () => {
     (authService as any).tokens.set('youtube', oldToken);
     expect(authService.isAuthenticated('youtube')).toBeFalse();
   });
+
+  test('tracks auto-refresh debug counters', async () => {
+    const provider = {
+      authenticate: async () => ({ success: true, accessToken: 'new-token', expiresIn: 3600 }),
+    } as any;
+
+    await authService.saveTokensForPlatform('youtube', {
+      accessToken: 'expiring-token',
+      refreshToken: 'refresh',
+      expiresIn: 1,
+    });
+    const token = authService.getTokensForPlatform('youtube');
+    if (token) {
+      token.expiresAt = Date.now() - 1000;
+    }
+
+    authService.startAutoRefresh({ youtube: provider }, 10);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    authService.stopAutoRefresh();
+
+    const debug = authService.getDebugState();
+    expect(debug.autoRefreshRunCount).toBeGreaterThan(0);
+    expect(debug.autoRefreshPlatformChecks).toBeGreaterThan(0);
+    expect(debug.autoRefreshIntervalActive).toBe(false);
+  });
 });

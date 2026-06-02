@@ -28,6 +28,9 @@ export class AuthService {
 
   private tokens: Map<string, TokenData> = new Map();
   private refreshInterval: ReturnType<typeof setInterval> | null = null;
+  private autoRefreshRunCount: number = 0;
+  private autoRefreshPlatformChecks: number = 0;
+  private autoRefreshLastRunTs: number = 0;
 
   // File-backed token store constructor. No OS keyring integration.
   constructor() {
@@ -167,7 +170,10 @@ export class AuthService {
 
     // Run immediately once, then on interval
     const runOnce = async () => {
+      this.autoRefreshRunCount++;
+      this.autoRefreshLastRunTs = Date.now();
       for (const [platform, provider] of Object.entries(providers)) {
+        this.autoRefreshPlatformChecks++;
         try {
           await this.refreshTokenIfNeeded(platform, provider);
         } catch (err) {
@@ -189,5 +195,15 @@ export class AuthService {
       clearInterval(this.refreshInterval);
       this.refreshInterval = null;
     }
+  }
+
+  getDebugState(): Record<string, number | boolean> {
+    return {
+      tokenCount: this.tokens.size,
+      autoRefreshIntervalActive: this.refreshInterval !== null,
+      autoRefreshRunCount: this.autoRefreshRunCount,
+      autoRefreshPlatformChecks: this.autoRefreshPlatformChecks,
+      autoRefreshLastRunTs: this.autoRefreshLastRunTs,
+    };
   }
 }

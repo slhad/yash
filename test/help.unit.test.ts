@@ -32,6 +32,12 @@ describe('shared help metadata', () => {
       '[help]   /stream [platform…]  — Edit stream info (opens modal, persists to settings)',
     );
     expect(lines).toContain(
+      '[help]   /memory [modal]  — Show runtime memory telemetry or open the memory status modal',
+    );
+    expect(lines).toContain(
+      '[help]       e.g.  /memory modal  — open the live memory status modal',
+    );
+    expect(lines).toContain(
       '[help]       e.g.  /marker Replay|-300  (YouTube: 5 minutes before current live position)',
     );
     expect(lines).toContain(
@@ -40,5 +46,13 @@ describe('shared help metadata', () => {
     expect(lines).toContain(
       '[help]   /scripts [list|install <example-id> [repair|force] [copy|link]]  — List, install, or repair bundled example scripts',
     );
+  });
+
+  test('api help keeps bare /memory usage', () => {
+    const commands = getHelpCommands('api');
+    expect(commands.find((entry) => entry.command === '/memory')).toMatchObject({
+      usage: '/memory',
+      description: 'Show runtime memory and retention telemetry',
+    });
   });
 });

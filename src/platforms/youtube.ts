@@ -304,6 +304,16 @@ export class YouTubeProvider implements PlatformProvider {
   private chatInitialized = false;
   private chatHistoryCutoffMs: number | null = null;
   private liveChatGrpcClient: YouTubeLiveChatGrpcClient | null = null;
+  private statusPollCount = 0;
+  private statusPollOverlapCount = 0;
+  private statusPollInFlight = 0;
+  private statusPollInFlightHighWater = 0;
+  private statusPollLastDurationMs = 0;
+  private statusPollMaxDurationMs = 0;
+  private chatPollInvocationCount = 0;
+  private chatPollStreamDataCount = 0;
+  private chatPollStreamErrorCount = 0;
+  private chatPollStreamEndCount = 0;
 
   // ---- chat ------------------------------------------------------------------
   private messageCallbacks: ((msg: ChatMessage) => void)[] = [];
@@ -1381,6 +1391,15 @@ export class YouTubeProvider implements PlatformProvider {
 
   private async _pollStatus(): Promise<void> {
     if (!this.isAuthenticated() || !this.tokenData) return;
+    this.statusPollCount += 1;
+    this.statusPollInFlight += 1;
+    if (this.statusPollInFlight > 1) {
+      this.statusPollOverlapCount += 1;
+    }
+    if (this.statusPollInFlight > this.statusPollInFlightHighWater) {
+      this.statusPollInFlightHighWater = this.statusPollInFlight;
+    }
+    const startedAt = performance.now();
     try {
       const broadcast = await this._findActiveBroadcast();
       if (broadcast) {
@@ -1418,6 +1437,13 @@ export class YouTubeProvider implements PlatformProvider {
       }
     } catch (err) {
       defaultLogger.error('[YouTube] _pollStatus error:', err);
+    } finally {
+      const durationMs = performance.now() - startedAt;
+      this.statusPollLastDurationMs = durationMs;
+      if (durationMs > this.statusPollMaxDurationMs) {
+        this.statusPollMaxDurationMs = durationMs;
+      }
+      this.statusPollInFlight = Math.max(0, this.statusPollInFlight - 1);
     }
   }
 
@@ -1517,6 +1543,7 @@ export class YouTubeProvider implements PlatformProvider {
 
   private async _doChatPoll(): Promise<void> {
     if (!this.liveChatId || !this.isAuthenticated() || !this.tokenData) return;
+    this.chatPollInvocationCount += 1;
     await this._refreshTokenIfNeeded();
 
     try {
@@ -1529,6 +1556,7 @@ export class YouTubeProvider implements PlatformProvider {
 
       stream.on('data', (data: YouTubeLiveChatStreamResponse) => {
         if (this.chatStream !== stream) return;
+        this.chatPollStreamDataCount += 1;
         if (data.nextPageToken) {
           this.chatNextPageToken = data.nextPageToken;
         }
@@ -1547,6 +1575,7 @@ export class YouTubeProvider implements PlatformProvider {
         if (this.chatStream !== stream) return;
         this.chatStream = null;
         if (err.code === GrpcStatus.CANCELLED) return;
+        this.chatPollStreamErrorCount += 1;
         defaultLogger.error(
           `[YouTube] live chat stream error: ${err.details ?? err.message ?? String(err.code ?? 'unknown')}`,
         );
@@ -1556,6 +1585,7 @@ export class YouTubeProvider implements PlatformProvider {
       stream.on('end', () => {
         if (this.chatStream !== stream) return;
         this.chatStream = null;
+        this.chatPollStreamEndCount += 1;
         if (!this.liveChatId || !this.isAuthenticated()) return;
         this._scheduleChatReconnect(0);
       });
@@ -2178,6 +2208,33 @@ export class YouTubeProvider implements PlatformProvider {
     } catch {
       return partial;
     }
+  }
+
+  getDebugState(): Record<string, number | boolean> {
+    return {
+      authenticated: this.isAuthenticatedFlag,
+      statusPollTimerActive: this.statusPollTimer !== null,
+      chatPollTimerActive: this.chatPollTimer !== null,
+      chatStreamActive: this.chatStream !== null,
+      liveChatGrpcClientActive: this.liveChatGrpcClient !== null,
+      messageCallbacks: this.messageCallbacks.length,
+      activityCallbacks: this.activityCallbacks.length,
+      startupNoticeCallbacks: this.startupNoticeCallbacks.length,
+      chapterMarkers: this.chapterMarkers.length,
+      chatInitialized: this.chatInitialized,
+      streamOnline: this.streamStatus === StreamStatus.ONLINE,
+      viewerCount: this.viewerCount,
+      statusPollCount: this.statusPollCount,
+      statusPollOverlapCount: this.statusPollOverlapCount,
+      statusPollInFlight: this.statusPollInFlight,
+      statusPollInFlightHighWater: this.statusPollInFlightHighWater,
+      statusPollLastDurationMs: this.statusPollLastDurationMs,
+      statusPollMaxDurationMs: this.statusPollMaxDurationMs,
+      chatPollInvocationCount: this.chatPollInvocationCount,
+      chatPollStreamDataCount: this.chatPollStreamDataCount,
+      chatPollStreamErrorCount: this.chatPollStreamErrorCount,
+      chatPollStreamEndCount: this.chatPollStreamEndCount,
+    };
   }
 
   // ---------------------------------------------------------------------------

@@ -1,5 +1,6 @@
 import { metrics, toPrometheusText } from './metrics';
 import { authorizeMetrics } from './metricsAuth';
+import { runtimeMonitor } from './runtime-monitor';
 
 // Handler helpers that are easy to unit-test. They accept a header getter and
 // a URL string so tests can invoke them without spinning up an HTTP server.
@@ -11,6 +12,7 @@ export function apiMetricsHandler(getHeader: (name: string) => string | null, ur
     });
   }
 
+  runtimeMonitor.getStatus();
   const snapshot = metrics && (metrics as any).getAll ? (metrics as any).getAll() : {};
   return new Response(JSON.stringify(snapshot), {
     headers: { 'Content-Type': 'application/json' },
@@ -25,6 +27,7 @@ export function prometheusMetricsHandler(getHeader: (name: string) => string | n
     });
   }
 
+  runtimeMonitor.getStatus();
   const body = toPrometheusText();
   return new Response(body, { headers: { 'Content-Type': 'text/plain; version=0.0.4' } });
 }

@@ -118,6 +118,42 @@ export default function setup(api: ScriptApi): void {
     await clearCountdownSource(source);
   }
 
+  async function runGoLivePhase(cfg: Pick<
+    ResolvedConfig,
+    'liveScene' | 'showSources' | 'unmuteSources' | 'chatMessage'
+  >): Promise<void> {
+    try {
+      await api.obs.setCurrentScene(cfg.liveScene);
+    } catch (err) {
+      api.logger.warn(`[obs-startup] could not switch to live scene: ${String(err)}`);
+    }
+
+    for (const target of cfg.showSources) {
+      try {
+        const id = await api.obs.getSceneItemId(target.sceneName, target.sourceName);
+        await api.obs.setSceneItemEnabled(target.sceneName, id, true);
+      } catch {
+        api.logger.warn(`[obs-startup] could not show "${target.sourceName}" in "${target.sceneName}"`);
+      }
+    }
+
+    for (const inputName of cfg.unmuteSources) {
+      try {
+        await api.obs.setInputMute(inputName, false);
+      } catch {
+        api.logger.warn(`[obs-startup] could not unmute "${inputName}"`);
+      }
+    }
+
+    if (cfg.chatMessage) {
+      try {
+        await api.chat.sendMessage(cfg.chatMessage);
+      } catch {
+        api.logger.warn('[obs-startup] could not send live message');
+      }
+    }
+  }
+
   // ─── Async sequence ──────────────────────────────────────────────────────────
 
   async function runStartupSequence(): Promise<void> {
@@ -230,36 +266,7 @@ export default function setup(api: ScriptApi): void {
 
     // Phase: go-live
     s.phase = 'go-live';
-    try {
-      await api.obs.setCurrentScene(cfg.liveScene);
-    } catch (err) {
-      api.logger.warn(`[obs-startup] could not switch to live scene: ${String(err)}`);
-    }
-
-    for (const target of cfg.showSources) {
-      try {
-        const id = await api.obs.getSceneItemId(target.sceneName, target.sourceName);
-        await api.obs.setSceneItemEnabled(target.sceneName, id, true);
-      } catch {
-        api.logger.warn(`[obs-startup] could not show "${target.sourceName}" in "${target.sceneName}"`);
-      }
-    }
-
-    for (const inputName of cfg.unmuteSources) {
-      try {
-        await api.obs.setInputMute(inputName, false);
-      } catch {
-        api.logger.warn(`[obs-startup] could not unmute "${inputName}"`);
-      }
-    }
-
-    if (cfg.chatMessage) {
-      try {
-        await api.chat.sendMessage(cfg.chatMessage);
-      } catch {
-        api.logger.warn('[obs-startup] could not send live message');
-      }
-    }
+    await runGoLivePhase(cfg);
 
     s.unsubObs();
     state = { active: false };
@@ -469,6 +476,86 @@ export default function setup(api: ScriptApi): void {
           changedKeys: result.changedKeys,
           configPath: getObsStartupConfigPath(),
           ...result.effectiveConfig,
+        },
+      };
+    },
+  });
+
+  api.registerAction({
+    id: 'obs.startup.live',
+    title: 'Switch directly to the live scene',
+    description:
+      'Runs only the go-live phase: switches to the configured live scene, shows configured sources, unmutes inputs, and optionally sends the live chat message.',
+    domain: 'obs',
+    voiceHint: true,
+    readOnly: false,
+    args: {
+      liveScene: { type: 'string', required: false, maxLength: 200 },
+      chatMessage: { type: 'string', required: false, maxLength: 500 },
+    },
+    examples: [
+      { args: {}, description: 'Switch to the configured live scene immediately' },
+      {
+        args: { liveScene: '[LS] Backup' },
+        description: 'Switch directly to a different live scene for this call',
+      },
+    ],
+    invoke: async (args: Parameters<UserScriptAction['invoke']>[0]) => {
+      if (state.active) {
+        throw new Error(`Startup already active in phase \`${state.phase}\` — cancel first`);
+      }
+      if (!api.obs.isConnected()) {
+        throw new Error('OBS is not connected');
+      }
+
+      const config = loadObsStartupEffectiveConfig();
+      const liveScene = (args.liveScene as string | undefined) ?? config.liveScene;
+      if (!liveScene) {
+        throw new Error(
+          'No live scene configured — set "liveScene" in config.jsonc or pass liveScene= as an argument',
+        );
+      }
+
+      const sceneList = await api.obs.getSceneList();
+      const sceneNames = Array.isArray(sceneList?.scenes)
+        ? sceneList.scenes
+            .map((scene: { sceneName?: string }) =>
+              typeof scene?.sceneName === 'string' ? scene.sceneName.trim() : '',
+            )
+            .filter(Boolean)
+        : [];
+
+      const showSources = config.showSources
+        .map((target: string) => resolveSceneSourceRef(String(target ?? ''), sceneNames, liveScene))
+        .filter((target: SceneSourceRef) => target.sourceName);
+      const unmuteSources = config.unmuteSources;
+      const chatMessage = (args.chatMessage as string | undefined) ?? config.liveMessage;
+
+      await runGoLivePhase({
+        liveScene,
+        showSources,
+        unmuteSources,
+        chatMessage,
+      });
+
+      const output = [`[obs-startup] live scene → ${liveScene}`];
+      if (showSources.length > 0) {
+        output.push(`[obs-startup] show → ${showSources.map((target) => target.raw).join(', ')}`);
+      }
+      if (unmuteSources.length > 0) {
+        output.push(`[obs-startup] unmute → ${unmuteSources.join(', ')}`);
+      }
+      if (chatMessage) {
+        output.push(`[obs-startup] live message → ${chatMessage}`);
+      }
+
+      return {
+        output,
+        data: {
+          liveScene,
+          showSources: showSources.map((target) => target.raw),
+          unmuteSources,
+          chatMessage: chatMessage || null,
         },
       };
     },

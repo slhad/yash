@@ -27,6 +27,7 @@ export const TUI_COMMANDS = [
   '/logs',
   '/marker',
   '/markers',
+  '/memory',
   '/msg',
   '/scripts',
   '/settings',
@@ -57,6 +58,7 @@ const PLATFORMS = ['youtube', 'twitch', 'kick', 'obs'];
 const INJECT_PLATFORMS = ['twitch', 'youtube', 'kick'];
 const MSG_TARGETS = ['all', 'youtube', 'twitch', 'kick'];
 const MARKERS_ARGS = ['restore', 'clear', 'edit', 'all', 'youtube', 'twitch', 'kick'];
+const MEMORY_ARGS = ['modal'];
 const SETTINGS_KEYS = [
   'chat.maxHistorySize',
   'demo',
@@ -68,6 +70,10 @@ const SETTINGS_KEYS = [
   'logs.tail',
   'viewers.visible',
   'viewers.mode',
+  'status.platformIcons.visible',
+  'status.platformIcons.youtube.sizePx',
+  'status.platformIcons.twitch.sizePx',
+  'status.platformIcons.kick.sizePx',
   'messages.position',
   'chat.timestamps.visible',
   'tui.emotes.scale',
@@ -419,6 +425,13 @@ export function getAutocomplete(input: string): {
     }
     if (['all', 'youtube', 'twitch', 'kick'].includes(first) && parts.length === 1) {
       return { completion: null, hints: ['<limit>'], completions: [] };
+    }
+    return { completion: null, hints: [], completions: [] };
+  }
+
+  if (cmd === '/memory') {
+    if (!rest.includes(' ')) {
+      return completeToken(MEMORY_ARGS, restLower);
     }
     return { completion: null, hints: [], completions: [] };
   }

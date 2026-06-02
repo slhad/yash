@@ -8,6 +8,14 @@ describe('validateTuiSettingsDraft', () => {
       titleVisible: false,
       viewersVisible: true,
       viewersMode: 'both',
+      platformIconsVisible: true,
+      platformIconsYoutubeSizePx: '24',
+      platformIconsTwitchSizePx: '24',
+      platformIconsKickSizePx: '24',
+      memoryStatusVisible: true,
+      memoryStatusGreenMaxMb: '500',
+      memoryStatusOrangeMinMb: '2048',
+      memoryStatusRedMinMb: '5120',
       messagesPosition: 'top',
       chatTimestampsVisible: true,
       tuiEmotesScale: '150',
@@ -32,6 +40,14 @@ describe('validateTuiSettingsDraft', () => {
       titleVisible: false,
       viewersVisible: true,
       viewersMode: 'both',
+      platformIconsVisible: true,
+      platformIconsYoutubeSizePx: 24,
+      platformIconsTwitchSizePx: 24,
+      platformIconsKickSizePx: 24,
+      memoryStatusVisible: true,
+      memoryStatusGreenMaxMb: 500,
+      memoryStatusOrangeMinMb: 2048,
+      memoryStatusRedMinMb: 5120,
       messagesPosition: 'top',
       chatTimestampsVisible: true,
       tuiEmotesScale: 150,
@@ -57,6 +73,14 @@ describe('validateTuiSettingsDraft', () => {
       titleVisible: true,
       viewersVisible: true,
       viewersMode: 'sideways',
+      platformIconsVisible: false,
+      platformIconsYoutubeSizePx: '0',
+      platformIconsTwitchSizePx: '0',
+      platformIconsKickSizePx: '0',
+      memoryStatusVisible: false,
+      memoryStatusGreenMaxMb: '3000',
+      memoryStatusOrangeMinMb: '2000',
+      memoryStatusRedMinMb: '1500',
       messagesPosition: 'middle',
       chatTimestampsVisible: false,
       tuiEmotesScale: '0',
@@ -78,6 +102,13 @@ describe('validateTuiSettingsDraft', () => {
     expect(result.values).toBeNull();
     expect(result.errors).toContain('tui.emotes.scale must be a positive integer.');
     expect(result.errors).toContain('chat.maxHistorySize must be a positive integer.');
+    expect(result.errors).toContain(
+      'status.platformIcons.youtube.sizePx must be a positive integer.',
+    );
+    expect(result.errors).toContain(
+      'status.platformIcons.twitch.sizePx must be a positive integer.',
+    );
+    expect(result.errors).toContain('status.platformIcons.kick.sizePx must be a positive integer.');
     expect(result.errors).toContain('events.tail must be a positive integer.');
     expect(result.errors).toContain('logs.height must be a positive integer.');
     expect(result.errors).toContain('logs.tail must be a positive integer.');
@@ -86,6 +117,12 @@ describe('validateTuiSettingsDraft', () => {
     expect(result.errors).toContain('events.width must be one of: 25%, 30%, 35%, 40%, 45%, 50%');
     expect(result.errors).toContain('activity.timeout must be a positive integer.');
     expect(result.errors).toContain('activity.mode must be one of: permanent, timed');
+    expect(result.errors).toContain(
+      'memory.status.greenMaxMb must be lower than memory.status.orangeMinMb.',
+    );
+    expect(result.errors).toContain(
+      'memory.status.orangeMinMb must be lower than memory.status.redMinMb.',
+    );
   });
 
   test('rejects activityTimeout: negative integer', () => {
@@ -94,6 +131,14 @@ describe('validateTuiSettingsDraft', () => {
       titleVisible: true,
       viewersVisible: true,
       viewersMode: 'both',
+      platformIconsVisible: false,
+      platformIconsYoutubeSizePx: '24',
+      platformIconsTwitchSizePx: '24',
+      platformIconsKickSizePx: '24',
+      memoryStatusVisible: true,
+      memoryStatusGreenMaxMb: '500',
+      memoryStatusOrangeMinMb: '2048',
+      memoryStatusRedMinMb: '5120',
       messagesPosition: 'top',
       chatTimestampsVisible: false,
       tuiEmotesScale: '100',
@@ -122,6 +167,14 @@ describe('validateTuiSettingsDraft', () => {
       titleVisible: true,
       viewersVisible: true,
       viewersMode: 'both',
+      platformIconsVisible: false,
+      platformIconsYoutubeSizePx: '24',
+      platformIconsTwitchSizePx: '24',
+      platformIconsKickSizePx: '24',
+      memoryStatusVisible: true,
+      memoryStatusGreenMaxMb: '500',
+      memoryStatusOrangeMinMb: '2048',
+      memoryStatusRedMinMb: '5120',
       messagesPosition: 'top',
       chatTimestampsVisible: false,
       tuiEmotesScale: '100',
@@ -150,6 +203,14 @@ describe('validateTuiSettingsDraft', () => {
       titleVisible: true,
       viewersVisible: true,
       viewersMode: 'both',
+      platformIconsVisible: false,
+      platformIconsYoutubeSizePx: '24',
+      platformIconsTwitchSizePx: '24',
+      platformIconsKickSizePx: '24',
+      memoryStatusVisible: false,
+      memoryStatusGreenMaxMb: '500',
+      memoryStatusOrangeMinMb: '2048',
+      memoryStatusRedMinMb: '5120',
       messagesPosition: 'top',
       chatTimestampsVisible: false,
       tuiEmotesScale: '100',
@@ -180,6 +241,14 @@ describe('validateTuiSettingsDraft', () => {
       titleVisible: true,
       viewersVisible: true,
       viewersMode: 'both',
+      platformIconsVisible: false,
+      platformIconsYoutubeSizePx: '24',
+      platformIconsTwitchSizePx: '24',
+      platformIconsKickSizePx: '24',
+      memoryStatusVisible: true,
+      memoryStatusGreenMaxMb: '500',
+      memoryStatusOrangeMinMb: '2048',
+      memoryStatusRedMinMb: '5120',
       messagesPosition: 'top',
       chatTimestampsVisible: false,
       tuiEmotesScale: '100',
@@ -211,6 +280,14 @@ describe('buildTuiSettingsEntries', () => {
       titleVisible: true,
       viewersVisible: true,
       viewersMode: 'per-platform',
+      platformIconsVisible: true,
+      platformIconsYoutubeSizePx: 28,
+      platformIconsTwitchSizePx: 22,
+      platformIconsKickSizePx: 24,
+      memoryStatusVisible: true,
+      memoryStatusGreenMaxMb: 500,
+      memoryStatusOrangeMinMb: 2048,
+      memoryStatusRedMinMb: 5120,
       messagesPosition: 'bottom',
       chatTimestampsVisible: true,
       tuiEmotesScale: 125,
@@ -230,12 +307,20 @@ describe('buildTuiSettingsEntries', () => {
     });
 
     expect(entries).toContainEqual({ key: 'messages.position', value: 'bottom' });
+    expect(entries).toContainEqual({ key: 'status.platformIcons.visible', value: true });
+    expect(entries).toContainEqual({ key: 'status.platformIcons.youtube.sizePx', value: 28 });
+    expect(entries).toContainEqual({ key: 'status.platformIcons.twitch.sizePx', value: 22 });
+    expect(entries).toContainEqual({ key: 'status.platformIcons.kick.sizePx', value: 24 });
+    expect(entries).toContainEqual({ key: 'memory.status.visible', value: true });
+    expect(entries).toContainEqual({ key: 'memory.status.greenMaxMb', value: 500 });
+    expect(entries).toContainEqual({ key: 'memory.status.orangeMinMb', value: 2048 });
+    expect(entries).toContainEqual({ key: 'memory.status.redMinMb', value: 5120 });
     expect(entries).toContainEqual({ key: 'tui.emotes.scale', value: 125 });
     expect(entries).toContainEqual({ key: 'logs.tail', value: 20 });
     expect(entries).toContainEqual({ key: 'platforms.kick.showViewers', value: false });
     expect(entries).toContainEqual({ key: 'activity.visible', value: true });
     expect(entries).toContainEqual({ key: 'activity.mode', value: 'permanent' });
     expect(entries).toContainEqual({ key: 'activity.timeout', value: 10 });
-    expect(entries).toHaveLength(20);
+    expect(entries).toHaveLength(28);
   });
 });

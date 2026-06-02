@@ -94,6 +94,19 @@ const HELP_ENTRIES: SharedHelpEntry[] = [
     usage: '/info',
   },
   {
+    command: '/memory',
+    surfaces: ['tui', 'api'],
+    descriptions: {
+      tui: 'Show runtime memory telemetry or open the memory status modal',
+      api: 'Show runtime memory and retention telemetry',
+    },
+    usages: {
+      tui: '/memory [modal]',
+      api: '/memory',
+    },
+    tuiExamples: ['/memory modal  — open the live memory status modal'],
+  },
+  {
     command: '/inject',
     surfaces: ['tui'],
     description: 'Inject a fake chat message for offline testing',

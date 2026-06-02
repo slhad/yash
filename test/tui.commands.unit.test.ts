@@ -22,6 +22,7 @@ describe('TUI_COMMANDS', () => {
       '/help',
       '/info',
       '/logs',
+      '/memory',
       '/marker',
       '/markers',
       '/msg',
@@ -252,6 +253,12 @@ describe('getAutocomplete', () => {
     expect(result.completion).toBe('/markers restore');
     expect(result.hints[0]).toBe('restore');
     expect(result.hints).toContain('clear');
+  });
+
+  test('/memory m → completes to /memory modal', () => {
+    const result = getAutocomplete('/memory m');
+    expect(result.completion).toBe('/memory modal');
+    expect(result.hints).toEqual(['modal']);
   });
 
   test('/markers y → completes to /markers youtube', () => {

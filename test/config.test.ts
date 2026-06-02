@@ -197,6 +197,19 @@ describe('Config Utility', () => {
     expect(cfg.stream).toBeUndefined();
   });
 
+  test('applies OBS reconnect disable override from environment', async () => {
+    const previous = process.env.YASH_OBS_DISABLE_RECONNECT;
+    process.env.YASH_OBS_DISABLE_RECONNECT = '1';
+    try {
+      const cfg = await reloadConfig();
+      expect(cfg.obs.websocket.disableReconnect).toBe('1');
+    } finally {
+      if (previous === undefined) delete process.env.YASH_OBS_DISABLE_RECONNECT;
+      else process.env.YASH_OBS_DISABLE_RECONNECT = previous;
+      await reloadConfig();
+    }
+  });
+
   test('settings store persists nested stream updates independently from config', async () => {
     await writeTestConfig({
       server: { host: 'localhost', port: 3000 },

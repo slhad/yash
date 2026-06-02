@@ -266,6 +266,8 @@ function applyEnvOverrides(cfg: any): any {
     config.obs.websocket.reconnectMaxAttempts = process.env.YASH_OBS_RECONNECT_MAX_ATTEMPTS;
   if (process.env.YASH_OBS_CONNECT_DELAY_MS)
     config.obs.websocket.connectDelayMs = process.env.YASH_OBS_CONNECT_DELAY_MS;
+  if (process.env.YASH_OBS_DISABLE_RECONNECT)
+    config.obs.websocket.disableReconnect = process.env.YASH_OBS_DISABLE_RECONNECT;
 
   // YouTube stream key override (used to match the correct broadcast)
   config.platforms = config.platforms || {};

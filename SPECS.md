@@ -13,6 +13,9 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
         * Window showing messages with platform as header (if more than one)
         * Window showing all messages with platform as prefix (if more than one)
         * Element : Platform connected as Status bar — single borderless line starting with "Status" label, each platform shown as `platform: STATUS (Xh Xm Xs/viewers)` in green (authenticated) or red (not authenticated); unauthenticated providers display `LOGGED OUT` instead of `OFFLINE`; elapsed time and viewer count `(Xh Xm Xs/x)` only shown when platform is ONLINE, `viewers.visible` setting is true (default), and per-platform `showViewers` is not false in `settings.json`
+            * Optional provider logos replace the `youtube` / `twitch` / `kick` text labels when `status.platformIcons.visible` is enabled; icons are downloaded lazily at runtime, cached under `YASH_DATA_DIR/cache/platform-status-icons`, recolored to their platform brand fill, sized per platform by `status.platformIcons.youtube.sizePx`, `status.platformIcons.twitch.sizePx`, and `status.platformIcons.kick.sizePx` (default `24` each), and fall back to text labels if the terminal cannot render inline images
+        * Element : Memory status in Status bar — optional `MEM: <rss>` segment showing current YASH RSS for leak tracking; enabled with `memory.status.visible` (default `false`) and color-coded by configurable thresholds `memory.status.greenMaxMb` (default `500`), `memory.status.orangeMinMb` (default `2048`), and `memory.status.redMinMb` (default `5120`)
+            * Clicking the memory segment opens a readable detail modal/overlay with current usage, short growth windows, thresholds, and active warnings
         * Message box
             * position : top/bottom/hide
         * Element : Title (YASH heading)
@@ -21,6 +24,11 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
     * Command /exit - exits the application cleanly (TUI only)
     * Command /help - lists all available commands
         * Command /info - fetches current stream/channel info from all providers and prints one `[system] <platform>: …` line per provider in the TUI chat; Kick output also includes current event subscriptions
+        * Command `/memory` - prints live process memory, recent growth deltas, and bounded-retention probe counts/warnings for the running YASH process; available from the TUI, WebUI command box, and IPC (`bun run cmd /memory`)
+            * TUI-only subcommand `/memory modal` opens the same memory status overlay as clicking the `MEM:` status-bar segment
+            * Includes OBS reconnect/socket lifecycle counters (`obsReconnectAttempt`, `obsWsCreateCount`, `obsWsCloseCount`, `obsWsErrorCount`, `obsReconnectDisabled`) to support live leak A/B soaks
+            * Includes TUI refresh-loop counters (`updateUiLoopRefreshCount`, `updateUiNonLoopRefreshCount`, `updateLoopEnabled`, `updateLoopSkippedRefreshCount`) to support live TUI leak A/B soaks
+        * The periodic TUI refresh loop should be dirty-driven: when no visible provider/OBS/title/viewer/demo state changed since the last render pass, the 2s loop should skip `updateUI()` instead of rebuilding the chat/sidebar trees
     * Command /logs [clear|tail <n>|visible <true|false>] - manage log display (TUI only)
     * Command `/chat clear <all|messages|events|logs>` - clear matching live entries from the TUI Chat pane without affecting persisted history
         * `messages` clears visible chat messages and the raw-message cache used by browse/chatter actions
@@ -44,7 +52,7 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
         * Script config files may include a reserved top-level `"$ui"` object for self-describing TUI metadata such as labels, descriptions, widget hints (`toggle`, `json`, `text`), ordering, hidden fields, and wildcard path templates like `titleTemplate`, `labelTemplate`, and `descriptionTemplate`; runtime values remain in the normal config shape outside `"$ui"`, and the generic TUI editor explores nested objects/arrays recursively
         * The generic script config modal should render scalar leaves compactly as single-line editors in the form `key: type = value`, while nested object/array section rows may be renamed through `"$ui"` templates
         * When a focused config row represents an object/array entry inside an array, the generic script config modal must allow local reordering with `[` (move up) / `]` (move down) and local deletion with `x` before save/cancel
-        * Bundled `obs-startup` actions: `begin`, `cancel`, `status`, `config`, and `configTUI`; all persisted startup settings now live in `YASH_DATA_DIR/scripts/obs-startup/config.jsonc`
+        * Bundled `obs-startup` actions: `begin`, `live`, `cancel`, `status`, `config`, and `configTUI`; `live` jumps straight to the configured `liveScene` and reapplies the go-live show/unmute/chat steps without running the prepare/countdown phases; all persisted startup settings now live in `YASH_DATA_DIR/scripts/obs-startup/config.jsonc`
         * Bundled `obs-shutdown` exposes `/action obs.shutdown.config` and `/action obs.shutdown.configTUI` against `YASH_DATA_DIR/scripts/obs-shutdown/config.jsonc`
         * `repair`/`force` refreshes tracked files and merges shipped `config.jsonc` defaults with the user's current `config.jsonc`, preserving existing values and unknown keys
         * Explicit `copy` forces copied tracked files even in local dev; explicit `link` forces symlinked tracked files when the runtime supports it
@@ -74,6 +82,8 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
         * Examples: `/markers`, `/markers youtube`, `/markers twitch 5`, `/markers restore twitch`, `/markers edit 1`, `/markers clear`, `/markers clear 1,2,5`
     * Command /settings [get <key>|set <key> <value>] - get or set UI settings; running `/settings` with no arguments opens a TUI modal for display/sidebar/viewer preferences and persists changes to `settings.json`
         * Includes `chat.timestamps.visible` for WebUI unified chat timestamp display
+        * Includes `status.platformIcons.visible`, `status.platformIcons.youtube.sizePx`, `status.platformIcons.twitch.sizePx`, and `status.platformIcons.kick.sizePx` for runtime-downloaded provider logos in the status bar
+        * Includes `memory.status.visible`, `memory.status.greenMaxMb`, `memory.status.orangeMinMb`, and `memory.status.redMinMb` for the status-bar RSS indicator
     * Command `/activity` — opens the activity bar modal showing the full event history (follow, sub, cheer, raid) with platform labels and timestamps (TUI only)
         * YouTube activity entries are sourced from live-chat event types and should continue to appear even if YouTube uses subscriber/member naming variants such as `newSponsorEvent` or `newSubscriberEvent`
     * Command `/inject <platform> <username> <message>` — injects a fake incoming chat message for dev/testing without a live platform connection (TUI only)
@@ -83,7 +93,7 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
     * Message box to send message to [all|youtube|twitch|kick] platform and receive command "/" (without sending to platforms)
         * Input history: Up/Down arrow keys navigate previously-sent messages (like a shell history)
         * The TUI persists previously sent commands and plain messages across restarts in `YASH_DATA_DIR/input-history.json`, so Up/Down recall still works after relaunch
-        * Plain messages (input not starting with `/`) show a target preview `all|youtube|twitch|kick > message`; `Tab` cycles between `all` and currently connected providers before sending
+        * Plain messages (input not starting with `/`) show a target preview `all|youtube|twitch|kick > message`; `Tab` cycles forward and `Shift+Tab` cycles backward between `all` and currently connected providers before sending
         * Slash commands are echoed into the Chat pane before their output so later feedback lines keep a visible source command context
         * After a successful Twitch send, the chat panel also appends a local self-echo incoming line so Twitch matches the visible send/echo behavior of the other providers
     * Web chat views (`/`, `/unified`, `/sidebyside`)
@@ -92,7 +102,7 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
         * Twitch messages render FrankerFaceZ emotes inline in the Chat pane and chatter/history modal message rows when the active terminal supports Kitty-style Unicode image placeholders (for example Ghostty through tmux with `allow-passthrough on` or `allow-passthrough all`); otherwise the original token text remains visible
         * `tui.emotes.scale` controls the TUI inline emote size and applies immediately when changed through `/settings`; users migrating from the early broken sizing behavior may need to increase existing saved values (for example `200` or `400`) to get the desired visible size
         * Persisted chat messages remain plain text; FFZ substitution is render-time only
-        * Command parameter autocomplete: after typing a command + space, Tab completes available parameters
+        * Command parameter autocomplete: after typing a command + space, `Tab` cycles forward through available completions and `Shift+Tab` cycles backward
             * `/connect ` → `youtube | twitch | kick`
             * `/action ` → public action ids; `/action <id> ` → available `key=` args or enum values
             * `/msg ` → `all | youtube | twitch | kick`
@@ -119,10 +129,10 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
         * Tags (youtube,twitch,kick)
         * Subject/Category/Game (youtube,twitch,kick)
         * Platform-specific category fields: `twitchGame` with datalist autocomplete (calls `/api/twitch/categories`); `kickCategory` with datalist autocomplete (calls `/api/kick/categories`); YouTube category `<select>` dropdown (populated from `/api/youtube/categories`)
-        * Status bar shows per-platform elapsed time + viewer counts, auto-refreshes every second
+        * Status bar shows per-platform elapsed time + viewer counts, auto-refreshes every second, and may also show the optional memory RSS segment when `memory.status.visible` is enabled
     * Route /unified to show unified view of all chats
         * Message box supports all applicable / commands: `/help`, `/msg`, `/marker`, `/markers`, `/connect`, `/settings`
-        * Status bar shows per-platform elapsed time + viewer counts
+        * Status bar shows per-platform elapsed time + viewer counts, plus the optional memory RSS segment when enabled
         * URL querystring configures initial state and stays in sync as options change: `?position=top|bottom|hide` overrides stored position; `?platform=all|youtube|twitch|kick` sets initial target platform; toggling either option updates the URL via `history.replaceState`
     * Route /sidebyside to show view of chats side by side with config options to enable any platform (saved in browser); URL querystring configures initial state and stays in sync: `?position=top|bottom|hide` overrides stored position; `?platforms=youtube,twitch,kick` (comma-separated subset) sets visible columns; toggling either option updates the URL via `history.replaceState`
         * Message box supports all applicable / commands: `/help`, `/msg`, `/marker`, `/markers`, `/connect`, `/settings`
@@ -318,7 +328,15 @@ Pre-v1 rule: do not add migration/compatibility behavior for old user-script or 
 | `YASH_OBS_RECONNECT_MAX_MS` | `obs.websocket.reconnectMaxMs` |
 | `YASH_OBS_RECONNECT_MULTIPLIER` | `obs.websocket.reconnectMultiplier` |
 | `YASH_OBS_RECONNECT_MAX_ATTEMPTS` | `obs.websocket.reconnectMaxAttempts` |
+| `YASH_OBS_DISABLE_RECONNECT` | `obs.websocket.disableReconnect` |
 | `YASH_OBS_CONNECT_DELAY_MS` | `obs.websocket.connectDelayMs` |
+| `YASH_DISABLE_AUTH_AUTO_REFRESH` | Disable AuthService token refresh loop for controlled soak/A-B runs |
+| `YASH_DISABLE_YOUTUBE_STARTUP` | Disable YouTube startup hook/poll setup for controlled soak/A-B runs |
+| `YASH_DISABLE_TWITCH_STARTUP` | Disable Twitch startup hook/listener setup for controlled soak/A-B runs |
+| `YASH_DISABLE_KICK_STARTUP` | Disable Kick startup hook/poll/relay setup for controlled soak/A-B runs |
+| `YASH_DISABLE_TWITCH_RUNTIME` | Disable Twitch auth-restored runtime startup (chat/viewer poll) for controlled soak/A-B runs |
+| `YASH_DISABLE_KICK_RUNTIME` | Disable Kick auth-restored runtime startup (poll) for controlled soak/A-B runs |
+| `YASH_DISABLE_TUI_UPDATE_LOOP` | Disable the 2s periodic TUI refresh loop for controlled soak/A-B runs |
 | `YASH_PLATFORM_YOUTUBE_STREAMKEY` | `platforms.youtube.streamKey` |
 | `TWITCH_CLIENT_ID` | `platforms.twitch.clientId` |
 | `TWITCH_CLIENT_SECRET` | `platforms.twitch.clientSecret` |
@@ -397,8 +415,9 @@ Pre-v1 rule: do not add migration/compatibility behavior for old user-script or 
 | POST | `/api/kick/webhook` | Receives direct Kick webhook events (non-smee tunnels) |
 | GET | `/api/youtube/categories` | List YouTube video category names: `{ categories: string[] }` |
 | GET | `/api/obs/status` | OBS connection status + metrics |
+| GET | `/api/runtime/status` | Runtime memory snapshot with RSS/heap/external bytes, short growth windows, and retention probe warnings |
 | GET | `/api/metrics` | JSON metrics snapshot |
-| GET | `/metrics` | Prometheus text format metrics |
+| GET | `/metrics` | Prometheus text format metrics, including process memory gauges and registered runtime probe gauges |
 
 ## Project Structure
 ```

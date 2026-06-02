@@ -49,11 +49,20 @@ import {
   getChatterSessionStats,
 } from './utils/chatterInfoSession';
 import { getDataDir, isDemoMode, saveConfig } from './utils/config';
+import { parseMessageWithFfzEmotes } from './utils/ffz';
 import { getFfzEmotePayload, type SharedTwitchEmoteDefinition } from './utils/ffz-fetch';
 import { renderTuiHelpLines } from './utils/help';
 import { runIpcCommand } from './utils/ipcCommandRunner';
 import logCollector from './utils/logCollector';
 import { defaultLogger } from './utils/logger';
+import {
+  buildMemoryInsightSummary,
+  DEFAULT_MEMORY_STATUS_GREEN_MAX_MB,
+  DEFAULT_MEMORY_STATUS_ORANGE_MIN_MB,
+  DEFAULT_MEMORY_STATUS_RED_MIN_MB,
+  formatMemoryStatusDisplay,
+  readMemoryStatusSettings,
+} from './utils/memoryStatus';
 import {
   applyObsShutdownConfigPatch,
   buildObsShutdownConfigDraft,
@@ -61,6 +70,20 @@ import {
   type ObsShutdownConfigDraft,
   validateObsShutdownConfigDraft,
 } from './utils/obsShutdownConfig';
+import {
+  DEFAULT_PLATFORM_STATUS_ICON_SIZE_PX,
+  getPlatformStatusIconColumns,
+  getPlatformStatusIconPlatformSizeSettingKey,
+  PLATFORM_STATUS_ICON_SETTING_KEY,
+  type PlatformStatusIconPlatform,
+  readPlatformStatusIconSizePxForPlatform,
+  readPlatformStatusIconsEnabled,
+} from './utils/platformStatusIcons';
+import {
+  ensurePlatformStatusIcon,
+  warmPlatformStatusIcons,
+} from './utils/platformStatusIcons.server';
+import { formatRuntimeStatusLines, runtimeMonitor } from './utils/runtime-monitor';
 import { buildTargetedStreamMetadataUpdate } from './utils/streamMetadata';
 import { getAutocomplete, initTuiCommands, setActionRegistry } from './utils/tuiCommands';
 import { installTuiErrorCapture } from './utils/tuiErrorCapture';
@@ -68,12 +91,14 @@ import {
   buildTuiFfzMessageParts,
   buildTuiFfzUploadSequences,
   getTuiFfzColumnSpan,
+  getTuiFfzPlaceholderCells,
   getTuiFfzUploadUrl,
+  imageIdToColorHex,
   isTuiFfzPassthroughEnabled,
   parsePngDimensions,
   supportsTuiFfzClientTerm,
 } from './utils/tuiFfz';
-import { type MessageTarget } from './utils/tuiMessageInput';
+import { getNextAutocompleteCycleIndex, type MessageTarget } from './utils/tuiMessageInput';
 import {
   buildTuiSettingsEntries,
   SETTINGS_ACTIVITY_MODES,
@@ -107,6 +132,9 @@ const MAX_CHAT_HISTORY_LIMIT = 5000;
 const MAX_EVENT_LOG_ENTRIES = 500;
 const MAX_ACTIVITY_EVENTS = 500;
 const MAX_TUI_FFZ_IMAGES = 512;
+const TUI_UPDATE_LOOP_DISABLED =
+  process.env.YASH_DISABLE_TUI_UPDATE_LOOP === '1' ||
+  process.env.YASH_DISABLE_TUI_UPDATE_LOOP === 'true';
 
 installTuiErrorCapture();
 
@@ -310,9 +338,36 @@ function applySettingSideEffects(key: string, value: unknown): void {
     pruneActivityEvents();
     _scheduleActivityBarRefresh();
   }
+  if (
+    key === getPlatformStatusIconPlatformSizeSettingKey('youtube') ||
+    key === getPlatformStatusIconPlatformSizeSettingKey('twitch') ||
+    key === getPlatformStatusIconPlatformSizeSettingKey('kick')
+  ) {
+    resetTuiPlatformStatusIconState();
+    if (statusPlatformIconsEnabled()) {
+      for (const platform of platforms) {
+        scheduleTuiPlatformStatusIconUpload(platform as PlatformStatusIconPlatform);
+      }
+    }
+  }
+  if (key === PLATFORM_STATUS_ICON_SETTING_KEY) {
+    resetTuiPlatformStatusIconState();
+    if (String(value).toLowerCase() === 'true') {
+      warmPlatformStatusIcons();
+      for (const platform of platforms) {
+        scheduleTuiPlatformStatusIconUpload(platform as PlatformStatusIconPlatform);
+      }
+    }
+  }
 }
 
 const STRUCTURAL_SETTING_KEYS = new Set(['messages.position', 'events.width', 'logs.height']);
+const DEPRECATED_SETTINGS_KEY_MESSAGES = new Map<string, string>([
+  [
+    'status.platformIcons.sizePx',
+    '[settings] status.platformIcons.sizePx was removed; use status.platformIcons.youtube.sizePx, status.platformIcons.twitch.sizePx, and status.platformIcons.kick.sizePx instead.',
+  ],
+]);
 
 async function persistSettingEntries(
   entries: Array<{ key: string; value: unknown }>,
@@ -377,6 +432,81 @@ function getPlatformStatusColor(status: { authenticated: boolean; streamStatus: 
   return 'yellow';
 }
 
+function statusPlatformIconsEnabled(): boolean {
+  return readPlatformStatusIconsEnabled((key, fallback) => settings.get(key, fallback));
+}
+
+function getStatusPlatformIconSizePxForPlatform(platform: PlatformStatusIconPlatform): number {
+  return readPlatformStatusIconSizePxForPlatform(platform, (key, fallback) =>
+    settings.get(key, fallback),
+  );
+}
+
+function buildPlatformStatusContent(
+  platform: string,
+  status: { authenticated: boolean; streamStatus: string },
+  viewers: string,
+): string | StyledText {
+  const label = `: ${formatPlatformStatusLabel(status, viewers)}  `;
+  if (!statusPlatformIconsEnabled() || !detectTuiFfzSupport()) {
+    return `${platform}${label}`;
+  }
+  const imageId = tuiPlatformStatusIconImageIds.get(platform as PlatformStatusIconPlatform);
+  if (!imageId) {
+    scheduleTuiPlatformStatusIconUpload(platform as PlatformStatusIconPlatform);
+    return `${platform}${label}`;
+  }
+  return new StyledText([
+    fg(imageIdToColorHex(imageId))(
+      getTuiFfzPlaceholderCells(
+        getPlatformStatusIconColumns(
+          getStatusPlatformIconSizePxForPlatform(platform as PlatformStatusIconPlatform),
+        ),
+      ),
+    ),
+    fg(getPlatformStatusColor(status))(label),
+  ]);
+}
+
+function getTuiMemoryStatusNodeState(): { visible: boolean; content: string; fg: string } {
+  const memorySettings = readMemoryStatusSettings((key, fallback) => settings.get(key, fallback));
+  if (!memorySettings.visible) {
+    return { visible: false, content: '', fg: 'gray' };
+  }
+  const display = formatMemoryStatusDisplay(
+    runtimeMonitor.getStatus().memory.rssBytes,
+    memorySettings,
+  );
+  const fg =
+    display.level === 'green'
+      ? 'green'
+      : display.level === 'yellow'
+        ? 'yellow'
+        : display.level === 'orange'
+          ? '#f97316'
+          : 'red';
+  return {
+    visible: true,
+    content: `  ${display.text}`,
+    fg,
+  };
+}
+
+function getMemoryInsightToneColor(tone: 'default' | 'muted' | 'good' | 'warn' | 'danger'): string {
+  switch (tone) {
+    case 'muted':
+      return 'gray';
+    case 'good':
+      return 'green';
+    case 'warn':
+      return 'yellow';
+    case 'danger':
+      return 'red';
+    default:
+      return 'white';
+  }
+}
+
 function clearScrollBox(scroll: ScrollBoxRenderable): void {
   for (const child of scroll.getChildren()) {
     scroll.remove(child.id);
@@ -405,6 +535,7 @@ interface UINodes {
   titleText: TextRenderable;
   subtitleText: TextRenderable;
   platformTexts: Map<string, TextRenderable>;
+  memoryText: TextRenderable;
   obsText: TextRenderable;
   demoText: TextRenderable;
   totalViewersText: TextRenderable;
@@ -453,6 +584,7 @@ let activeChatterInfoModal: {
 } | null = null;
 let activeHistoryModal: { box: BoxRenderable } | null = null;
 let activeActivityModal: { box: BoxRenderable } | null = null;
+let activeMemoryModal: { box: BoxRenderable } | null = null;
 
 const chatterCache = new ChatterCache();
 
@@ -482,14 +614,20 @@ function getConnectedMessageTargets(): MessageTarget[] {
   return targets;
 }
 
-function cycleMessageTarget(): void {
+function cycleMessageTarget(direction: 1 | -1 = 1): void {
   const targets = getConnectedMessageTargets();
   const currentIndex = targets.indexOf(selectedMessageTarget);
-  if (currentIndex === -1 || currentIndex === targets.length - 1) {
-    selectedMessageTarget = targets[0] ?? 'all';
+  if (targets.length === 0) {
+    selectedMessageTarget = 'all';
     return;
   }
-  selectedMessageTarget = targets[currentIndex + 1] ?? 'all';
+  const nextIndex =
+    currentIndex === -1
+      ? direction === -1
+        ? targets.length - 1
+        : 0
+      : (currentIndex + direction + targets.length) % targets.length;
+  selectedMessageTarget = targets[nextIndex] ?? 'all';
 }
 
 function getMessageTargetColor(target: MessageTarget): string {
@@ -562,12 +700,6 @@ function initUI(renderer: CliRenderer, messages: ChatLine[]): UINodes {
   // ── Root container ───────────────────────────────────────────────
   const mainBox = new BoxRenderable(renderer, {
     id: 'yash-root',
-    borderStyle: 'rounded',
-    border: true,
-    paddingTop: 1,
-    paddingRight: 2,
-    paddingBottom: 1,
-    paddingLeft: 2,
     width: '100%',
     height: '100%',
     flexDirection: 'column',
@@ -613,7 +745,7 @@ function initUI(renderer: CliRenderer, messages: ChatLine[]): UINodes {
           : ` (${viewerCount})`
         : '';
     const t = new TextRenderable(renderer, {
-      content: `${platform}: ${formatPlatformStatusLabel(status, viewers)}  `,
+      content: buildPlatformStatusContent(platform, status, viewers),
       fg: getPlatformStatusColor(status),
     });
     platformTexts.set(platform, t);
@@ -627,6 +759,17 @@ function initUI(renderer: CliRenderer, messages: ChatLine[]): UINodes {
   totalViewersText.visible =
     viewersVisible && (viewersMode === 'cumulative' || viewersMode === 'both');
   platformRow.add(totalViewersText);
+
+  const initialMemoryState = getTuiMemoryStatusNodeState();
+  const memoryText = new TextRenderable(renderer, {
+    content: initialMemoryState.content,
+    fg: initialMemoryState.fg,
+  });
+  memoryText.visible = initialMemoryState.visible;
+  memoryText.onMouseDown = (e) => {
+    if (e.button === 0) openMemoryStatusModal();
+  };
+  platformRow.add(memoryText);
 
   const obsText = new TextRenderable(renderer, {
     content: `OBS: ${obsService.isConnected() ? '✓' : '✗'}  `,
@@ -654,7 +797,6 @@ function initUI(renderer: CliRenderer, messages: ChatLine[]): UINodes {
   const activityBar = new BoxRenderable(renderer, {
     flexDirection: 'row',
     width: '100%',
-    paddingLeft: 1,
   });
   activityBar.add(activityBarLabel);
   activityBar.add(activityBarText);
@@ -780,6 +922,7 @@ function initUI(renderer: CliRenderer, messages: ChatLine[]): UINodes {
     titleText,
     subtitleText,
     platformTexts,
+    memoryText,
     obsText,
     demoText,
     totalViewersText,
@@ -880,6 +1023,7 @@ function openActivityModal(): void {
   if (
     !uiNodes ||
     activeActivityModal ||
+    activeMemoryModal ||
     activeModal ||
     activeStreamModal ||
     activeSettingsModal ||
@@ -964,11 +1108,110 @@ function openActivityModal(): void {
   renderer.prependInputHandler(keyHandler);
 }
 
+function openMemoryStatusModal(): void {
+  if (
+    !uiNodes ||
+    activeMemoryModal ||
+    activeActivityModal ||
+    activeModal ||
+    activeStreamModal ||
+    activeSettingsModal ||
+    activeObsShutdownConfigModal ||
+    activeScriptConfigModal ||
+    activeChatterInfoModal ||
+    activeHistoryModal
+  )
+    return;
+
+  const memorySettings = readMemoryStatusSettings((key, fallback) => settings.get(key, fallback));
+  if (!memorySettings.visible) return;
+
+  const insight = buildMemoryInsightSummary(runtimeMonitor.getStatus(), memorySettings);
+  const { renderer } = uiNodes;
+  const statusColor =
+    insight.statusLevel === 'green'
+      ? 'green'
+      : insight.statusLevel === 'yellow'
+        ? 'yellow'
+        : insight.statusLevel === 'orange'
+          ? '#f97316'
+          : 'red';
+
+  const box = new BoxRenderable(renderer, {
+    position: 'absolute',
+    top: '8%',
+    left: '6%',
+    width: '88%',
+    height: '72%',
+    zIndex: 110,
+    border: true,
+    borderStyle: 'rounded',
+    borderColor: statusColor,
+    backgroundColor: 'black',
+    shouldFill: true,
+    padding: 1,
+    flexDirection: 'column',
+    gap: 0,
+    title: ` Memory Status ${insight.title} `,
+  });
+
+  box.add(
+    new TextRenderable(renderer, {
+      content: `  ${insight.statusText}  •  ↑↓ scroll  •  Esc close`,
+      fg: statusColor,
+      attributes: TextAttributes.BOLD,
+    }),
+  );
+  box.add(new TextRenderable(renderer, { content: '', fg: 'gray' }));
+
+  const scroll = new ScrollBoxRenderable(renderer, {
+    flexGrow: 1,
+    stickyScroll: false,
+    stickyStart: 'top',
+  });
+
+  for (const line of insight.lines) {
+    scroll.add(
+      new TextRenderable(renderer, {
+        content: `  ${line.text}`,
+        fg: getMemoryInsightToneColor(line.tone),
+      }),
+    );
+  }
+
+  box.add(scroll);
+  renderer.root.add(box);
+  activeMemoryModal = { box };
+
+  const keyHandler = (sequence: string): boolean => {
+    if (!activeMemoryModal) return false;
+    if (sequence === '\x1b' || sequence === '\x1b\x1b') {
+      renderer.removeInputHandler(keyHandler);
+      renderer.root.remove(box.id);
+      activeMemoryModal = null;
+      uiNodes?.inputEl.focus();
+      return true;
+    }
+    if (sequence === '\x1b[A') {
+      scroll.scrollBy(-1);
+      return true;
+    }
+    if (sequence === '\x1b[B') {
+      scroll.scrollBy(1);
+      return true;
+    }
+    return false;
+  };
+
+  renderer.prependInputHandler(keyHandler);
+}
+
 // ─── updateUI ────────────────────────────────────────────────────────────────
 // Mutates existing nodes in-place — never removes/re-adds root, so no flicker.
 
 function updateUI(messages: ChatLine[]): void {
   if (!uiNodes) return;
+  const startedAt = performance.now();
   trimUiChatMemory();
   pruneActivityEvents();
   const {
@@ -976,6 +1219,7 @@ function updateUI(messages: ChatLine[]): void {
     titleText,
     subtitleText,
     platformTexts,
+    memoryText,
     obsText,
     demoText,
     totalViewersText,
@@ -1010,7 +1254,7 @@ function updateUI(messages: ChatLine[]): void {
             ? ` (${elapsed}/${viewerCount})`
             : ` (${viewerCount})`
           : '';
-      node.content = `${platform}: ${formatPlatformStatusLabel(status, viewers)}  `;
+      node.content = buildPlatformStatusContent(platform, status, viewers);
       node.fg = getPlatformStatusColor(status);
     }
   }
@@ -1021,6 +1265,10 @@ function updateUI(messages: ChatLine[]): void {
   totalViewersText.content = `  Total viewers: ${totalViewers}`;
   totalViewersText.visible =
     viewersVisible && (viewersMode === 'cumulative' || viewersMode === 'both');
+  const memoryState = getTuiMemoryStatusNodeState();
+  memoryText.content = memoryState.content;
+  memoryText.fg = memoryState.fg;
+  memoryText.visible = memoryState.visible;
 
   // Chat: clear and refill
   clearScrollBox(chatScroll);
@@ -1066,6 +1314,24 @@ function updateUI(messages: ChatLine[]): void {
   _fillSidebar(renderer, sidebarScroll, eventsVisible, logsVisible, eventsTail, logsTail);
 
   ensureMainInputFocus();
+  lastUpdateLoopSignature = getUpdateLoopRefreshSignature();
+
+  const durationMs = performance.now() - startedAt;
+  updateUiCount += 1;
+  updateUiTotalDurationMs += durationMs;
+  updateUiLastDurationMs = durationMs;
+  if (durationMs > updateUiMaxDurationMs) {
+    updateUiMaxDurationMs = durationMs;
+  }
+  updateUiLastMessageCount = messages.length;
+  const chatChildren = chatScroll.getChildren().length;
+  const sidebarChildren = sidebarScroll.getChildren().length;
+  if (chatChildren > updateUiChatChildrenHighWater) {
+    updateUiChatChildrenHighWater = chatChildren;
+  }
+  if (sidebarChildren > updateUiSidebarChildrenHighWater) {
+    updateUiSidebarChildrenHighWater = sidebarChildren;
+  }
 }
 
 // ─── Command dispatch ────────────────────────────────────────────────────────
@@ -2476,7 +2742,16 @@ function openStreamModal(preselected: string[]): void {
     return;
   const { renderer } = uiNodes;
 
-  const selectedPlatforms = new Set(preselected.length > 0 ? preselected : [...platforms]);
+  const defaultSelectedPlatforms =
+    preselected.length > 0
+      ? preselected
+      : platforms.filter((platform) => {
+          const provider = platform === 'youtube' ? youtube : platform === 'twitch' ? twitch : kick;
+          return provider.isAuthenticated();
+        });
+  const selectedPlatforms = new Set(
+    defaultSelectedPlatforms.length > 0 ? defaultSelectedPlatforms : [...platforms],
+  );
   const savedStream = settings.get('stream', {});
 
   function makeLabel(text: string): TextRenderable {
@@ -3302,10 +3577,20 @@ const commandHandlers: Record<
       openSettingsModal();
     } else if (op === 'get' && parts[2]) {
       const key = parts[2];
+      const deprecatedMessage = DEPRECATED_SETTINGS_KEY_MESSAGES.get(key);
+      if (deprecatedMessage) {
+        emit(deprecatedMessage);
+        return;
+      }
       const val = getSettingValue(key);
       emit(`[settings] ${key} = ${JSON.stringify(val)}`);
     } else if (op === 'set' && parts[2] && parts[3]) {
       const key = parts[2];
+      const deprecatedMessage = DEPRECATED_SETTINGS_KEY_MESSAGES.get(key);
+      if (deprecatedMessage) {
+        emit(deprecatedMessage);
+        return;
+      }
       const rawValue = parts.slice(3).join(' ');
       const value = parseSettingsValue(rawValue);
       const changedKeys = await persistSettingEntries([{ key, value }]);
@@ -3319,7 +3604,7 @@ const commandHandlers: Record<
     } else {
       emit('[system] Usage: /settings | /settings get <key> | /settings set <key> <json-value>');
       emit(
-        '[system] Common keys: stream.title, stream.description, chat.maxHistorySize, demo, title.visible, logs.visible, logs.height, logs.tail, viewers.visible, viewers.mode, messages.position, chat.timestamps.visible, tui.emotes.scale, events.visible, events.tail, events.width, platforms.<provider>.showViewers, platforms.youtube.setup.*',
+        '[system] Common keys: stream.title, stream.description, chat.maxHistorySize, demo, title.visible, logs.visible, logs.height, logs.tail, viewers.visible, viewers.mode, status.platformIcons.visible, status.platformIcons.youtube.sizePx, status.platformIcons.twitch.sizePx, status.platformIcons.kick.sizePx, memory.status.visible, memory.status.greenMaxMb, memory.status.orangeMinMb, memory.status.redMinMb, messages.position, chat.timestamps.visible, tui.emotes.scale, events.visible, events.tail, events.width, platforms.<provider>.showViewers, platforms.youtube.setup.*',
       );
     }
   },
@@ -3415,6 +3700,16 @@ const commandHandlers: Record<
       } catch (err) {
         emit(`[system] ${platform}: error: ${String(err)}`);
       }
+    }
+  },
+
+  '/memory': async (_parts, emit) => {
+    if ((_parts[1] ?? '').toLowerCase() === 'modal') {
+      openMemoryStatusModal();
+      return;
+    }
+    for (const line of formatRuntimeStatusLines(runtimeMonitor.getStatus())) {
+      emit(line);
     }
   },
 
@@ -3623,6 +3918,53 @@ function openSettingsModal(): void {
     titleVisible: boolSetting(settings.get('title.visible', false), false),
     viewersVisible: boolSetting(settings.get('viewers.visible', true), true),
     viewersMode: String(settings.get('viewers.mode', 'per-platform') ?? 'per-platform'),
+    platformIconsVisible: boolSetting(settings.get(PLATFORM_STATUS_ICON_SETTING_KEY, false), false),
+    platformIconsYoutubeSizePx: String(
+      numSetting(
+        settings.get(
+          getPlatformStatusIconPlatformSizeSettingKey('youtube'),
+          DEFAULT_PLATFORM_STATUS_ICON_SIZE_PX,
+        ),
+        DEFAULT_PLATFORM_STATUS_ICON_SIZE_PX,
+      ),
+    ),
+    platformIconsTwitchSizePx: String(
+      numSetting(
+        settings.get(
+          getPlatformStatusIconPlatformSizeSettingKey('twitch'),
+          DEFAULT_PLATFORM_STATUS_ICON_SIZE_PX,
+        ),
+        DEFAULT_PLATFORM_STATUS_ICON_SIZE_PX,
+      ),
+    ),
+    platformIconsKickSizePx: String(
+      numSetting(
+        settings.get(
+          getPlatformStatusIconPlatformSizeSettingKey('kick'),
+          DEFAULT_PLATFORM_STATUS_ICON_SIZE_PX,
+        ),
+        DEFAULT_PLATFORM_STATUS_ICON_SIZE_PX,
+      ),
+    ),
+    memoryStatusVisible: boolSetting(settings.get('memory.status.visible', false), false),
+    memoryStatusGreenMaxMb: String(
+      numSetting(
+        settings.get('memory.status.greenMaxMb', DEFAULT_MEMORY_STATUS_GREEN_MAX_MB),
+        DEFAULT_MEMORY_STATUS_GREEN_MAX_MB,
+      ),
+    ),
+    memoryStatusOrangeMinMb: String(
+      numSetting(
+        settings.get('memory.status.orangeMinMb', DEFAULT_MEMORY_STATUS_ORANGE_MIN_MB),
+        DEFAULT_MEMORY_STATUS_ORANGE_MIN_MB,
+      ),
+    ),
+    memoryStatusRedMinMb: String(
+      numSetting(
+        settings.get('memory.status.redMinMb', DEFAULT_MEMORY_STATUS_RED_MIN_MB),
+        DEFAULT_MEMORY_STATUS_RED_MIN_MB,
+      ),
+    ),
     messagesPosition: String(settings.get('messages.position', 'bottom') ?? 'bottom'),
     chatTimestampsVisible: boolSetting(settings.get('chat.timestamps.visible', true), true),
     tuiEmotesScale: String(
@@ -3707,6 +4049,86 @@ function openSettingsModal(): void {
   const titleVisibleRow = new TextRenderable(renderer, { content: '', fg: 'white' });
   const viewersVisibleRow = new TextRenderable(renderer, { content: '', fg: 'white' });
   const viewersModeRow = new TextRenderable(renderer, { content: '', fg: 'white' });
+  const platformIconsVisibleRow = new TextRenderable(renderer, { content: '', fg: 'white' });
+  const platformIconsYoutubeSizeLabel = makeLabel(
+    '  status.platformIcons.youtube.sizePx: YouTube logo size override in pixels',
+  );
+  const platformIconsYoutubeSizeInput = new InputRenderable(renderer, {
+    placeholder: String(DEFAULT_PLATFORM_STATUS_ICON_SIZE_PX),
+    width: '100%',
+  });
+  const platformIconsYoutubeSizeInputRow = createIndentedInputRow(
+    renderer,
+    platformIconsYoutubeSizeInput,
+    '    ',
+  );
+  platformIconsYoutubeSizeInput.value = draft.platformIconsYoutubeSizePx;
+  const platformIconsTwitchSizeLabel = makeLabel(
+    '  status.platformIcons.twitch.sizePx: Twitch logo size override in pixels',
+  );
+  const platformIconsTwitchSizeInput = new InputRenderable(renderer, {
+    placeholder: String(DEFAULT_PLATFORM_STATUS_ICON_SIZE_PX),
+    width: '100%',
+  });
+  const platformIconsTwitchSizeInputRow = createIndentedInputRow(
+    renderer,
+    platformIconsTwitchSizeInput,
+    '    ',
+  );
+  platformIconsTwitchSizeInput.value = draft.platformIconsTwitchSizePx;
+  const platformIconsKickSizeLabel = makeLabel(
+    '  status.platformIcons.kick.sizePx: Kick logo size override in pixels',
+  );
+  const platformIconsKickSizeInput = new InputRenderable(renderer, {
+    placeholder: String(DEFAULT_PLATFORM_STATUS_ICON_SIZE_PX),
+    width: '100%',
+  });
+  const platformIconsKickSizeInputRow = createIndentedInputRow(
+    renderer,
+    platformIconsKickSizeInput,
+    '    ',
+  );
+  platformIconsKickSizeInput.value = draft.platformIconsKickSizePx;
+  const memoryStatusVisibleRow = new TextRenderable(renderer, { content: '', fg: 'white' });
+  const memoryStatusGreenMaxMbLabel = makeLabel(
+    '  memory.status.greenMaxMb: green at or below this RSS threshold in MB',
+  );
+  const memoryStatusGreenMaxMbInput = new InputRenderable(renderer, {
+    placeholder: String(DEFAULT_MEMORY_STATUS_GREEN_MAX_MB),
+    width: '100%',
+  });
+  const memoryStatusGreenMaxMbInputRow = createIndentedInputRow(
+    renderer,
+    memoryStatusGreenMaxMbInput,
+    '    ',
+  );
+  memoryStatusGreenMaxMbInput.value = draft.memoryStatusGreenMaxMb;
+  const memoryStatusOrangeMinMbLabel = makeLabel(
+    '  memory.status.orangeMinMb: orange at or above this RSS threshold in MB',
+  );
+  const memoryStatusOrangeMinMbInput = new InputRenderable(renderer, {
+    placeholder: String(DEFAULT_MEMORY_STATUS_ORANGE_MIN_MB),
+    width: '100%',
+  });
+  const memoryStatusOrangeMinMbInputRow = createIndentedInputRow(
+    renderer,
+    memoryStatusOrangeMinMbInput,
+    '    ',
+  );
+  memoryStatusOrangeMinMbInput.value = draft.memoryStatusOrangeMinMb;
+  const memoryStatusRedMinMbLabel = makeLabel(
+    '  memory.status.redMinMb: red at or above this RSS threshold in MB',
+  );
+  const memoryStatusRedMinMbInput = new InputRenderable(renderer, {
+    placeholder: String(DEFAULT_MEMORY_STATUS_RED_MIN_MB),
+    width: '100%',
+  });
+  const memoryStatusRedMinMbInputRow = createIndentedInputRow(
+    renderer,
+    memoryStatusRedMinMbInput,
+    '    ',
+  );
+  memoryStatusRedMinMbInput.value = draft.memoryStatusRedMinMb;
   const messagesPositionRow = new TextRenderable(renderer, { content: '', fg: 'white' });
   const chatTimestampsRow = new TextRenderable(renderer, { content: '', fg: 'white' });
   const tuiEmotesScaleLabel = makeLabel(
@@ -3794,6 +4216,20 @@ function openSettingsModal(): void {
   contentBox.add(titleVisibleRow);
   contentBox.add(viewersVisibleRow);
   contentBox.add(viewersModeRow);
+  contentBox.add(platformIconsVisibleRow);
+  contentBox.add(platformIconsYoutubeSizeLabel);
+  contentBox.add(platformIconsYoutubeSizeInputRow);
+  contentBox.add(platformIconsTwitchSizeLabel);
+  contentBox.add(platformIconsTwitchSizeInputRow);
+  contentBox.add(platformIconsKickSizeLabel);
+  contentBox.add(platformIconsKickSizeInputRow);
+  contentBox.add(memoryStatusVisibleRow);
+  contentBox.add(memoryStatusGreenMaxMbLabel);
+  contentBox.add(memoryStatusGreenMaxMbInputRow);
+  contentBox.add(memoryStatusOrangeMinMbLabel);
+  contentBox.add(memoryStatusOrangeMinMbInputRow);
+  contentBox.add(memoryStatusRedMinMbLabel);
+  contentBox.add(memoryStatusRedMinMbInputRow);
   contentBox.add(messagesPositionRow);
   contentBox.add(chatTimestampsRow);
   contentBox.add(tuiEmotesScaleLabel);
@@ -3827,16 +4263,18 @@ function openSettingsModal(): void {
     | {
         kind: 'toggle';
         node: TextRenderable;
+        container: TextRenderable;
         render: (focused: boolean) => void;
         toggle: () => void;
       }
     | {
         kind: 'enum';
         node: TextRenderable;
+        container: TextRenderable;
         render: (focused: boolean) => void;
         cycle: (direction: 1 | -1) => void;
       }
-    | { kind: 'input'; node: InputRenderable };
+    | { kind: 'input'; node: InputRenderable; container: BoxRenderable };
 
   function cycleOption(current: string, options: readonly string[], direction: 1 | -1): string {
     const currentIndex = Math.max(0, options.indexOf(current));
@@ -3844,50 +4282,17 @@ function openSettingsModal(): void {
     return options[nextIndex] ?? options[0] ?? current;
   }
 
-  // Approximate scroll-line target for each focusable item.
-  // contentBox has gap:1, so each child is 2 lines wide (content + gap).
-  // Non-focusable items (headings, labels) each consume 2 lines and shift subsequent offsets.
-  // items: [demo, title, viewers, viewersMode, msgPos, chatTs, emoteScale, histSize,
-  //         eventsVis, eventsTail, eventsW, logsVis, logsH, logsT,
-  //         ytV, twitchV, kickV, actVis, actMode, actTimeout]
-  const FOCUS_SCROLL_TARGETS = [
-    2,
-    4,
-    6,
-    8,
-    10,
-    12, // Display section (displayHeading=0, then items at 2..12)
-    16, // tuiEmotesScaleInput (label at 14)
-    20, // historySizeInput (label at 18)
-    24, // eventsVisible (sidebarHeading at 22)
-    28,
-    30,
-    32, // eventsTailInput, eventsWidth, logsVisible (eventsTailLabel at 26)
-    36,
-    40, // logsHeightInput, logsTailInput (labels at 34, 38)
-    44,
-    46,
-    48, // per-platform viewers (providerHeading at 42)
-    52,
-    54,
-    58, // activity section (activityHeading at 50, label at 56)
-  ] as const;
-
-  let settingsScrollLine = 0;
-
-  function scrollToFocusItem(idx: number): void {
-    const target = FOCUS_SCROLL_TARGETS[idx] ?? 0;
-    const delta = target - settingsScrollLine;
-    if (delta !== 0) {
-      contentScroll.scrollBy(delta);
-      settingsScrollLine = target;
-    }
+  function scrollCurrentIntoView(): void {
+    const current = items[focusIdx];
+    if (!current) return;
+    contentScroll.scrollChildIntoView(current.container.id);
   }
 
   const items: SettingsFocusItem[] = [
     {
       kind: 'toggle',
       node: demoRow,
+      container: demoRow,
       render: (focused) => {
         demoRow.content = makeToggleRow('demo', draft.demo, focused).concat(
           '  - fake connected providers for local testing',
@@ -3901,6 +4306,7 @@ function openSettingsModal(): void {
     {
       kind: 'toggle',
       node: titleVisibleRow,
+      container: titleVisibleRow,
       render: (focused) => {
         titleVisibleRow.content = makeToggleRow(
           'title.visible',
@@ -3916,6 +4322,7 @@ function openSettingsModal(): void {
     {
       kind: 'toggle',
       node: viewersVisibleRow,
+      container: viewersVisibleRow,
       render: (focused) => {
         viewersVisibleRow.content = makeToggleRow(
           'viewers.visible',
@@ -3931,6 +4338,7 @@ function openSettingsModal(): void {
     {
       kind: 'enum',
       node: viewersModeRow,
+      container: viewersModeRow,
       render: (focused) => {
         viewersModeRow.content = makeEnumRow('viewers.mode', draft.viewersMode, focused).concat(
           '  - per platform, total only, or both',
@@ -3942,8 +4350,71 @@ function openSettingsModal(): void {
       },
     },
     {
+      kind: 'toggle',
+      node: platformIconsVisibleRow,
+      container: platformIconsVisibleRow,
+      render: (focused) => {
+        platformIconsVisibleRow.content = makeToggleRow(
+          'status.platformIcons.visible',
+          draft.platformIconsVisible,
+          focused,
+        ).concat('  - swap YOUTUBE/TWITCH/KICK labels for lazily downloaded logos');
+        platformIconsVisibleRow.fg = focused ? 'cyan' : 'white';
+      },
+      toggle: () => {
+        draft.platformIconsVisible = !draft.platformIconsVisible;
+      },
+    },
+    {
+      kind: 'input',
+      node: platformIconsYoutubeSizeInput,
+      container: platformIconsYoutubeSizeInputRow,
+    },
+    {
+      kind: 'input',
+      node: platformIconsTwitchSizeInput,
+      container: platformIconsTwitchSizeInputRow,
+    },
+    {
+      kind: 'input',
+      node: platformIconsKickSizeInput,
+      container: platformIconsKickSizeInputRow,
+    },
+    {
+      kind: 'toggle',
+      node: memoryStatusVisibleRow,
+      container: memoryStatusVisibleRow,
+      render: (focused) => {
+        memoryStatusVisibleRow.content = makeToggleRow(
+          'memory.status.visible',
+          draft.memoryStatusVisible,
+          focused,
+        ).concat('  - show current YASH RSS in the status bar');
+        memoryStatusVisibleRow.fg = focused ? 'cyan' : 'white';
+      },
+      toggle: () => {
+        draft.memoryStatusVisible = !draft.memoryStatusVisible;
+      },
+    },
+    {
+      kind: 'input',
+      node: memoryStatusGreenMaxMbInput,
+      container: memoryStatusGreenMaxMbInputRow,
+    },
+    {
+      kind: 'input',
+      node: memoryStatusOrangeMinMbInput,
+      container: memoryStatusOrangeMinMbInputRow,
+    },
+    {
+      kind: 'input',
+      node: memoryStatusRedMinMbInput,
+      container: memoryStatusRedMinMbInputRow,
+    },
+    {
       kind: 'enum',
       node: messagesPositionRow,
+      container: messagesPositionRow,
       render: (focused) => {
         messagesPositionRow.content = makeEnumRow(
           'messages.position',
@@ -3963,6 +4434,7 @@ function openSettingsModal(): void {
     {
       kind: 'toggle',
       node: chatTimestampsRow,
+      container: chatTimestampsRow,
       render: (focused) => {
         chatTimestampsRow.content = makeToggleRow(
           'chat.timestamps.visible',
@@ -3975,11 +4447,12 @@ function openSettingsModal(): void {
         draft.chatTimestampsVisible = !draft.chatTimestampsVisible;
       },
     },
-    { kind: 'input', node: tuiEmotesScaleInput },
-    { kind: 'input', node: historySizeInput },
+    { kind: 'input', node: tuiEmotesScaleInput, container: tuiEmotesScaleInputRow },
+    { kind: 'input', node: historySizeInput, container: historySizeInputRow },
     {
       kind: 'toggle',
       node: eventsVisibleRow,
+      container: eventsVisibleRow,
       render: (focused) => {
         eventsVisibleRow.content = makeToggleRow(
           'events.visible',
@@ -3992,10 +4465,11 @@ function openSettingsModal(): void {
         draft.eventsVisible = !draft.eventsVisible;
       },
     },
-    { kind: 'input', node: eventsTailInput },
+    { kind: 'input', node: eventsTailInput, container: eventsTailInputRow },
     {
       kind: 'enum',
       node: eventsWidthRow,
+      container: eventsWidthRow,
       render: (focused) => {
         eventsWidthRow.content = makeEnumRow('events.width', draft.eventsWidth, focused).concat(
           '  - choose how wide the right sidebar should be',
@@ -4009,6 +4483,7 @@ function openSettingsModal(): void {
     {
       kind: 'toggle',
       node: logsVisibleRow,
+      container: logsVisibleRow,
       render: (focused) => {
         logsVisibleRow.content = makeToggleRow('logs.visible', draft.logsVisible, focused).concat(
           '  - show or hide application logs in the sidebar',
@@ -4019,11 +4494,12 @@ function openSettingsModal(): void {
         draft.logsVisible = !draft.logsVisible;
       },
     },
-    { kind: 'input', node: logsHeightInput },
-    { kind: 'input', node: logsTailInput },
+    { kind: 'input', node: logsHeightInput, container: logsHeightInputRow },
+    { kind: 'input', node: logsTailInput, container: logsTailInputRow },
     {
       kind: 'toggle',
       node: ytViewersRow,
+      container: ytViewersRow,
       render: (focused) => {
         ytViewersRow.content = makeToggleRow(
           'platforms.youtube.showViewers',
@@ -4039,6 +4515,7 @@ function openSettingsModal(): void {
     {
       kind: 'toggle',
       node: twitchViewersRow,
+      container: twitchViewersRow,
       render: (focused) => {
         twitchViewersRow.content = makeToggleRow(
           'platforms.twitch.showViewers',
@@ -4054,6 +4531,7 @@ function openSettingsModal(): void {
     {
       kind: 'toggle',
       node: kickViewersRow,
+      container: kickViewersRow,
       render: (focused) => {
         kickViewersRow.content = makeToggleRow(
           'platforms.kick.showViewers',
@@ -4069,6 +4547,7 @@ function openSettingsModal(): void {
     {
       kind: 'toggle',
       node: activityVisibleRow,
+      container: activityVisibleRow,
       render: (focused) => {
         activityVisibleRow.content = makeToggleRow(
           'activity.visible',
@@ -4084,6 +4563,7 @@ function openSettingsModal(): void {
     {
       kind: 'enum',
       node: activityModeRow,
+      container: activityModeRow,
       render: (focused) => {
         activityModeRow.content = makeEnumRow('activity.mode', draft.activityMode, focused).concat(
           '  - permanent: events stay until cleared; timed: each event expires after timeout',
@@ -4094,7 +4574,7 @@ function openSettingsModal(): void {
         draft.activityMode = cycleOption(draft.activityMode, SETTINGS_ACTIVITY_MODES, direction);
       },
     },
-    { kind: 'input', node: activityTimeoutInput },
+    { kind: 'input', node: activityTimeoutInput, container: activityTimeoutInputRow },
   ];
 
   let focusIdx = 0;
@@ -4112,6 +4592,7 @@ function openSettingsModal(): void {
     if (!current) return;
     if (current.kind === 'input') current.node.focus();
     else current.render(true);
+    scrollCurrentIntoView();
   }
 
   function renderRows(): void {
@@ -4128,6 +4609,12 @@ function openSettingsModal(): void {
   async function saveAndClose(): Promise<void> {
     const result = validateTuiSettingsDraft({
       ...draft,
+      platformIconsYoutubeSizePx: platformIconsYoutubeSizeInput.value,
+      platformIconsTwitchSizePx: platformIconsTwitchSizeInput.value,
+      platformIconsKickSizePx: platformIconsKickSizeInput.value,
+      memoryStatusGreenMaxMb: memoryStatusGreenMaxMbInput.value,
+      memoryStatusOrangeMinMb: memoryStatusOrangeMinMbInput.value,
+      memoryStatusRedMinMb: memoryStatusRedMinMbInput.value,
       tuiEmotesScale: tuiEmotesScaleInput.value,
       chatMaxHistorySize: historySizeInput.value,
       eventsTail: eventsTailInput.value,
@@ -4186,21 +4673,8 @@ function openSettingsModal(): void {
     if (sequence === '\t' || sequence === '\x1b[Z') {
       blurCurrent();
       const direction = sequence === '\t' ? 1 : -1;
-      const prevIdx = focusIdx;
       focusIdx = (focusIdx + direction + items.length) % items.length;
       activeSettingsModal.focusIndex = focusIdx;
-      if (direction === 1 && focusIdx < prevIdx) {
-        // Wrapped forward: scroll back to top
-        contentScroll.scrollBy(-settingsScrollLine);
-        settingsScrollLine = 0;
-      } else if (direction === -1 && focusIdx > prevIdx) {
-        // Wrapped backward: scroll to last item
-        const lastTarget = FOCUS_SCROLL_TARGETS[items.length - 1] ?? 0;
-        contentScroll.scrollBy(lastTarget - settingsScrollLine);
-        settingsScrollLine = lastTarget;
-      } else {
-        scrollToFocusItem(focusIdx);
-      }
       focusCurrent();
       return true;
     }
@@ -4230,16 +4704,6 @@ function openSettingsModal(): void {
       cancelAndClose();
       return true;
     }
-    if (sequence === '\x1b[A') {
-      contentScroll.scrollBy(-1);
-      settingsScrollLine = Math.max(0, settingsScrollLine - 1);
-      return true;
-    }
-    if (sequence === '\x1b[B') {
-      contentScroll.scrollBy(1);
-      settingsScrollLine += 1;
-      return true;
-    }
     return false;
   };
 
@@ -4249,6 +4713,12 @@ function openSettingsModal(): void {
     if (key.name === 'escape' && activeSettingsModal) cancelAndClose();
   };
   for (const input of [
+    platformIconsYoutubeSizeInput,
+    platformIconsTwitchSizeInput,
+    platformIconsKickSizeInput,
+    memoryStatusGreenMaxMbInput,
+    memoryStatusOrangeMinMbInput,
+    memoryStatusRedMinMbInput,
     historySizeInput,
     eventsTailInput,
     logsHeightInput,
@@ -6413,19 +6883,167 @@ function trimUiChatMemory(): void {
   }
 }
 
+runtimeMonitor.registerProbe('tui', () => {
+  const maxHistory = getChatHistoryLimit();
+  const chatterStats = chatterCache.getStats();
+  const logStats = logCollector.getStats();
+  return {
+    metrics: {
+      lastMessages: lastMessages.length,
+      lastMessagesLimit: maxHistory,
+      lastRawMessages: lastRawMessages.length,
+      inputHistory: inputHistory.length,
+      inputHistoryLimit: INPUT_HISTORY_LIMIT,
+      browseModeActive,
+      eventLog: eventLog.length,
+      eventLogLimit: MAX_EVENT_LOG_ENTRIES,
+      activityEvents: activityEvents.length,
+      activityEventsLimit: MAX_ACTIVITY_EVENTS,
+      ffzImageCache: tuiFfzImageIdsByUrl.size,
+      ffzImageCacheLimit: MAX_TUI_FFZ_IMAGES,
+      ffzUploadCount: tuiFfzUploadCount,
+      ffzUploadBytes: tuiFfzUploadBytes,
+      ffzLastUploadBytes: tuiFfzLastUploadBytes,
+      ffzClearCount: tuiFfzClearCount,
+      ffzRefreshCount: tuiFfzRefreshCount,
+      ffzImageIdHighWaterMark: tuiFfzImageIdHighWaterMark,
+      updateUiCount,
+      updateUiLoopRefreshCount,
+      updateUiNonLoopRefreshCount: Math.max(0, updateUiCount - updateUiLoopRefreshCount),
+      updateUiLastDurationMs,
+      updateUiAvgDurationMs: updateUiCount > 0 ? updateUiTotalDurationMs / updateUiCount : 0,
+      updateUiMaxDurationMs,
+      updateUiLastMessageCount,
+      updateUiChatChildrenHighWater,
+      updateUiSidebarChildrenHighWater,
+      updateLoopTickCount,
+      updateLoopEnabled: TUI_UPDATE_LOOP_DISABLED ? 0 : 1,
+      updateLoopOverlapCount,
+      updateLoopInFlight,
+      updateLoopInFlightHighWater,
+      updateLoopLastDurationMs,
+      updateLoopMaxDurationMs,
+      updateLoopSkippedRefreshCount,
+      chatterCacheSize: chatterStats.size,
+      chatterCacheLimit: chatterStats.maxEntries,
+      logEntries: logStats.count,
+      logEntriesLimit: logStats.max,
+    },
+    warnings: [
+      ...(lastMessages.length >= maxHistory
+        ? [
+            'TUI chat history is at cap; lower chat.maxHistorySize if memory pressure tracks live message rate.',
+          ]
+        : []),
+      ...(eventLog.length >= MAX_EVENT_LOG_ENTRIES
+        ? [
+            'Sidebar event log is at cap; frequent operational churn may be masking the true pressure source elsewhere.',
+          ]
+        : []),
+      ...(activityEvents.length >= MAX_ACTIVITY_EVENTS
+        ? [
+            'Activity events is at cap; if this keeps refilling quickly, verify activity retention settings against live traffic.',
+          ]
+        : []),
+      ...(tuiFfzImageIdsByUrl.size >= MAX_TUI_FFZ_IMAGES
+        ? [
+            'TUI FFZ image cache is at cap; if RSS stays high with chat traffic, compare runs with emote rendering disabled.',
+          ]
+        : []),
+      ...(logStats.count >= logStats.max
+        ? [
+            'In-memory log collector is at cap; repeated reconnect/log spam may still pressure native allocations even though the JS list is bounded.',
+          ]
+        : []),
+      ...(TUI_UPDATE_LOOP_DISABLED
+        ? ['TUI periodic update loop is disabled for A/B soak mode.']
+        : []),
+    ],
+  };
+});
+
 const tuiFfzEmotes: Record<string, SharedTwitchEmoteDefinition> = {};
 const tuiFfzImageIdsByName: Record<string, number> = {};
 const tuiFfzImageIdsByUrl = new Map<string, number>();
+const tuiPlatformStatusIconImageIds = new Map<PlatformStatusIconPlatform, number>();
+const tuiPendingPlatformStatusIconUploads = new Set<PlatformStatusIconPlatform>();
 let nextTuiFfzImageId = 1;
+let nextTuiPlatformStatusIconImageId = 10001;
 let tuiFfzRefreshPromise: Promise<void> | null = null;
 let tuiFfzSupported: boolean | null = null;
 let tuiFfzLastChannel: string | null = null;
+let tuiFfzUploadCount = 0;
+let tuiFfzUploadBytes = 0;
+let tuiFfzClearCount = 0;
+let tuiFfzRefreshCount = 0;
+let tuiFfzLastUploadBytes = 0;
+let tuiFfzImageIdHighWaterMark = 0;
+const tuiFfzPendingUploadUrls = new Set<string>();
+let tuiFfzUploadQueue: Promise<void> = Promise.resolve();
+let tuiPlatformStatusIconUploadQueue: Promise<void> = Promise.resolve();
+
+function resetTuiPlatformStatusIconState(): void {
+  tuiPlatformStatusIconImageIds.clear();
+  tuiPendingPlatformStatusIconUploads.clear();
+  nextTuiPlatformStatusIconImageId = 10001;
+}
+let updateUiCount = 0;
+let updateUiTotalDurationMs = 0;
+let updateUiLastDurationMs = 0;
+let updateUiMaxDurationMs = 0;
+let updateUiLastMessageCount = 0;
+let updateUiChatChildrenHighWater = 0;
+let updateUiSidebarChildrenHighWater = 0;
+let updateUiLoopRefreshCount = 0;
+let updateLoopTickCount = 0;
+let updateLoopOverlapCount = 0;
+let updateLoopInFlight = 0;
+let updateLoopInFlightHighWater = 0;
+let updateLoopLastDurationMs = 0;
+let updateLoopMaxDurationMs = 0;
+let updateLoopSkippedRefreshCount = 0;
+let lastUpdateLoopSignature: string | null = null;
 
 function platformColor(platform: string): string {
   if (platform === 'youtube') return 'red';
   if (platform === 'twitch') return '#9146FF';
   if (platform === 'kick') return 'green';
   return 'white';
+}
+
+function getUpdateLoopRefreshSignature(now = Date.now()): string {
+  const viewerMode = String(settings.get('viewers.mode', 'per-platform') ?? 'per-platform');
+  const viewersVisible = boolSetting(settings.get('viewers.visible', true), true) ? 1 : 0;
+  const titleVisible = boolSetting(settings.get('title.visible', false), false) ? 1 : 0;
+  const obsConnected = obsService.isConnected() ? 1 : 0;
+  const demoVisible = isDemoMode() ? 1 : 0;
+  const providerState = platforms
+    .map((platform) => {
+      const provider = platform === 'youtube' ? youtube : platform === 'twitch' ? twitch : kick;
+      const status = provider.getStatus();
+      const viewerCount = provider.getViewerCount();
+      const startTime = provider.getStreamStartTime();
+      const elapsedBucket =
+        status.streamStatus === 'ONLINE' && startTime
+          ? Math.floor((now - startTime.getTime()) / 2000)
+          : -1;
+      return [
+        platform,
+        provider.isAuthenticated() ? 1 : 0,
+        status.streamStatus,
+        viewerCount,
+        startTime?.getTime() ?? 0,
+        elapsedBucket,
+      ].join(':');
+    })
+    .join('|');
+  return [
+    providerState,
+    `obs:${obsConnected}`,
+    `demo:${demoVisible}`,
+    `title:${titleVisible}`,
+    `viewers:${viewersVisible}:${viewerMode}`,
+  ].join('|');
 }
 
 function getTuiFfzPassthroughMode(): 'none' | 'tmux' {
@@ -6470,11 +7088,58 @@ function detectTuiFfzSupport(): boolean {
 }
 
 function clearTuiFfzState(): void {
+  tuiFfzClearCount += 1;
   tuiFfzLastChannel = null;
   for (const key of Object.keys(tuiFfzEmotes)) delete tuiFfzEmotes[key];
   for (const key of Object.keys(tuiFfzImageIdsByName)) delete tuiFfzImageIdsByName[key];
   tuiFfzImageIdsByUrl.clear();
   nextTuiFfzImageId = 1;
+}
+
+async function uploadTuiPlatformStatusIcon(
+  platform: PlatformStatusIconPlatform,
+  imageId: number,
+): Promise<void> {
+  const icon = await ensurePlatformStatusIcon(platform);
+  const bytes = new Uint8Array(await Bun.file(icon.pngPath).arrayBuffer());
+  const parsed = parsePngDimensions(bytes);
+  const columns = getPlatformStatusIconColumns(getStatusPlatformIconSizePxForPlatform(platform));
+  for (const sequence of buildTuiFfzUploadSequences({
+    imageId,
+    pngBytes: bytes,
+    width: parsed.width,
+    height: parsed.height,
+    columns,
+    passthrough: getTuiFfzPassthroughMode(),
+  })) {
+    process.stdout.write(sequence);
+  }
+}
+
+function scheduleTuiPlatformStatusIconUpload(platform: PlatformStatusIconPlatform): void {
+  if (!statusPlatformIconsEnabled() || !detectTuiFfzSupport()) return;
+  if (
+    tuiPlatformStatusIconImageIds.has(platform) ||
+    tuiPendingPlatformStatusIconUploads.has(platform)
+  ) {
+    return;
+  }
+  tuiPendingPlatformStatusIconUploads.add(platform);
+  tuiPlatformStatusIconUploadQueue = tuiPlatformStatusIconUploadQueue
+    .catch(() => {})
+    .then(async () => {
+      if (tuiPlatformStatusIconImageIds.has(platform)) return;
+      const imageId = nextTuiPlatformStatusIconImageId++;
+      await uploadTuiPlatformStatusIcon(platform, imageId);
+      tuiPlatformStatusIconImageIds.set(platform, imageId);
+      if (uiNodes) updateUI(lastMessages);
+    })
+    .catch((error) => {
+      defaultLogger.warn(`[status-icons] TUI upload failed for ${platform}: ${String(error)}`);
+    })
+    .finally(() => {
+      tuiPendingPlatformStatusIconUploads.delete(platform);
+    });
 }
 
 async function uploadTuiFfzImage(
@@ -6488,6 +7153,12 @@ async function uploadTuiFfzImage(
   }
 
   const bytes = new Uint8Array(await response.arrayBuffer());
+  tuiFfzUploadCount += 1;
+  tuiFfzUploadBytes += bytes.byteLength;
+  tuiFfzLastUploadBytes = bytes.byteLength;
+  if (imageId > tuiFfzImageIdHighWaterMark) {
+    tuiFfzImageIdHighWaterMark = imageId;
+  }
   const parsed = parsePngDimensions(bytes);
   const width = emote.width ?? parsed.width;
   const height = emote.height ?? parsed.height;
@@ -6515,6 +7186,68 @@ function rerenderRawChatLines(): void {
   if (changed && uiNodes) updateUI(lastMessages);
 }
 
+function getTuiFfzCacheKey(emote: SharedTwitchEmoteDefinition): string {
+  return emote.source === 'twitch' ? (emote.staticUrl ?? emote.url) : emote.url;
+}
+
+function deleteTuiFfzImageReferences(imageId: number): void {
+  for (const [name, currentImageId] of Object.entries(tuiFfzImageIdsByName)) {
+    if (currentImageId === imageId) delete tuiFfzImageIdsByName[name];
+  }
+}
+
+function trimTuiFfzImageCache(): void {
+  while (tuiFfzImageIdsByUrl.size > MAX_TUI_FFZ_IMAGES) {
+    const oldestEntry = tuiFfzImageIdsByUrl.entries().next().value;
+    if (!oldestEntry) return;
+    const [oldestUrl, imageId] = oldestEntry;
+    tuiFfzImageIdsByUrl.delete(oldestUrl);
+    deleteTuiFfzImageReferences(imageId);
+  }
+}
+
+function scheduleTuiFfzUploadForEmote(emote: SharedTwitchEmoteDefinition): void {
+  const cacheKey = getTuiFfzCacheKey(emote);
+  if (!cacheKey || tuiFfzImageIdsByUrl.has(cacheKey) || tuiFfzPendingUploadUrls.has(cacheKey)) {
+    return;
+  }
+
+  tuiFfzPendingUploadUrls.add(cacheKey);
+  tuiFfzUploadQueue = tuiFfzUploadQueue
+    .catch(() => {})
+    .then(async () => {
+      if (tuiFfzImageIdsByUrl.has(cacheKey)) return;
+      const imageId = nextTuiFfzImageId++;
+      await uploadTuiFfzImage(emote, imageId);
+      tuiFfzImageIdsByUrl.set(cacheKey, imageId);
+      tuiFfzImageIdsByName[emote.name] = imageId;
+      trimTuiFfzImageCache();
+      rerenderRawChatLines();
+    })
+    .catch((error) => {
+      defaultLogger.warn(`[FFZ:TUI] Lazy upload failed for ${emote.name}: ${String(error)}`);
+    })
+    .finally(() => {
+      tuiFfzPendingUploadUrls.delete(cacheKey);
+    });
+}
+
+function scheduleTuiFfzUploadsForMessage(platform: string, message: string): void {
+  if (platform !== 'twitch' || Object.keys(tuiFfzEmotes).length === 0) return;
+  for (const part of parseMessageWithFfzEmotes(message, tuiFfzEmotes)) {
+    if (part.type !== 'emote') continue;
+    const emote = tuiFfzEmotes[part.emote.name];
+    if (!emote) continue;
+    const cacheKey = getTuiFfzCacheKey(emote);
+    const imageId = tuiFfzImageIdsByUrl.get(cacheKey);
+    if (imageId) {
+      tuiFfzImageIdsByName[emote.name] = imageId;
+      continue;
+    }
+    scheduleTuiFfzUploadForEmote(emote);
+  }
+}
+
 async function refreshTuiFfzEmotes(reason: string): Promise<void> {
   if (!detectTuiFfzSupport()) return;
   if (tuiFfzRefreshPromise) return tuiFfzRefreshPromise;
@@ -6531,6 +7264,7 @@ async function refreshTuiFfzEmotes(reason: string): Promise<void> {
   }
 
   tuiFfzRefreshPromise = (async () => {
+    tuiFfzRefreshCount += 1;
     try {
       const payload = await getFfzEmotePayload(channel, {
         apiClient: twitchWithEmoteContext.apiClient ?? null,
@@ -6555,27 +7289,21 @@ async function refreshTuiFfzEmotes(reason: string): Promise<void> {
         if (!activeNames.has(name)) delete tuiFfzImageIdsByName[name];
       }
       for (const cachedUrl of Array.from(tuiFfzImageIdsByUrl.keys())) {
-        if (!activeUrls.has(cachedUrl)) tuiFfzImageIdsByUrl.delete(cachedUrl);
+        if (!activeUrls.has(cachedUrl)) {
+          const imageId = tuiFfzImageIdsByUrl.get(cachedUrl);
+          tuiFfzImageIdsByUrl.delete(cachedUrl);
+          if (imageId) deleteTuiFfzImageReferences(imageId);
+        }
       }
 
       for (const [name, emote] of Object.entries(payload.emotes)) {
         tuiFfzEmotes[name] = emote;
-        const cacheKey = emote.source === 'twitch' ? (emote.staticUrl ?? emote.url) : emote.url;
-        try {
-          let imageId = tuiFfzImageIdsByUrl.get(cacheKey);
-          if (!imageId) {
-            imageId = nextTuiFfzImageId++;
-            await uploadTuiFfzImage(emote, imageId);
-            tuiFfzImageIdsByUrl.set(cacheKey, imageId);
-            if (tuiFfzImageIdsByUrl.size > MAX_TUI_FFZ_IMAGES) {
-              const oldestUrl = tuiFfzImageIdsByUrl.keys().next().value;
-              if (oldestUrl) tuiFfzImageIdsByUrl.delete(oldestUrl);
-            }
-          }
+        const cacheKey = getTuiFfzCacheKey(emote);
+        const imageId = tuiFfzImageIdsByUrl.get(cacheKey);
+        if (imageId) {
           tuiFfzImageIdsByName[name] = imageId;
-        } catch (error) {
+        } else {
           delete tuiFfzImageIdsByName[name];
-          defaultLogger.warn(`[FFZ:TUI] Skipping ${name}: ${String(error)}`);
         }
       }
 
@@ -6596,6 +7324,7 @@ async function reloadTuiFfzEmotes(reason: string): Promise<void> {
 }
 
 function transformMessage(msg: ChatMessage): ChatLine {
+  scheduleTuiFfzUploadsForMessage(msg.platform, msg.message);
   const platColor = platformColor(msg.platform);
   const userColor = msg.color ?? platColor;
   const showTs = boolSetting(settings.get('chat.timestamps.visible', true), true);
@@ -6860,10 +7589,11 @@ async function main() {
           return true;
         }
 
-        if (sequence === '\t') {
+        if (sequence === '\t' || sequence === '\x1b[Z') {
+          const direction: 1 | -1 = sequence === '\x1b[Z' ? -1 : 1;
           const val = uiNodes.inputEl.value;
           if (!val.startsWith('/')) {
-            cycleMessageTarget();
+            cycleMessageTarget(direction);
             updateInputAssist();
             return true;
           }
@@ -6871,13 +7601,21 @@ async function main() {
           const continuing = autocycleIndex >= 0 && autocycleSuggestions[autocycleIndex] === val;
 
           if (continuing) {
-            autocycleIndex = (autocycleIndex + 1) % autocycleSuggestions.length;
+            autocycleIndex = getNextAutocompleteCycleIndex(
+              autocycleIndex,
+              autocycleSuggestions.length,
+              direction,
+            );
           } else {
             const { completions, hints } = getAutocomplete(val);
             if (completions.length === 0) return true;
             autocycleSuggestions = completions;
             autocycleHints = hints;
-            autocycleIndex = 0;
+            autocycleIndex = getNextAutocompleteCycleIndex(
+              -1,
+              autocycleSuggestions.length,
+              direction,
+            );
           }
 
           uiNodes.inputEl.value = autocycleSuggestions[autocycleIndex] ?? val;
@@ -7078,6 +7816,9 @@ async function main() {
 
   await initializeServices();
   await loadUserScripts(getDataDir());
+  if (statusPlatformIconsEnabled()) {
+    warmPlatformStatusIcons();
+  }
   startIpcServer(handleCommandForCli, chatService, { youtube, twitch, kick }, (line) => {
     lastMessages.push(line);
     updateUI(lastMessages);
@@ -7127,6 +7868,12 @@ async function main() {
 
   // Build UI tree once — no flicker on periodic updates
   uiNodes = initUI(renderer, lastMessages);
+  if (statusPlatformIconsEnabled()) {
+    for (const platform of platforms) {
+      scheduleTuiPlatformStatusIconUpload(platform as PlatformStatusIconPlatform);
+    }
+  }
+  lastUpdateLoopSignature = getUpdateLoopRefreshSignature();
   void refreshTuiFfzEmotes('startup');
   subscribeToActionAutocompleteRefresh(() => {
     if (!uiNodes) return;
@@ -7184,40 +7931,65 @@ async function main() {
   let lastTwitchStreamStatus = twitch.getStreamStatus();
 
   // Periodic refresh — in-place mutations only, no flicker
-  const updateLoop = setInterval(async () => {
+  const runUpdateLoopPass = async () => {
     if (!isRunning) return;
-    // Detect new Twitch broadcast going live → rotate activity session
-    const nowTwitchStatus = twitch.getStreamStatus();
-    if (lastTwitchStreamStatus !== nowTwitchStatus && String(nowTwitchStatus) === 'ONLINE') {
-      _rotateActivitySession();
+    updateLoopTickCount += 1;
+    updateLoopInFlight += 1;
+    if (updateLoopInFlight > 1) {
+      updateLoopOverlapCount += 1;
     }
-    lastTwitchStreamStatus = nowTwitchStatus;
-    // If a platform isn't authenticated, retry silently — it may have been
-    // authorized via the web OAuth flow while the TUI was running.
-    for (const [name, provider] of [
-      ['twitch', twitch],
-      ['youtube', youtube],
-      ['kick', kick],
-    ] as const) {
-      if (!provider.isAuthenticated()) {
-        const res = await provider.authenticate();
-        if (res?.success) {
-          lastMessages.push(`[system] ${name} connected`);
+    if (updateLoopInFlight > updateLoopInFlightHighWater) {
+      updateLoopInFlightHighWater = updateLoopInFlight;
+    }
+    const startedAt = performance.now();
+    try {
+      // Detect new Twitch broadcast going live → rotate activity session
+      const nowTwitchStatus = twitch.getStreamStatus();
+      if (lastTwitchStreamStatus !== nowTwitchStatus && String(nowTwitchStatus) === 'ONLINE') {
+        _rotateActivitySession();
+      }
+      lastTwitchStreamStatus = nowTwitchStatus;
+      // If a platform isn't authenticated, retry silently — it may have been
+      // authorized via the web OAuth flow while the TUI was running.
+      for (const [name, provider] of [
+        ['twitch', twitch],
+        ['youtube', youtube],
+        ['kick', kick],
+      ] as const) {
+        if (!provider.isAuthenticated()) {
+          const res = await provider.authenticate();
+          if (res?.success) {
+            lastMessages.push(`[system] ${name} connected`);
+          }
         }
       }
-    }
-    try {
-      updateUI(lastMessages);
+      const nextRefreshSignature = getUpdateLoopRefreshSignature();
+      if (nextRefreshSignature !== lastUpdateLoopSignature) {
+        lastUpdateLoopSignature = nextRefreshSignature;
+        updateUiLoopRefreshCount += 1;
+        updateUI(lastMessages);
+      } else {
+        updateLoopSkippedRefreshCount += 1;
+      }
     } catch {
       // Renderer was destroyed outside the SIGINT path — stop the loop cleanly
       isRunning = false;
-      clearInterval(updateLoop);
+      if (updateLoop) clearInterval(updateLoop);
+    } finally {
+      const durationMs = performance.now() - startedAt;
+      updateLoopLastDurationMs = durationMs;
+      if (durationMs > updateLoopMaxDurationMs) {
+        updateLoopMaxDurationMs = durationMs;
+      }
+      updateLoopInFlight = Math.max(0, updateLoopInFlight - 1);
     }
-  }, 2000);
+  };
+
+  const updateLoop = TUI_UPDATE_LOOP_DISABLED ? null : setInterval(runUpdateLoopPass, 2000);
 
   const shutdown = async () => {
     isRunning = false;
-    clearInterval(updateLoop);
+    if (updateLoop) clearInterval(updateLoop);
     authService.stopAutoRefresh();
     await obsService.disconnect();
     renderer.destroy();

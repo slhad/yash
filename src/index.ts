@@ -28,6 +28,16 @@ import { getFfzEmotePayload, type TwitchEmoteFetchContext } from './utils/ffz-fe
 import { getHelpCommands } from './utils/help';
 import { defaultLogger } from './utils/logger';
 import { apiMetricsHandler, prometheusMetricsHandler } from './utils/metricsHandlers';
+import {
+  isPlatformStatusIconPlatform,
+  PLATFORM_STATUS_ICON_SETTING_KEY,
+  readPlatformStatusIconsEnabled,
+} from './utils/platformStatusIcons';
+import {
+  ensurePlatformStatusIcon,
+  warmPlatformStatusIcons,
+} from './utils/platformStatusIcons.server';
+import { runtimeMonitor } from './utils/runtime-monitor';
 import { buildStreamMarkerPayload } from './utils/streamMarkerRoute';
 
 type TwitchProviderEmoteContext = TwitchEmoteFetchContext & {
@@ -55,10 +65,14 @@ function getSettingValue(key: string): unknown {
 }
 
 function applySettingSideEffects(key: string, value: unknown): void {
-  if (key !== 'chat.maxHistorySize') return;
-  const parsed = typeof value === 'number' ? value : Number.parseInt(String(value), 10);
-  if (Number.isFinite(parsed) && parsed > 0) {
-    chatService.setMaxHistorySize(parsed);
+  if (key === 'chat.maxHistorySize') {
+    const parsed = typeof value === 'number' ? value : Number.parseInt(String(value), 10);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      chatService.setMaxHistorySize(parsed);
+    }
+  }
+  if (key === PLATFORM_STATUS_ICON_SETTING_KEY && String(value).toLowerCase() === 'true') {
+    warmPlatformStatusIcons();
   }
 }
 
@@ -69,6 +83,141 @@ const htmlRoutes: Record<string, any> = isTuiOnly
   : { '/': indexHtml, '/unified': unifiedHtml, '/sidebyside': sidebysidesHtml };
 
 const SERVER_PORT = resolvePort();
+
+runtimeMonitor.start();
+if (readPlatformStatusIconsEnabled((key, fallback) => settingsStore.get(key, fallback))) {
+  warmPlatformStatusIcons();
+}
+runtimeMonitor.registerProbe('services', () => {
+  const chatDebug = chatService.getDebugState();
+  const authDebug = authService.getDebugState();
+  const obsDebug = obsService.getDebugState();
+  const youtubeDebug = youtube.getDebugState();
+  const twitchDebug = twitch.getDebugState();
+  const kickDebug = kick.getDebugState();
+  return {
+    metrics: {
+      chatHistorySize: chatDebug.messageHistorySize,
+      chatHistoryLimit: chatDebug.maxHistorySize,
+      chatCallbacks: chatDebug.callbackCount,
+      chatProviders: chatDebug.providerCount,
+      chatProviderUnsubscribers: chatDebug.providerUnsubscriberCount,
+      chatRecentAvgMessageBytes: Number(chatDebug.recentAvgMessageBytes ?? 0),
+      chatMaxObservedMessageBytes: Number(chatDebug.maxObservedMessageBytes ?? 0),
+      chatRecentAvgExtraKeyCount: Number(chatDebug.recentAvgExtraKeyCount ?? 0),
+      chatMaxObservedExtraKeyCount: Number(chatDebug.maxObservedExtraKeyCount ?? 0),
+      chatRecentSamples: Number(chatDebug.recentSamples ?? 0),
+      authTokenCount: Number(authDebug.tokenCount ?? 0),
+      authAutoRefreshIntervalActive: Number(authDebug.autoRefreshIntervalActive ?? 0),
+      authAutoRefreshRunCount: Number(authDebug.autoRefreshRunCount ?? 0),
+      authAutoRefreshPlatformChecks: Number(authDebug.autoRefreshPlatformChecks ?? 0),
+      obsPendingRequests: Number(obsDebug.pendingRequests ?? 0),
+      obsMessageCallbacks: Number(obsDebug.messageCallbacks ?? 0),
+      obsStatusCallbacks: Number(obsDebug.statusCallbacks ?? 0),
+      obsReconnectCallbacks: Number(obsDebug.reconnectLimitExceededCallbacks ?? 0),
+      obsReconnectTimerActive: Number(obsDebug.reconnectTimerActive ?? 0),
+      obsReconnectAttempt: Number(obsDebug.reconnectAttempt ?? 0),
+      obsScheduledHistorySize: Number(obsDebug.scheduledHistorySize ?? 0),
+      obsReconnectDisabled: Number(obsDebug.reconnectDisabled ?? 0),
+      obsSocketActive: Number(obsDebug.socketActive ?? 0),
+      obsWsCreateCount: Number(obsDebug.wsCreateCount ?? 0),
+      obsWsOpenCount: Number(obsDebug.wsOpenCount ?? 0),
+      obsWsCloseCount: Number(obsDebug.wsCloseCount ?? 0),
+      obsWsErrorCount: Number(obsDebug.wsErrorCount ?? 0),
+      obsWsMessageCount: Number(obsDebug.wsMessageCount ?? 0),
+      obsWsIdentifyCount: Number(obsDebug.wsIdentifyCount ?? 0),
+      obsWsIdentifiedCount: Number(obsDebug.wsIdentifiedCount ?? 0),
+      youtubeMessageCallbacks: Number(youtubeDebug.messageCallbacks ?? 0),
+      youtubeActivityCallbacks: Number(youtubeDebug.activityCallbacks ?? 0),
+      youtubeStartupNoticeCallbacks: Number(youtubeDebug.startupNoticeCallbacks ?? 0),
+      youtubeChapterMarkers: Number(youtubeDebug.chapterMarkers ?? 0),
+      youtubeStatusPollCount: Number(youtubeDebug.statusPollCount ?? 0),
+      youtubeStatusPollOverlapCount: Number(youtubeDebug.statusPollOverlapCount ?? 0),
+      youtubeStatusPollInFlight: Number(youtubeDebug.statusPollInFlight ?? 0),
+      youtubeStatusPollInFlightHighWater: Number(youtubeDebug.statusPollInFlightHighWater ?? 0),
+      youtubeStatusPollLastDurationMs: Number(youtubeDebug.statusPollLastDurationMs ?? 0),
+      youtubeStatusPollMaxDurationMs: Number(youtubeDebug.statusPollMaxDurationMs ?? 0),
+      youtubeChatPollInvocationCount: Number(youtubeDebug.chatPollInvocationCount ?? 0),
+      youtubeChatPollStreamDataCount: Number(youtubeDebug.chatPollStreamDataCount ?? 0),
+      youtubeChatPollStreamErrorCount: Number(youtubeDebug.chatPollStreamErrorCount ?? 0),
+      youtubeChatPollStreamEndCount: Number(youtubeDebug.chatPollStreamEndCount ?? 0),
+      twitchMessageCallbacks: Number(twitchDebug.messageCallbacks ?? 0),
+      twitchActivityCallbacks: Number(twitchDebug.activityCallbacks ?? 0),
+      twitchRuntimeDisabled: Number(twitchDebug.runtimeDisabled ?? 0),
+      twitchViewerPollCount: Number(twitchDebug.viewerPollCount ?? 0),
+      twitchViewerPollOverlapCount: Number(twitchDebug.viewerPollOverlapCount ?? 0),
+      twitchViewerPollInFlight: Number(twitchDebug.viewerPollInFlight ?? 0),
+      twitchViewerPollInFlightHighWater: Number(twitchDebug.viewerPollInFlightHighWater ?? 0),
+      twitchViewerPollLastDurationMs: Number(twitchDebug.viewerPollLastDurationMs ?? 0),
+      twitchViewerPollMaxDurationMs: Number(twitchDebug.viewerPollMaxDurationMs ?? 0),
+      kickMessageCallbacks: Number(kickDebug.messageCallbacks ?? 0),
+      kickActivityCallbacks: Number(kickDebug.activityCallbacks ?? 0),
+      kickRuntimeDisabled: Number(kickDebug.runtimeDisabled ?? 0),
+      kickPollCount: Number(kickDebug.pollCount ?? 0),
+      kickPollOverlapCount: Number(kickDebug.pollOverlapCount ?? 0),
+      kickPollInFlight: Number(kickDebug.pollInFlight ?? 0),
+      kickPollInFlightHighWater: Number(kickDebug.pollInFlightHighWater ?? 0),
+      kickPollLastDurationMs: Number(kickDebug.pollLastDurationMs ?? 0),
+      kickPollMaxDurationMs: Number(kickDebug.pollMaxDurationMs ?? 0),
+    },
+    warnings: [
+      ...(Number(chatDebug.messageHistorySize) >= Number(chatDebug.maxHistorySize)
+        ? [
+            'ChatService history is at its configured cap; if RSS tracks chat volume, reduce chat.maxHistorySize.',
+          ]
+        : []),
+      ...(Number(chatDebug.maxObservedExtraKeyCount) > 0
+        ? [
+            `Chat messages carried extra undeclared keys (max ${Number(chatDebug.maxObservedExtraKeyCount)}); inspect provider payload shape if heap growth follows message volume.`,
+          ]
+        : []),
+      ...(Number(chatDebug.maxObservedMessageBytes) >= 16 * 1024
+        ? [
+            `Chat messages reached ${Math.round(Number(chatDebug.maxObservedMessageBytes) / 1024)} KiB serialized size; retained message objects may be heavier than expected.`,
+          ]
+        : []),
+      ...(Number(authDebug.autoRefreshIntervalActive) === 0
+        ? ['AuthService auto-refresh is disabled for the current run.']
+        : []),
+      ...(Number(youtubeDebug.chapterMarkers) >= 250
+        ? [
+            'YouTube chapterMarkers is growing; clear/import hygiene may be needed if marker-heavy streams keep this in memory.',
+          ]
+        : []),
+      ...(Number(obsDebug.messageCallbacks) > 5 || Number(obsDebug.statusCallbacks) > 5
+        ? [
+            'OBS callback counts are elevated; verify subscriptions are torn down on reinitialization paths.',
+          ]
+        : []),
+      ...(Number(obsDebug.reconnectDisabled) > 0
+        ? [
+            'OBS reconnect is disabled for A/B soak mode; current process will not retry after a disconnect.',
+          ]
+        : []),
+      ...(Number(obsDebug.wsCreateCount) > 0 &&
+      Number(obsDebug.wsCreateCount) !== Number(obsDebug.wsCloseCount)
+        ? [
+            `OBS socket lifecycle mismatch: created=${Number(obsDebug.wsCreateCount)} closed=${Number(obsDebug.wsCloseCount)}.`,
+          ]
+        : []),
+      ...(Number(youtubeDebug.statusPollOverlapCount) > 0
+        ? ['YouTube status poll overlapped; inspect async interval churn in the polling loop.']
+        : []),
+      ...(Number(twitchDebug.runtimeDisabled) > 0
+        ? ['Twitch runtime hooks are disabled for the current run.']
+        : []),
+      ...(Number(twitchDebug.viewerPollOverlapCount) > 0
+        ? ['Twitch viewer poll overlapped; inspect async interval churn in the polling loop.']
+        : []),
+      ...(Number(kickDebug.runtimeDisabled) > 0
+        ? ['Kick runtime hooks are disabled for the current run.']
+        : []),
+      ...(Number(kickDebug.pollOverlapCount) > 0
+        ? ['Kick status poll overlapped; inspect async interval churn in the polling loop.']
+        : []),
+    ],
+  };
+});
 
 Bun.serve({
   port: SERVER_PORT,
@@ -100,6 +249,13 @@ Bun.serve({
     '/api/chat/history': {
       GET: () => {
         return new Response(JSON.stringify(chatService.getMessageHistory()), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      },
+    },
+    '/api/runtime/status': {
+      GET: () => {
+        return new Response(JSON.stringify(runtimeMonitor.getStatus()), {
           headers: { 'Content-Type': 'application/json' },
         });
       },
@@ -697,6 +853,34 @@ Bun.serve({
         return new Response(JSON.stringify({ success: true }), {
           headers: { 'Content-Type': 'application/json' },
         });
+      },
+    },
+
+    '/api/assets/platform-icons/:platform.svg': {
+      GET: async (req) => {
+        const url = new URL(req.url);
+        const platform = url.pathname
+          .replace('/api/assets/platform-icons/', '')
+          .replace(/\.svg$/u, '')
+          .toLowerCase();
+        if (!isPlatformStatusIconPlatform(platform)) {
+          return new Response('not found', { status: 404 });
+        }
+        try {
+          const icon = await ensurePlatformStatusIcon(platform);
+          return new Response(Bun.file(icon.svgPath), {
+            headers: {
+              'Content-Type': 'image/svg+xml; charset=utf-8',
+              'Cache-Control': 'public, max-age=86400',
+            },
+          });
+        } catch (error) {
+          defaultLogger.warn(`[status-icons] API fetch failed for ${platform}: ${String(error)}`);
+          return new Response(JSON.stringify({ error: 'icon unavailable' }), {
+            status: 503,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
       },
     },
 

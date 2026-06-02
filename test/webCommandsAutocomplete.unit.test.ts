@@ -8,7 +8,7 @@ import { describe, expect, test } from 'bun:test';
 import { getWebAutocomplete } from '../src/utils/webCommands';
 
 // All valid commands exported by the module (in filter order).
-const ALL_COMMANDS = '/connect  /help  /marker  /markers  /msg  /settings  /setup-youtube';
+const ALL_COMMANDS = '/connect  /help  /memory  /marker  /markers  /msg  /settings  /setup-youtube';
 
 // All SETTINGS_KEYS joined with two spaces (same order as in source).
 const ALL_SETTINGS_KEYS = [
@@ -22,6 +22,14 @@ const ALL_SETTINGS_KEYS = [
   'logs.tail',
   'viewers.visible',
   'viewers.mode',
+  'status.platformIcons.visible',
+  'status.platformIcons.youtube.sizePx',
+  'status.platformIcons.twitch.sizePx',
+  'status.platformIcons.kick.sizePx',
+  'memory.status.visible',
+  'memory.status.greenMaxMb',
+  'memory.status.orangeMinMb',
+  'memory.status.redMinMb',
   'messages.position',
   'chat.timestamps.visible',
   'tui.emotes.scale',
@@ -174,6 +182,18 @@ describe('getWebAutocomplete — /settings', () => {
     expect(getWebAutocomplete('/settings get tui')).toBe('tui.emotes.scale');
   });
 
+  test('/settings get memory → only memory status keys', () => {
+    expect(getWebAutocomplete('/settings get memory')).toBe(
+      'memory.status.visible  memory.status.greenMaxMb  memory.status.orangeMinMb  memory.status.redMinMb',
+    );
+  });
+
+  test('/settings get status → only status icon keys', () => {
+    expect(getWebAutocomplete('/settings get status')).toBe(
+      'status.platformIcons.visible  status.platformIcons.youtube.sizePx  status.platformIcons.twitch.sizePx  status.platformIcons.kick.sizePx',
+    );
+  });
+
   test('/settings get nonexistent_prefix → null', () => {
     expect(getWebAutocomplete('/settings get nonexistent_prefix')).toBeNull();
   });
@@ -184,6 +204,18 @@ describe('getWebAutocomplete — /settings', () => {
 
   test('/settings set tui → only keys starting with "tui"', () => {
     expect(getWebAutocomplete('/settings set tui')).toBe('tui.emotes.scale');
+  });
+
+  test('/settings set memory → only memory status keys', () => {
+    expect(getWebAutocomplete('/settings set memory')).toBe(
+      'memory.status.visible  memory.status.greenMaxMb  memory.status.orangeMinMb  memory.status.redMinMb',
+    );
+  });
+
+  test('/settings set status → only status icon keys', () => {
+    expect(getWebAutocomplete('/settings set status')).toBe(
+      'status.platformIcons.visible  status.platformIcons.youtube.sizePx  status.platformIcons.twitch.sizePx  status.platformIcons.kick.sizePx',
+    );
   });
 
   test('/settings set chat.maxHistorySize  (key typed + space) → <value>', () => {
@@ -200,6 +232,12 @@ describe('getWebAutocomplete — /settings', () => {
 describe('getWebAutocomplete — /help', () => {
   test('/help  (trailing space) → null', () => {
     expect(getWebAutocomplete('/help ')).toBeNull();
+  });
+});
+
+describe('getWebAutocomplete — /memory', () => {
+  test('/memory  (trailing space) → null', () => {
+    expect(getWebAutocomplete('/memory ')).toBeNull();
   });
 });
 

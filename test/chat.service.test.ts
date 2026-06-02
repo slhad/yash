@@ -78,6 +78,28 @@ describe('ChatService', () => {
     chatService.clearHistory();
   });
 
+  test('should expose payload-shape debug telemetry', () => {
+    chatService.injectMessage({
+      id: 'inject_debug',
+      platform: 'twitch',
+      userId: 'user_debug',
+      username: 'DebugUser',
+      message: 'hello',
+      timestamp: Date.now(),
+      color: '#ffffff',
+      badges: { mod: '1' },
+      streamId: 'stream-1',
+      extraPayload: { nested: true },
+    } as ChatMessage & { extraPayload: { nested: boolean } });
+
+    const debug = chatService.getDebugState();
+    expect(debug.recentSamples).toBe(1);
+    expect(debug.maxObservedExtraKeyCount).toBe(1);
+    expect(debug.recentAvgExtraKeyCount).toBe(1);
+    expect(debug.maxObservedMessageBytes).toBeGreaterThan(0);
+    expect(debug.recentAvgMessageBytes).toBeGreaterThan(0);
+  });
+
   test('should maintain message history', () => {
     chatService.registerProvider('twitch', twitchProvider);
 

@@ -67,6 +67,28 @@
     "visible": true,
     "mode": "per-platform"
   },
+  "status": {
+    "platformIcons": {
+      "visible": false,
+      "youtube": {
+        "sizePx": 24
+      },
+      "twitch": {
+        "sizePx": 24
+      },
+      "kick": {
+        "sizePx": 24
+      }
+    }
+  },
+  "memory": {
+    "status": {
+      "visible": false,
+      "greenMaxMb": 500,
+      "orangeMinMb": 2048,
+      "redMinMb": 5120
+    }
+  },
   "messages": {
     "position": "bottom"
   },
