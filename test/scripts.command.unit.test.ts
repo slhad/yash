@@ -27,7 +27,11 @@ describe('bundled example script helpers', () => {
     tempDir = await makeRepoTempDir('yash-scripts-list');
 
     const scripts = listBundledExampleScripts(tempDir);
-    expect(scripts).toHaveLength(2);
+    expect(scripts).toHaveLength(3);
+    expect(scripts.find((script) => script.id === 'obs-scene-change')).toMatchObject({
+      id: 'obs-scene-change',
+      status: 'not-installed',
+    });
     expect(scripts.find((script) => script.id === 'obs-startup')).toMatchObject({
       id: 'obs-startup',
       status: 'not-installed',
@@ -107,6 +111,9 @@ describe('/scripts command helper', () => {
 
     const lines = renderScriptsHelpLines(tempDir);
     expect(lines[0]).toBe('[scripts] Bundled example scripts:');
+    expect(lines).toContain(
+      '[scripts]   obs-scene-change  — Minimal voice-friendly OBS scene switcher with configurable default scene. [not installed]',
+    );
     expect(lines).toContain(
       '[scripts]   obs-startup  — Five-phase OBS startup sequence with countdown and go-live actions. [not installed]',
     );
