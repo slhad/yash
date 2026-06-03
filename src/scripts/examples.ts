@@ -23,6 +23,13 @@ const EXAMPLES_ROOT = path.resolve(import.meta.dir, '../../examples/scripts');
 
 const BUNDLED_EXAMPLE_SCRIPTS: readonly BundledExampleScriptDefinition[] = [
   {
+    id: 'obs-scene-change',
+    name: 'OBS scene change',
+    description: 'Minimal voice-friendly OBS scene switcher with configurable default scene.',
+    relativeDir: 'obs-scene-change',
+    files: ['README.md', 'config.jsonc', 'index.ts', 'types.d.ts'],
+  },
+  {
     id: 'obs-startup',
     name: 'OBS startup',
     description: 'Five-phase OBS startup sequence with countdown and go-live actions.',

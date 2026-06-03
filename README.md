@@ -86,6 +86,7 @@ YASH ships a small catalog of tracked example user scripts under `examples/scrip
 
 ```sh
 bun run cmd /scripts list
+bun run cmd /scripts install obs-scene-change
 bun run cmd /scripts install obs-startup
 bun run cmd /scripts install obs-source-recaller
 bun run cmd /scripts install obs-source-recaller repair
@@ -100,6 +101,7 @@ bun run cmd /scripts install obs-source-recaller copy
 - Use `repair` (or `force`) to refresh tracked files intentionally for a partial or outdated install
 - Repair merges the shipped `config.jsonc` defaults with your current `config.jsonc`, preserving your existing values and unknown keys
 - Restart YASH after install so the script is loaded at startup
+- `obs-scene-change` is the simplest voice-bridge-oriented example: configure a default scene or pass `scene=` and call `obs.scene-change.activate`
 
 ### `/action` command
 

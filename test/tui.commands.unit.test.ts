@@ -337,13 +337,13 @@ describe('getAutocomplete', () => {
   test('/scripts install  → hints bundled example ids', () => {
     const result = getAutocomplete('/scripts install ');
     expect(result.completion).toBeNull();
-    expect(result.hints).toEqual(['obs-startup', 'obs-source-recaller']);
+    expect(result.hints).toEqual(['obs-scene-change', 'obs-startup', 'obs-source-recaller']);
   });
 
-  test('/scripts install obs → keeps both obs-* scripts as ambiguous prefix matches', () => {
+  test('/scripts install obs → keeps all obs-* scripts as ambiguous prefix matches', () => {
     const result = getAutocomplete('/scripts install obs');
     expect(result.completion).toBeNull();
-    expect(result.hints).toEqual(['obs-startup', 'obs-source-recaller']);
+    expect(result.hints).toEqual(['obs-startup', 'obs-scene-change', 'obs-source-recaller']);
   });
 
   test('/scripts install obs-startup  → hints repair flags', () => {

@@ -43,12 +43,13 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
         * The live TUI may also invoke visible non-IPC actions through `/action`; modal-only actions such as `obs.shutdown.configTUI`, `obs.startup.configTUI`, and `obs.source-recaller.configTUI` remain blocked over IPC (`bun run cmd`)
     * Command `/scripts | /scripts list | /scripts install <example-id> [repair|force] [copy|link]` - list bundled example scripts and install one into `YASH_DATA_DIR/scripts/<example-id>` without overwriting existing files unless repair/force is requested explicitly
         * Intended for AppImage and packaged installs so users can install tracked example scripts without manually extracting repo files
-        * Bundled examples currently include `obs-startup` and `obs-source-recaller`
+        * Bundled examples currently include `obs-scene-change`, `obs-startup`, and `obs-source-recaller`
         * `YASH_DATA_DIR/scripts/<example-id>/config.jsonc` is the single source of truth owned by that script; do not split normal script settings across a separate runtime settings file
         * Default install strategy is `link` for local dev checkouts and `copy` for AppImage/packaged runtimes; `link` symlinks immutable tracked files while still copying `config.jsonc` so script-local settings stay user-owned
         * Every bundled script or bundled example script must expose both `/action <prefix>.config` and `/action <prefix>.configTUI`
         * `<prefix>.config` must show/update the script-local settings stored in `YASH_DATA_DIR/scripts/<scriptId>/config.jsonc` and remain callable over IPC
         * `<prefix>.configTUI` must edit the same `config.jsonc` surface from the live TUI and stay blocked over IPC
+        * Bundled `obs-scene-change` actions: `activate`, `config`, and `configTUI`; `activate` switches OBS to `scene=` when passed or to the configured `defaultScene` otherwise, so voice bridges can trigger scene changes without needing custom app code
         * Script config files may include a reserved top-level `"$ui"` object for self-describing TUI metadata such as labels, descriptions, widget hints (`toggle`, `json`, `text`), ordering, hidden fields, and wildcard path templates like `titleTemplate`, `labelTemplate`, and `descriptionTemplate`; runtime values remain in the normal config shape outside `"$ui"`, and the generic TUI editor explores nested objects/arrays recursively
         * The generic script config modal should render scalar leaves compactly as single-line editors in the form `key: type = value`, while nested object/array section rows may be renamed through `"$ui"` templates
         * When a focused config row represents an object/array entry inside an array, the generic script config modal must allow local reordering with `[` (move up) / `]` (move down) and local deletion with `x` before save/cancel
