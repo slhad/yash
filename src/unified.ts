@@ -51,6 +51,7 @@ const statusPlatformsEl = byId<HTMLSpanElement>('status-platforms');
 const inputHistory: string[] = [];
 let historyIdx = -1;
 const knownIds = new Set<string>();
+const renderedMessages = new Map<string, HTMLDivElement>();
 let isAtBottom = true;
 let ffzEmotes: Record<string, FfzEmoteDefinition> = {};
 
@@ -121,6 +122,44 @@ function createBadgeList(badges: Record<string, string> | undefined): HTMLSpanEl
   return wrap;
 }
 
+function syncRenderedMessage(div: HTMLDivElement, msg: ChatMessage): void {
+  const existingAvatar = div.querySelector<HTMLImageElement>('.chat-avatar');
+  if (msg.profileImageUrl) {
+    if (existingAvatar) {
+      if (existingAvatar.src !== msg.profileImageUrl) existingAvatar.src = msg.profileImageUrl;
+      existingAvatar.alt = `${msg.username} avatar`;
+    } else {
+      const avatar = document.createElement('img');
+      avatar.className = 'chat-avatar';
+      avatar.src = msg.profileImageUrl;
+      avatar.alt = `${msg.username} avatar`;
+      avatar.loading = 'lazy';
+      avatar.decoding = 'async';
+      const platformTagEl = div.querySelector('.platform-tag');
+      if (platformTagEl) {
+        platformTagEl.insertAdjacentElement('afterend', avatar);
+      } else {
+        div.prepend(avatar);
+      }
+    }
+  }
+
+  const existingBadges = div.querySelector('.badge-list');
+  const badges = createBadgeList(msg.badges);
+  if (badges) {
+    if (existingBadges) {
+      existingBadges.replaceWith(badges);
+    } else {
+      const username = div.querySelector('.username');
+      if (username) {
+        username.insertAdjacentElement('beforebegin', badges);
+      } else {
+        div.appendChild(badges);
+      }
+    }
+  }
+}
+
 function rerenderTwitchMessages(): void {
   for (const text of messagesEl.querySelectorAll<HTMLSpanElement>(
     '.msg[data-platform="twitch"] .text',
@@ -161,9 +200,15 @@ function renderMessage(msg: ChatMessage): HTMLDivElement {
 function appendMessages(msgs: ChatMessage[]): void {
   let added = false;
   for (const msg of msgs) {
-    if (knownIds.has(msg.id)) continue;
+    if (knownIds.has(msg.id)) {
+      const existing = renderedMessages.get(msg.id);
+      if (existing) syncRenderedMessage(existing, msg);
+      continue;
+    }
     knownIds.add(msg.id);
-    messagesEl.appendChild(renderMessage(msg));
+    const rendered = renderMessage(msg);
+    renderedMessages.set(msg.id, rendered);
+    messagesEl.appendChild(rendered);
     added = true;
   }
   if (added && isAtBottom) {

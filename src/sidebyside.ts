@@ -41,6 +41,11 @@ const knownIds: Record<Platform, Set<string>> = {
   twitch: new Set<string>(),
   kick: new Set<string>(),
 };
+const renderedMessages: Record<Platform, Map<string, HTMLDivElement>> = {
+  youtube: new Map<string, HTMLDivElement>(),
+  twitch: new Map<string, HTMLDivElement>(),
+  kick: new Map<string, HTMLDivElement>(),
+};
 const atBottom: Record<Platform, boolean> = {
   youtube: true,
   twitch: true,
@@ -90,6 +95,39 @@ function createBadgeList(badges: Record<string, string> | undefined): HTMLSpanEl
   return wrap;
 }
 
+function syncRenderedMessage(div: HTMLDivElement, msg: ChatMessage): void {
+  const existingAvatar = div.querySelector<HTMLImageElement>('.chat-avatar');
+  if (msg.profileImageUrl) {
+    if (existingAvatar) {
+      if (existingAvatar.src !== msg.profileImageUrl) existingAvatar.src = msg.profileImageUrl;
+      existingAvatar.alt = `${msg.username} avatar`;
+    } else {
+      const avatar = document.createElement('img');
+      avatar.className = 'chat-avatar';
+      avatar.src = msg.profileImageUrl;
+      avatar.alt = `${msg.username} avatar`;
+      avatar.loading = 'lazy';
+      avatar.decoding = 'async';
+      div.prepend(avatar);
+    }
+  }
+
+  const existingBadges = div.querySelector('.badge-list');
+  const badges = createBadgeList(msg.badges);
+  if (badges) {
+    if (existingBadges) {
+      existingBadges.replaceWith(badges);
+    } else {
+      const username = div.querySelector('.username');
+      if (username) {
+        username.insertAdjacentElement('beforebegin', badges);
+      } else {
+        div.appendChild(badges);
+      }
+    }
+  }
+}
+
 function rerenderTwitchMessages(): void {
   for (const text of document.querySelectorAll<HTMLSpanElement>('#msgs-twitch .text')) {
     const message = text.dataset.message ?? text.textContent ?? '';
@@ -133,7 +171,11 @@ function appendMessages(msgs: ChatMessage[]): void {
     let added = false;
     for (const msg of msgs) {
       if (msg.platform !== platform) continue;
-      if (knownIds[platform].has(msg.id)) continue;
+      if (knownIds[platform].has(msg.id)) {
+        const existing = renderedMessages[platform].get(msg.id);
+        if (existing) syncRenderedMessage(existing, msg);
+        continue;
+      }
       knownIds[platform].add(msg.id);
       const div = document.createElement('div');
       div.className = 'msg';
@@ -156,6 +198,7 @@ function appendMessages(msgs: ChatMessage[]): void {
       username.textContent = `${msg.username}:`;
       div.appendChild(username);
       div.appendChild(createMessageText(msg.message, msg.platform));
+      renderedMessages[platform].set(msg.id, div);
       el.appendChild(div);
       added = true;
     }
