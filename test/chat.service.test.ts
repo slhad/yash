@@ -131,6 +131,42 @@ describe('ChatService', () => {
     expect(allHistory.length).toBe(2);
   });
 
+  test('should filter history by stream ids', () => {
+    chatService.injectMessage({
+      id: 'stream-a-1',
+      platform: 'twitch',
+      userId: 'user-a',
+      username: 'UserA',
+      message: 'A1',
+      timestamp: 1000,
+      streamId: 'stream-a',
+    });
+    chatService.injectMessage({
+      id: 'stream-b-1',
+      platform: 'kick',
+      userId: 'user-b',
+      username: 'UserB',
+      message: 'B1',
+      timestamp: 2000,
+      streamId: 'stream-b',
+    });
+    chatService.injectMessage({
+      id: 'no-stream',
+      platform: 'youtube',
+      userId: 'user-c',
+      username: 'UserC',
+      message: 'C1',
+      timestamp: 3000,
+    });
+
+    expect(chatService.getMessageHistoryForStreamIds(['stream-a']).map((msg) => msg.id)).toEqual([
+      'stream-a-1',
+    ]);
+    expect(
+      chatService.getMessageHistoryForStreamIds(['stream-a', 'stream-b']).map((msg) => msg.id),
+    ).toEqual(['stream-a-1', 'stream-b-1']);
+  });
+
   test('should respect max history size', () => {
     chatService.setMaxHistorySize(3);
     chatService.registerProvider('twitch', twitchProvider);

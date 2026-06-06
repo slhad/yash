@@ -19,8 +19,15 @@ Bullet points: what was added / changed / removed and why.
 ## Proofs of work (Screenshots and Videos)
 - Show what changed where
 <!--
-Inlined link and description of each proof
-links point to artifacts from pre-release "Screenshots & Assets" if done by AI agents (aka copy/paste don't work)
+For screenshots and GIFs, embed the media directly in the PR body with Markdown image syntax so GitHub renders them inline:
+![alt text](https://...)
+
+For MP4 videos, use a GitHub `user-attachments` URL and place it on its own line so GitHub renders the player inline.
+Plain release asset `.mp4` links usually render as downloads, not embedded video.
+
+If done by AI agents:
+- screenshots/GIFs may use hosted URLs from the pre-release "Screenshots & Assets"
+- MP4s should use GitHub `user-attachments` URLs, not release asset links
 -->
 
 ## Checklist

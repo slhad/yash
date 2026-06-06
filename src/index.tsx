@@ -40,7 +40,11 @@ import {
   subscribeToActionAutocompleteRefresh,
 } from './utils/actionAutocomplete';
 import { type ChatClearLineKind, runChatClearCommand } from './utils/chatClear';
-import { buildChatHistoryMessages } from './utils/chatHistoryLoader';
+import {
+  buildChatHistoryMessages,
+  getChatHistoryStreamIds,
+  getChatHistoryLimit as readChatHistoryLimit,
+} from './utils/chatHistoryLoader';
 import {
   applySessionStatsToChatterInfo,
   doesIncomingMessageAffectChatterAllTime,
@@ -131,8 +135,6 @@ type TwitchProviderEmoteContext = {
 };
 
 const DEFAULT_TUI_EMOTE_SCALE_PERCENT = 100;
-const DEFAULT_CHAT_HISTORY_LIMIT = 1000;
-const MAX_CHAT_HISTORY_LIMIT = 5000;
 const MAX_EVENT_LOG_ENTRIES = 500;
 const MAX_ACTIVITY_EVENTS = 500;
 const MAX_TUI_FFZ_IMAGES = 512;
@@ -143,11 +145,7 @@ const TUI_UPDATE_LOOP_DISABLED =
 installTuiErrorCapture();
 
 function getChatHistoryLimit(): number {
-  const raw = Number(settings.get('chat.maxHistorySize', DEFAULT_CHAT_HISTORY_LIMIT));
-  if (!Number.isFinite(raw) || raw <= 0) {
-    return DEFAULT_CHAT_HISTORY_LIMIT;
-  }
-  return Math.min(Math.floor(raw), MAX_CHAT_HISTORY_LIMIT);
+  return readChatHistoryLimit((key, fallback) => settings.get(key, fallback));
 }
 
 function trimArrayTail<T>(items: T[], maxEntries: number): void {
@@ -7734,24 +7732,13 @@ async function fetchPlatformInfo(platform: string): Promise<Record<string, unkno
 
 function loadChatHistory(): { lines: ChatLine[]; rawMsgs: ChatMessage[] } {
   const maxHistory = getChatHistoryLimit();
-  const streamIds: string[] = [];
-
   const ytInfo = youtube.getChannelInfo();
-  if (ytInfo.broadcastId) streamIds.push(ytInfo.broadcastId);
-
-  const twitchStart = twitch.getStreamStartTime();
-  if (twitchStart) streamIds.push(twitchStart.toISOString());
-
-  const kickStart = kick.getStreamStartTime();
-  if (kickStart) streamIds.push(kickStart.toISOString());
-
-  // Allow explicit override via settings (useful for demos / dev without live streams)
-  const overrideIds = settings.get('chat.historyStreamIds', []);
-  if (Array.isArray(overrideIds)) {
-    for (const id of overrideIds) {
-      if (typeof id === 'string' && !streamIds.includes(id)) streamIds.push(id);
-    }
-  }
+  const streamIds = getChatHistoryStreamIds({
+    youtubeBroadcastId: ytInfo.broadcastId,
+    twitchStreamStartTime: twitch.getStreamStartTime(),
+    kickStreamStartTime: kick.getStreamStartTime(),
+    overrideIds: settings.get('chat.historyStreamIds', []),
+  });
 
   const rawMsgs = buildChatHistoryMessages(
     streamIds,

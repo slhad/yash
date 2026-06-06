@@ -1,6 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import type { ChatMessage } from '../src/platforms/base';
-import { buildChatHistoryMessages } from '../src/utils/chatHistoryLoader';
+import {
+  buildChatHistoryMessages,
+  getChatHistoryLimit,
+  getChatHistoryStreamIds,
+  mergeChatHistoryMessages,
+} from '../src/utils/chatHistoryLoader';
 
 function makeMsg(overrides: Partial<ChatMessage> & { id: string }): ChatMessage {
   return {
@@ -108,5 +113,66 @@ describe('buildChatHistoryMessages', () => {
     const msgs = Array.from({ length: 5 }, (_, i) => makeMsg({ id: `m${i}`, timestamp: i * 1000 }));
     const result = buildChatHistoryMessages(['s1'], fakeStore({ s1: msgs }), 5);
     expect(result).toHaveLength(5);
+  });
+});
+
+describe('mergeChatHistoryMessages', () => {
+  test('merges groups oldest-first and deduplicates by message id', () => {
+    const shared = makeMsg({ id: 'shared', timestamp: 2000 });
+    const result = mergeChatHistoryMessages(
+      [
+        [makeMsg({ id: 'a', timestamp: 1000 }), shared],
+        [shared, makeMsg({ id: 'b', timestamp: 3000 })],
+      ],
+      10,
+    );
+    expect(result.map((msg) => msg.id)).toEqual(['a', 'shared', 'b']);
+  });
+
+  test('enforces maxHistory after merge', () => {
+    const result = mergeChatHistoryMessages(
+      [
+        [makeMsg({ id: 'a', timestamp: 1000 }), makeMsg({ id: 'b', timestamp: 2000 })],
+        [makeMsg({ id: 'c', timestamp: 3000 })],
+      ],
+      2,
+    );
+    expect(result.map((msg) => msg.id)).toEqual(['b', 'c']);
+  });
+});
+
+describe('getChatHistoryLimit', () => {
+  test('uses default when setting is invalid', () => {
+    expect(getChatHistoryLimit(<T>() => -1 as T)).toBe(1000);
+  });
+
+  test('clamps oversized values', () => {
+    expect(getChatHistoryLimit(<T>() => 999999 as T)).toBe(5000);
+  });
+});
+
+describe('getChatHistoryStreamIds', () => {
+  test('collects provider stream ids and override ids without duplicates', () => {
+    const twitchStart = new Date('2026-06-06T10:00:00.000Z');
+    const kickStart = new Date('2026-06-06T11:00:00.000Z');
+    expect(
+      getChatHistoryStreamIds({
+        youtubeBroadcastId: 'yt-123',
+        twitchStreamStartTime: twitchStart,
+        kickStreamStartTime: kickStart,
+        overrideIds: ['yt-123', 'manual-id'],
+      }),
+    ).toEqual(['yt-123', twitchStart.toISOString(), kickStart.toISOString(), 'manual-id']);
+  });
+
+  test('ignores blank and invalid values', () => {
+    expect(
+      getChatHistoryStreamIds({
+        youtubeBroadcastId: '   ',
+        twitchStreamStartTime: new Date('invalid'),
+        kickStreamStartTime: null,
+        overrideIds: [' ', 123, null],
+      }),
+    ).toEqual([]);
   });
 });
