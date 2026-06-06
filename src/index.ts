@@ -26,7 +26,8 @@ import './actions/markers';
 import { isDemoMode, resolvePort } from './utils/config';
 import { getFfzEmotePayload, type TwitchEmoteFetchContext } from './utils/ffz-fetch';
 import { getHelpCommands } from './utils/help';
-import { defaultLogger } from './utils/logger';
+import { defaultLogger, parseLoggerLevelName, setDefaultLoggerLevel } from './utils/logger';
+import { readMemoryTelemetrySettings } from './utils/memoryStatus';
 import { apiMetricsHandler, prometheusMetricsHandler } from './utils/metricsHandlers';
 import {
   isPlatformStatusIconPlatform,
@@ -64,12 +65,29 @@ function getSettingValue(key: string): unknown {
   return settingsStore.get(key, null);
 }
 
+function syncRuntimeMonitorTelemetrySettings(): void {
+  const telemetry = readMemoryTelemetrySettings((key, fallback) =>
+    settingsStore.get(key, fallback),
+  );
+  runtimeMonitor.configureTelemetryLogging(telemetry.enabled, telemetry.intervalMinutes);
+}
+
+function syncDefaultLoggerLevelSetting(): void {
+  setDefaultLoggerLevel(parseLoggerLevelName(settingsStore.get('logs.level', 'info')));
+}
+
 function applySettingSideEffects(key: string, value: unknown): void {
   if (key === 'chat.maxHistorySize') {
     const parsed = typeof value === 'number' ? value : Number.parseInt(String(value), 10);
     if (Number.isFinite(parsed) && parsed > 0) {
       chatService.setMaxHistorySize(parsed);
     }
+  }
+  if (key === 'memory.telemetry.enabled' || key === 'memory.telemetry.intervalMinutes') {
+    syncRuntimeMonitorTelemetrySettings();
+  }
+  if (key === 'logs.level') {
+    syncDefaultLoggerLevelSetting();
   }
   if (key === PLATFORM_STATUS_ICON_SETTING_KEY && String(value).toLowerCase() === 'true') {
     warmPlatformStatusIcons();
@@ -85,6 +103,8 @@ const htmlRoutes: Record<string, any> = isTuiOnly
 const SERVER_PORT = resolvePort();
 
 runtimeMonitor.start();
+syncDefaultLoggerLevelSetting();
+syncRuntimeMonitorTelemetrySettings();
 if (readPlatformStatusIconsEnabled((key, fallback) => settingsStore.get(key, fallback))) {
   warmPlatformStatusIcons();
 }
@@ -141,6 +161,42 @@ runtimeMonitor.registerProbe('services', () => {
       youtubeChatPollStreamDataCount: Number(youtubeDebug.chatPollStreamDataCount ?? 0),
       youtubeChatPollStreamErrorCount: Number(youtubeDebug.chatPollStreamErrorCount ?? 0),
       youtubeChatPollStreamEndCount: Number(youtubeDebug.chatPollStreamEndCount ?? 0),
+      youtubeChatPollStreamSetupErrorCount: Number(youtubeDebug.chatPollStreamSetupErrorCount ?? 0),
+      youtubeChatPollStreamDisposeCount: Number(youtubeDebug.chatPollStreamDisposeCount ?? 0),
+      youtubeChatPollStreamDisposeCancelCount: Number(
+        youtubeDebug.chatPollStreamDisposeCancelCount ?? 0,
+      ),
+      youtubeChatPollStreamDisposeDestroyCount: Number(
+        youtubeDebug.chatPollStreamDisposeDestroyCount ?? 0,
+      ),
+      youtubeChatPollReconnectScheduleCount: Number(
+        youtubeDebug.chatPollReconnectScheduleCount ?? 0,
+      ),
+      youtubeChatPollReconnectReplaceTimerCount: Number(
+        youtubeDebug.chatPollReconnectReplaceTimerCount ?? 0,
+      ),
+      youtubeChatPollReconnectLastDelayMs: Number(youtubeDebug.chatPollReconnectLastDelayMs ?? 0),
+      youtubeChatPollLastStreamDurationMs: Number(youtubeDebug.chatPollLastStreamDurationMs ?? 0),
+      youtubeChatPollMaxStreamDurationMs: Number(youtubeDebug.chatPollMaxStreamDurationMs ?? 0),
+      youtubeChatPollTotalStreamDurationMs: Number(youtubeDebug.chatPollTotalStreamDurationMs ?? 0),
+      youtubeChatPollShortStreamEndCount: Number(youtubeDebug.chatPollShortStreamEndCount ?? 0),
+      youtubeChatPollLastStreamDataEventCount: Number(
+        youtubeDebug.chatPollLastStreamDataEventCount ?? 0,
+      ),
+      youtubeChatPollMaxStreamDataEventCount: Number(
+        youtubeDebug.chatPollMaxStreamDataEventCount ?? 0,
+      ),
+      youtubeChatPollTotalStreamDataEventCount: Number(
+        youtubeDebug.chatPollTotalStreamDataEventCount ?? 0,
+      ),
+      youtubeChatPollEndWithNextPageTokenCount: Number(
+        youtubeDebug.chatPollEndWithNextPageTokenCount ?? 0,
+      ),
+      youtubeChatPollEndWithoutNextPageTokenCount: Number(
+        youtubeDebug.chatPollEndWithoutNextPageTokenCount ?? 0,
+      ),
+      youtubeLiveChatGrpcClientCreateCount: Number(youtubeDebug.liveChatGrpcClientCreateCount ?? 0),
+      youtubeLiveChatGrpcClientCloseCount: Number(youtubeDebug.liveChatGrpcClientCloseCount ?? 0),
       twitchMessageCallbacks: Number(twitchDebug.messageCallbacks ?? 0),
       twitchActivityCallbacks: Number(twitchDebug.activityCallbacks ?? 0),
       twitchRuntimeDisabled: Number(twitchDebug.runtimeDisabled ?? 0),
@@ -826,9 +882,10 @@ Bun.serve({
         const body = await req.json().catch(() => ({}));
         const { key, value } = body as { key?: string; value?: unknown };
         if (key) {
-          await settingsStore.set(key, value);
-          applySettingSideEffects(key, value);
-          return new Response(JSON.stringify({ success: true, key, value }), {
+          const storedValue = key === 'logs.level' ? parseLoggerLevelName(value) : value;
+          await settingsStore.set(key, storedValue);
+          applySettingSideEffects(key, storedValue);
+          return new Response(JSON.stringify({ success: true, key, value: storedValue }), {
             headers: { 'Content-Type': 'application/json' },
           });
         }
@@ -843,12 +900,47 @@ Bun.serve({
             headers: { 'Content-Type': 'application/json' },
           });
         }
-        await settingsStore.merge(body);
-        if ('chat' in body && body.chat && typeof body.chat === 'object') {
+        const normalizedBody =
+          'logs' in body &&
+          body.logs &&
+          typeof body.logs === 'object' &&
+          !Array.isArray(body.logs) &&
+          'level' in (body.logs as Record<string, unknown>)
+            ? {
+                ...body,
+                logs: {
+                  ...(body.logs as Record<string, unknown>),
+                  level: parseLoggerLevelName((body.logs as Record<string, unknown>).level),
+                },
+              }
+            : body;
+        await settingsStore.merge(normalizedBody);
+        if (
+          'chat' in normalizedBody &&
+          normalizedBody.chat &&
+          typeof normalizedBody.chat === 'object'
+        ) {
           applySettingSideEffects(
             'chat.maxHistorySize',
-            (body.chat as Record<string, unknown>).maxHistorySize,
+            (normalizedBody.chat as Record<string, unknown>).maxHistorySize,
           );
+        }
+        if (
+          'memory' in normalizedBody &&
+          normalizedBody.memory &&
+          typeof normalizedBody.memory === 'object'
+        ) {
+          syncRuntimeMonitorTelemetrySettings();
+        }
+        if (
+          'logs' in normalizedBody &&
+          normalizedBody.logs &&
+          typeof normalizedBody.logs === 'object'
+        ) {
+          const logsBody = normalizedBody.logs as Record<string, unknown>;
+          if ('level' in logsBody) {
+            syncDefaultLoggerLevelSetting();
+          }
         }
         return new Response(JSON.stringify({ success: true }), {
           headers: { 'Content-Type': 'application/json' },

@@ -642,18 +642,24 @@ describe('TwitchProvider — activity events', () => {
     expect(() => (p as any)._dispatchActivity('follow', 'ghost follow')).not.toThrow();
   });
 
-  test('callback receives correct { type, message } shape', () => {
+  test('callback receives correct activity payload including chatter identity', () => {
     const p = makeProvider();
-    let received: { type: string; message: string } | null = null;
+    let received: { type: string; message: string; userId?: string; username?: string } | null =
+      null;
     p.onActivityEvent((event) => {
       received = event;
     });
 
-    (p as any)._dispatchActivity('cheer', '100 bits from viewer99');
+    (p as any)._dispatchActivity('cheer', '100 bits from viewer99', {
+      userId: 'viewer-id',
+      username: 'viewer99',
+    });
 
     expect(received).not.toBeNull();
     expect(received!.type).toBe('cheer');
     expect(received!.message).toBe('100 bits from viewer99');
-    expect(Object.keys(received!).sort()).toEqual(['message', 'type']);
+    expect(received!.userId).toBe('viewer-id');
+    expect(received!.username).toBe('viewer99');
+    expect(Object.keys(received!).sort()).toEqual(['message', 'type', 'userId', 'username']);
   });
 });

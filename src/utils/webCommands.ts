@@ -298,7 +298,17 @@ export function getWebAutocomplete(input: string): string | null {
   }
 
   if (cmd === '/help') return null;
-  if (cmd === '/memory') return null;
+  if (cmd === '/memory') {
+    const options = ['modal', 'snapshot'];
+    if (parts.length === 0) return lower.endsWith(' ') ? options.join(' | ') : null;
+    if (parts.length === 1 && rest.endsWith(' ')) return options.join(' | ');
+    if (parts.length === 1) {
+      const partial = parts[0] ?? '';
+      const matches = options.filter((option) => option.startsWith(partial));
+      return matches.length > 0 ? matches.join(' | ') : null;
+    }
+    return null;
+  }
 
   return null;
 }
@@ -312,6 +322,7 @@ const SETTINGS_KEYS = [
   'stream.description',
   'title.visible',
   'logs.visible',
+  'logs.level',
   'logs.height',
   'logs.tail',
   'viewers.visible',
@@ -324,6 +335,8 @@ const SETTINGS_KEYS = [
   'memory.status.greenMaxMb',
   'memory.status.orangeMinMb',
   'memory.status.redMinMb',
+  'memory.telemetry.enabled',
+  'memory.telemetry.intervalMinutes',
   'messages.position',
   'chat.timestamps.visible',
   'tui.emotes.scale',
@@ -372,8 +385,16 @@ export async function handleWebCommand(text: string, ctx: WebCommandContext): Pr
   }
 
   if (cmd === '/memory') {
-    if ((parts[1] ?? '').toLowerCase() === 'modal') {
+    const sub = (parts[1] ?? '').toLowerCase();
+    if (sub === 'modal') {
       fb('memory', 'The memory modal is TUI-only. Use /memory modal in YASH.');
+      return true;
+    }
+    if (sub === 'snapshot') {
+      fb(
+        'memory',
+        'Heap snapshots are available in YASH or over IPC. Use /memory snapshot [label] there.',
+      );
       return true;
     }
     try {

@@ -33,6 +33,7 @@ import { EventSubWsListener } from '@twurple/eventsub-ws';
 import { getConfig, reloadConfig } from '../utils/config';
 import { defaultLogger } from '../utils/logger';
 import type {
+  ActivityEventPayload,
   AuthResult,
   ChatMessage,
   ChatterInfo,
@@ -109,17 +110,21 @@ export class TwitchProvider implements PlatformProvider {
   private messageCallbacks: ((msg: ChatMessage) => void)[] = [];
 
   // ---- activity events -------------------------------------------------------
-  private activityCallbacks: ((event: { type: string; message: string }) => void)[] = [];
+  private activityCallbacks: ((event: ActivityEventPayload) => void)[] = [];
 
-  onActivityEvent(cb: (event: { type: string; message: string }) => void): () => void {
+  onActivityEvent(cb: (event: ActivityEventPayload) => void): () => void {
     this.activityCallbacks.push(cb);
     return () => {
       this.activityCallbacks = this.activityCallbacks.filter((c) => c !== cb);
     };
   }
 
-  private _dispatchActivity(type: string, message: string): void {
-    for (const cb of this.activityCallbacks) cb({ type, message });
+  private _dispatchActivity(
+    type: string,
+    message: string,
+    identity?: Pick<ActivityEventPayload, 'userId' | 'username'>,
+  ): void {
+    for (const cb of this.activityCallbacks) cb({ type, message, ...identity });
   }
 
   // ---- EventSub --------------------------------------------------------------
@@ -786,7 +791,10 @@ export class TwitchProvider implements PlatformProvider {
     // channel.follow (requires moderator:read:followers scope)
     try {
       await this.eventSubListener.onChannelFollow(this.userId, this.userId, (e) => {
-        this._dispatchActivity('follow', `${e.userDisplayName} followed`);
+        this._dispatchActivity('follow', `${e.userDisplayName} followed`, {
+          userId: e.userId,
+          username: e.userDisplayName,
+        });
       });
     } catch (err) {
       defaultLogger.info('[Twitch] follow events unavailable (missing scope?):', err);
@@ -796,7 +804,10 @@ export class TwitchProvider implements PlatformProvider {
     try {
       await this.eventSubListener.onChannelSubscription(this.userId, (e) => {
         const tier = `T${e.tier.charAt(0)}`;
-        this._dispatchActivity('sub', `${e.userDisplayName} subscribed (${tier})`);
+        this._dispatchActivity('sub', `${e.userDisplayName} subscribed (${tier})`, {
+          userId: e.userId,
+          username: e.userDisplayName,
+        });
       });
     } catch (err) {
       defaultLogger.info('[Twitch] sub events unavailable (missing scope?):', err);
@@ -806,7 +817,16 @@ export class TwitchProvider implements PlatformProvider {
     try {
       await this.eventSubListener.onChannelCheer(this.userId, (e) => {
         const who = e.isAnonymous ? 'Anonymous' : (e.userDisplayName ?? 'Unknown');
-        this._dispatchActivity('cheer', `${who} cheered ${e.bits} bits`);
+        this._dispatchActivity(
+          'cheer',
+          `${who} cheered ${e.bits} bits`,
+          e.isAnonymous
+            ? undefined
+            : {
+                userId: e.userId ?? undefined,
+                username: e.userDisplayName ?? who,
+              },
+        );
       });
     } catch (err) {
       defaultLogger.info('[Twitch] cheer events unavailable (missing scope?):', err);
@@ -818,6 +838,10 @@ export class TwitchProvider implements PlatformProvider {
         this._dispatchActivity(
           'raid',
           `${e.raidingBroadcasterDisplayName} raided with ${e.viewers} viewers`,
+          {
+            userId: e.raidingBroadcasterId,
+            username: e.raidingBroadcasterDisplayName,
+          },
         );
       });
     } catch (err) {

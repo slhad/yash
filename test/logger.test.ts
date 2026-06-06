@@ -1,5 +1,11 @@
 import { describe, expect, test, vi } from 'bun:test';
-import { Logger, LogLevel } from '../src/utils/logger';
+import {
+  LOGGER_LEVEL_NAMES,
+  Logger,
+  LogLevel,
+  loggerLevelNameToLevel,
+  parseLoggerLevelName,
+} from '../src/utils/logger';
 
 describe('Logger', () => {
   test('should be instantiable with default options', () => {
@@ -102,5 +108,18 @@ describe('LogLevel', () => {
     expect(LogLevel.WARN).toBe(2);
     expect(LogLevel.ERROR).toBe(3);
     expect(LogLevel.NONE).toBe(4);
+  });
+
+  test('parses persisted log-level names', () => {
+    expect(parseLoggerLevelName('DEBUG')).toBe('debug');
+    expect(parseLoggerLevelName(' warn ')).toBe('warn');
+    expect(parseLoggerLevelName('invalid')).toBe('info');
+    expect(LOGGER_LEVEL_NAMES.map((name) => loggerLevelNameToLevel(name))).toEqual([
+      LogLevel.DEBUG,
+      LogLevel.INFO,
+      LogLevel.WARN,
+      LogLevel.ERROR,
+      LogLevel.NONE,
+    ]);
   });
 });

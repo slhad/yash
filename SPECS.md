@@ -15,7 +15,7 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
         * Element : Platform connected as Status bar — single borderless line starting with "Status" label, each platform shown as `platform: STATUS (Xh Xm Xs/viewers)` in green (authenticated) or red (not authenticated); unauthenticated providers display `LOGGED OUT` instead of `OFFLINE`; elapsed time and viewer count `(Xh Xm Xs/x)` only shown when platform is ONLINE, `viewers.visible` setting is true (default), and per-platform `showViewers` is not false in `settings.json`
             * Optional provider logos replace the `youtube` / `twitch` / `kick` text labels when `status.platformIcons.visible` is enabled; icons are downloaded lazily at runtime, cached under `YASH_DATA_DIR/cache/platform-status-icons`, recolored to their platform brand fill, sized per platform by `status.platformIcons.youtube.sizePx`, `status.platformIcons.twitch.sizePx`, and `status.platformIcons.kick.sizePx` (default `24` each), and fall back to text labels if the terminal cannot render inline images
         * Element : Memory status in Status bar — optional `MEM: <rss>` segment showing current YASH RSS for leak tracking; enabled with `memory.status.visible` (default `false`) and color-coded by configurable thresholds `memory.status.greenMaxMb` (default `500`), `memory.status.orangeMinMb` (default `2048`), and `memory.status.redMinMb` (default `5120`)
-            * Clicking the memory segment opens a readable detail modal/overlay with current usage, short growth windows, thresholds, and active warnings
+            * Clicking the memory segment opens a readable detail modal/overlay with current usage, RSS-focused drift windows, abbreviation legend (`RSS`, `heap`, `external`, `ArrayBuffers`, native gap), thresholds, and active warnings
         * Message box
             * position : top/bottom/hide
         * Element : Title (YASH heading)
@@ -28,8 +28,11 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
             * TUI-only subcommand `/memory modal` opens the same memory status overlay as clicking the `MEM:` status-bar segment
             * Includes OBS reconnect/socket lifecycle counters (`obsReconnectAttempt`, `obsWsCreateCount`, `obsWsCloseCount`, `obsWsErrorCount`, `obsReconnectDisabled`) to support live leak A/B soaks
             * Includes TUI refresh-loop counters (`updateUiLoopRefreshCount`, `updateUiNonLoopRefreshCount`, `updateLoopEnabled`, `updateLoopSkippedRefreshCount`) to support live TUI leak A/B soaks
+            * Runtime memory snapshots and `/api/runtime/status` expose extra RSS telemetry such as native-gap estimate, since-start growth, sample-to-sample delta, 15m min/max window stats, and 30m/60m growth windows to help diagnose idle RSS drift
+            * Optional periodic memory telemetry logging appends JSONL records under `YASH_DATA_DIR/logs/memory-telemetry-YYYY-MM-DD.jsonl`, controlled by `memory.telemetry.enabled` and `memory.telemetry.intervalMinutes`
         * The periodic TUI refresh loop should be dirty-driven: when no visible provider/OBS/title/viewer/demo state changed since the last render pass, the 2s loop should skip `updateUI()` instead of rebuilding the chat/sidebar trees
     * Command /logs [clear|tail <n>|visible <true|false>] - manage log display (TUI only)
+        * Logger verbosity should also be configurable through `/settings` / the settings modal via `logs.level` with values `debug|info|warn|error|none`
     * Command `/chat clear <all|messages|events|logs>` - clear matching live entries from the TUI Chat pane without affecting persisted history
         * `messages` clears visible chat messages and the raw-message cache used by browse/chatter actions
         * `events` clears non-message operational entries currently shown in the Chat pane
@@ -82,10 +85,14 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
         * Default list target is `all`; default list limit is `20`
         * Examples: `/markers`, `/markers youtube`, `/markers twitch 5`, `/markers restore twitch`, `/markers edit 1`, `/markers clear`, `/markers clear 1,2,5`
     * Command /settings [get <key>|set <key> <value>] - get or set UI settings; running `/settings` with no arguments opens a TUI modal for display/sidebar/viewer preferences and persists changes to `settings.json`
+        * Includes `logs.level` for runtime logger verbosity (`debug`, `info`, `warn`, `error`, `none`)
         * Includes `chat.timestamps.visible` for WebUI unified chat timestamp display
         * Includes `status.platformIcons.visible`, `status.platformIcons.youtube.sizePx`, `status.platformIcons.twitch.sizePx`, and `status.platformIcons.kick.sizePx` for runtime-downloaded provider logos in the status bar
         * Includes `memory.status.visible`, `memory.status.greenMaxMb`, `memory.status.orangeMinMb`, and `memory.status.redMinMb` for the status-bar RSS indicator
+        * Includes `memory.telemetry.enabled` and `memory.telemetry.intervalMinutes` for periodic RSS telemetry file logging
     * Command `/activity` — opens the activity bar modal showing the full event history (follow, sub, cheer, raid) with platform labels and timestamps (TUI only)
+        * `Ctrl+G` opens the same activity modal from the keyboard when no other exclusive modal is active
+        * When an activity entry carries chatter identity, clicking the chatter name in the modal opens the chatter info modal for that user
         * YouTube activity entries are sourced from live-chat event types and should continue to appear even if YouTube uses subscriber/member naming variants such as `newSponsorEvent` or `newSubscriberEvent`
     * Command `/inject <platform> <username> <message>` — injects a fake incoming chat message for dev/testing without a live platform connection (TUI only)
     * Command `/setup-youtube` — opens the YouTube stream setup modal (TUI only); configure chaptering, auto-start marker, sync delay, tags, description, subject, and playlist
@@ -313,6 +320,8 @@ Bootstrap config is stored in `YASH_DATA_DIR/config.json` (default `~/.config/ya
 Mutable settings live in `settings.json`, including `demo`, `chat.*`, `stream.*`, `platforms.youtube.setup`, `platforms.<provider>.showViewers`, and TUI/WebUI display preferences.
 
 `config.json` and `settings.json` are reserved for YASH itself. User scripts own `YASH_DATA_DIR/scripts/<scriptId>/config.jsonc` as their primary persisted surface; do not document normal script settings as part of YASH's top-level settings surface.
+
+Memory telemetry logs, when enabled, are written under `YASH_DATA_DIR/logs/` as daily append-only JSONL files named `memory-telemetry-YYYY-MM-DD.jsonl` rather than one file per startup.
 
 Pre-v1 rule: do not add migration/compatibility behavior for old user-script or app-data layouts unless a task explicitly requires it; format changes may require resetting a script's local `config.jsonc`.
 

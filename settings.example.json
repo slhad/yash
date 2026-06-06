@@ -60,6 +60,7 @@
   },
   "logs": {
     "visible": true,
+    "level": "info",
     "height": 15,
     "tail": 20
   },
@@ -87,6 +88,10 @@
       "greenMaxMb": 500,
       "orangeMinMb": 2048,
       "redMinMb": 5120
+    },
+    "telemetry": {
+      "enabled": false,
+      "intervalMinutes": 15
     }
   },
   "messages": {

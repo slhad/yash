@@ -11,6 +11,9 @@ export enum LogLevel {
   NONE = 4,
 }
 
+export const LOGGER_LEVEL_NAMES = ['debug', 'info', 'warn', 'error', 'none'] as const;
+export type LoggerLevelName = (typeof LOGGER_LEVEL_NAMES)[number];
+
 export interface LoggerOptions {
   level?: LogLevel;
   prefix?: string;
@@ -181,6 +184,44 @@ function fileLog(line: string): void {
 // output in TUI/console contexts; tests create their own Logger instances and
 // control timestamp behavior explicitly.
 export const defaultLogger = new Logger({ level: LogLevel.INFO, prefix: 'YASH', timestamp: false });
+
+function toLoggerLevelName(value: unknown): LoggerLevelName | null {
+  const normalized = String(value ?? '')
+    .trim()
+    .toLowerCase();
+  if ((LOGGER_LEVEL_NAMES as readonly string[]).includes(normalized)) {
+    return normalized as LoggerLevelName;
+  }
+  return null;
+}
+
+export function parseLoggerLevelName(
+  value: unknown,
+  fallback: LoggerLevelName = 'info',
+): LoggerLevelName {
+  return toLoggerLevelName(value) ?? fallback;
+}
+
+export function loggerLevelNameToLevel(levelName: LoggerLevelName): LogLevel {
+  switch (levelName) {
+    case 'debug':
+      return LogLevel.DEBUG;
+    case 'info':
+      return LogLevel.INFO;
+    case 'warn':
+      return LogLevel.WARN;
+    case 'error':
+      return LogLevel.ERROR;
+    case 'none':
+      return LogLevel.NONE;
+  }
+}
+
+export function setDefaultLoggerLevel(value: unknown): LoggerLevelName {
+  const levelName = parseLoggerLevelName(value);
+  defaultLogger.setLevel(loggerLevelNameToLevel(levelName));
+  return levelName;
+}
 
 // Integrate with in-TUI log collector if available. This is a best-effort
 // integration: require the module dynamically so server builds that don't

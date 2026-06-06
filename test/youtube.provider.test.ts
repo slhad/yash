@@ -44,9 +44,23 @@ function makeProvider() {
 
 class FakeChatStream extends EventEmitter {
   cancelled = false;
+  destroyed = false;
 
   cancel() {
     this.cancelled = true;
+  }
+
+  destroy() {
+    this.destroyed = true;
+    return this;
+  }
+}
+
+class FakeLiveChatGrpcClient {
+  closeCount = 0;
+
+  close() {
+    this.closeCount += 1;
   }
 }
 
@@ -368,7 +382,7 @@ describe('YouTubeProvider — chat', () => {
     expect(p.liveChatId).toBeNull();
   });
 
-  test('chat stream reconnects immediately with the next page token after end', async () => {
+  test('chat stream reconnects after a short delay with the next page token after end', async () => {
     const p = makeProvider() as any;
     p.isAuthenticatedFlag = true;
     p.tokenData = {
@@ -399,7 +413,95 @@ describe('YouTubeProvider — chat', () => {
     }
 
     expect(p.chatNextPageToken).toBe('next-page');
-    expect(scheduledDelay).toBe(0);
+    expect(stream.destroyed).toBe(true);
+    expect(scheduledDelay).toBe(2_000);
+    expect(p.chatPollStreamDisposeCount).toBe(1);
+    expect(p.chatPollStreamDisposeCancelCount).toBe(0);
+    expect(p.chatPollStreamDisposeDestroyCount).toBe(1);
+    expect(p.chatPollReconnectScheduleCount).toBe(1);
+    expect(p.chatPollReconnectReplaceTimerCount).toBe(0);
+    expect(p.chatPollReconnectLastDelayMs).toBe(2_000);
+    expect(p.chatPollLastStreamDurationMs).toBeGreaterThanOrEqual(0);
+    expect(p.chatPollMaxStreamDurationMs).toBe(p.chatPollLastStreamDurationMs);
+    expect(p.chatPollTotalStreamDurationMs).toBe(p.chatPollLastStreamDurationMs);
+  });
+
+  test('chat stream reuses the grpc client before reconnecting after end', async () => {
+    const p = makeProvider() as any;
+    p.isAuthenticatedFlag = true;
+    p.tokenData = {
+      accessToken: 'token',
+      refreshToken: 'refresh',
+      expiresIn: 3600,
+      obtainmentTimestamp: Date.now(),
+      channelId: 'chan',
+      channelTitle: 'title',
+    };
+    p.liveChatId = 'chat-live';
+    const stream = new FakeChatStream();
+    const grpcClient = new FakeLiveChatGrpcClient();
+    p.liveChatGrpcClient = grpcClient;
+    p._createChatStreamCall = () => stream;
+
+    const originalSetTimeout = globalThis.setTimeout;
+    let scheduledDelay = -1;
+    (globalThis as any).setTimeout = ((_callback: (...args: any[]) => void, delay?: number) => {
+      scheduledDelay = Number(delay ?? 0);
+      return 1;
+    }) as typeof setTimeout;
+
+    try {
+      await p._doChatPoll();
+      stream.emit('end');
+    } finally {
+      globalThis.setTimeout = originalSetTimeout;
+    }
+
+    expect(grpcClient.closeCount).toBe(0);
+    expect(p.liveChatGrpcClient).toBe(grpcClient);
+    expect(stream.destroyed).toBe(true);
+    expect(scheduledDelay).toBe(2_000);
+    expect(p.liveChatGrpcClientCloseCount).toBe(0);
+    expect(p.chatPollReconnectScheduleCount).toBe(1);
+  });
+
+  test('chat stream reuses the grpc client after non-cancelled errors', async () => {
+    const p = makeProvider() as any;
+    p.isAuthenticatedFlag = true;
+    p.tokenData = {
+      accessToken: 'token',
+      refreshToken: 'refresh',
+      expiresIn: 3600,
+      obtainmentTimestamp: Date.now(),
+      channelId: 'chan',
+      channelTitle: 'title',
+    };
+    p.liveChatId = 'chat-live';
+    const stream = new FakeChatStream();
+    const grpcClient = new FakeLiveChatGrpcClient();
+    p.liveChatGrpcClient = grpcClient;
+    p._createChatStreamCall = () => stream;
+
+    const originalSetTimeout = globalThis.setTimeout;
+    (globalThis as any).setTimeout = ((_callback: (...args: any[]) => void, _delay?: number) =>
+      1) as typeof setTimeout;
+
+    try {
+      await p._doChatPoll();
+      stream.emit('error', {
+        code: GrpcStatus.INTERNAL,
+        details: 'boom',
+      });
+    } finally {
+      globalThis.setTimeout = originalSetTimeout;
+    }
+
+    expect(stream.destroyed).toBe(true);
+    expect(grpcClient.closeCount).toBe(0);
+    expect(p.liveChatGrpcClient).toBe(grpcClient);
+    expect(p.liveChatGrpcClientCloseCount).toBe(0);
+    expect(p.chatPollStreamDisposeCount).toBe(1);
+    expect(p.chatPollStreamDisposeCancelCount).toBe(0);
   });
 
   test('_pollStatus clears chapter markers when broadcast changes and clearMarkersOnNewStream is enabled', async () => {
@@ -788,6 +890,44 @@ describe('YouTubeProvider — chat', () => {
     await p._pollStatus();
 
     expect(started).toBe(1);
+    expect(p.liveChatId).toBe('chat-live');
+    expect(p.getStreamStatus()).toBe(StreamStatus.ONLINE);
+    expect(p.getViewerCount()).toBe(42);
+  });
+
+  test('status poll does not restart chat while a reconnect timer is already pending', async () => {
+    const p = makeProvider() as any;
+    p.isAuthenticatedFlag = true;
+    p.tokenData = {
+      accessToken: 'token',
+      refreshToken: 'refresh',
+      expiresIn: 3600,
+      obtainmentTimestamp: Date.now(),
+      channelId: 'chan',
+      channelTitle: 'title',
+    };
+    p.broadcastId = 'broadcast-1';
+    p.liveChatId = 'chat-live';
+    p.chatStream = null;
+    p.chatPollTimer = 12345;
+    p._findActiveBroadcast = async () => ({ id: 'broadcast-1', liveChatId: 'chat-live' });
+    p._request = async () =>
+      new Response(
+        JSON.stringify({ items: [{ liveStreamingDetails: { concurrentViewers: '42' } }] }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      );
+
+    let started = 0;
+    p._startChatPoll = () => {
+      started += 1;
+    };
+
+    await p._pollStatus();
+
+    expect(started).toBe(0);
     expect(p.liveChatId).toBe('chat-live');
     expect(p.getStreamStatus()).toBe(StreamStatus.ONLINE);
     expect(p.getViewerCount()).toBe(42);
@@ -2319,6 +2459,7 @@ describe('YouTubeProvider — playlists', () => {
 function makeItem(
   messageType: string,
   overrides: {
+    authorChannelId?: unknown;
     displayMessage?: unknown;
     displayName?: unknown;
     snippet?: Record<string, unknown>;
@@ -2333,7 +2474,7 @@ function makeItem(
       ...(overrides.snippet ?? {}),
     },
     authorDetails: {
-      channelId: 'channel_123',
+      channelId: overrides.authorChannelId ?? 'channel_123',
       displayName: overrides.displayName ?? 'TestUser',
     },
   };
@@ -2388,11 +2529,14 @@ describe('YouTubeProvider — onActivityEvent', () => {
 describe('YouTubeProvider — _dispatchStreamItems activity events', () => {
   test('superChatEvent dispatches superchat activity', () => {
     const p = makeProvider() as any;
-    const events: { type: string; message: string }[] = [];
-    p.onActivityEvent((ev: { type: string; message: string }) => events.push(ev));
+    const events: { type: string; message: string; userId?: string; username?: string }[] = [];
+    p.onActivityEvent((ev: { type: string; message: string; userId?: string; username?: string }) =>
+      events.push(ev),
+    );
 
     const item = makeItem('superChatEvent', {
       displayName: 'SuperChatter',
+      authorChannelId: 'yt-super-1',
       snippet: { superChatDetails: { amountDisplayString: '€10.00' } },
     });
     p._dispatchStreamItems([item], true);
@@ -2401,15 +2545,20 @@ describe('YouTubeProvider — _dispatchStreamItems activity events', () => {
     expect(events[0]?.type).toBe('superchat');
     expect(events[0]?.message).toContain('SuperChatter');
     expect(events[0]?.message).toContain('€10.00');
+    expect(events[0]?.userId).toBe('yt-super-1');
+    expect(events[0]?.username).toBe('SuperChatter');
   });
 
   test('newSponsorEvent dispatches member activity', () => {
     const p = makeProvider() as any;
-    const events: { type: string; message: string }[] = [];
-    p.onActivityEvent((ev: { type: string; message: string }) => events.push(ev));
+    const events: { type: string; message: string; userId?: string; username?: string }[] = [];
+    p.onActivityEvent((ev: { type: string; message: string; userId?: string; username?: string }) =>
+      events.push(ev),
+    );
 
     const item = makeItem('newSponsorEvent', {
       displayName: 'NewMember',
+      authorChannelId: 'yt-member-1',
       snippet: { newSponsorDetails: { memberLevelName: 'Gold' } },
     });
     p._dispatchStreamItems([item], true);
@@ -2418,6 +2567,8 @@ describe('YouTubeProvider — _dispatchStreamItems activity events', () => {
     expect(events[0]?.type).toBe('member');
     expect(events[0]?.message).toContain('NewMember');
     expect(events[0]?.message).toContain('Gold');
+    expect(events[0]?.userId).toBe('yt-member-1');
+    expect(events[0]?.username).toBe('NewMember');
   });
 
   test('subscriber-like aliases dispatch member activity', () => {

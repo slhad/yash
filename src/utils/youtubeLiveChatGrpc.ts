@@ -1,5 +1,7 @@
 import { Buffer } from 'node:buffer';
 
+const utf8Decoder = new TextDecoder();
+
 export interface YouTubeLiveChatGrpcRequest {
   part: string[];
   liveChatId: string;
@@ -89,7 +91,7 @@ function decodeLengthDelimited(
 
 function decodeString(buffer: Uint8Array, offset: number): { value: string; offset: number } {
   const decoded = decodeLengthDelimited(buffer, offset);
-  return { value: Buffer.from(decoded.value).toString('utf8'), offset: decoded.offset };
+  return { value: utf8Decoder.decode(decoded.value), offset: decoded.offset };
 }
 
 function skipField(buffer: Uint8Array, offset: number, wireType: number): number {

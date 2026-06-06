@@ -4,12 +4,19 @@ export const DEFAULT_MEMORY_STATUS_VISIBLE = false;
 export const DEFAULT_MEMORY_STATUS_GREEN_MAX_MB = 500;
 export const DEFAULT_MEMORY_STATUS_ORANGE_MIN_MB = 2048;
 export const DEFAULT_MEMORY_STATUS_RED_MIN_MB = 5120;
+export const DEFAULT_MEMORY_TELEMETRY_ENABLED = false;
+export const DEFAULT_MEMORY_TELEMETRY_INTERVAL_MINUTES = 15;
 
 export interface MemoryStatusSettings {
   visible: boolean;
   greenMaxMb: number;
   orangeMinMb: number;
   redMinMb: number;
+}
+
+export interface MemoryTelemetrySettings {
+  enabled: boolean;
+  intervalMinutes: number;
 }
 
 export interface MemoryStatusDisplay {
@@ -59,6 +66,19 @@ export function readMemoryStatusSettings(
   };
 }
 
+export function readMemoryTelemetrySettings(
+  getter: (key: string, defaultValue: unknown) => unknown,
+): MemoryTelemetrySettings {
+  return {
+    enabled:
+      String(getter('memory.telemetry.enabled', DEFAULT_MEMORY_TELEMETRY_ENABLED)) === 'true',
+    intervalMinutes: normalizePositiveInt(
+      getter('memory.telemetry.intervalMinutes', DEFAULT_MEMORY_TELEMETRY_INTERVAL_MINUTES),
+      DEFAULT_MEMORY_TELEMETRY_INTERVAL_MINUTES,
+    ),
+  };
+}
+
 export function formatMemoryStatusDisplay(
   rssBytes: number,
   settings: MemoryStatusSettings,
@@ -103,6 +123,11 @@ function formatWindowGrowth(value: { bytes: number; windowMs: number } | null | 
   return `${formatSignedBytes(value.bytes)} over ${Math.round(value.windowMs / 60000)}m`;
 }
 
+function formatRatio(value: number | null | undefined): string {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 'n/a';
+  return `${(value * 100).toFixed(1)}%`;
+}
+
 function describeLevel(level: MemoryStatusDisplay['level']): string {
   switch (level) {
     case 'green':
@@ -122,9 +147,14 @@ export function buildMemoryInsightSummary(
 ): MemoryInsightSummary {
   const status = formatMemoryStatusDisplay(snapshot.memory.rssBytes, settings);
   const statusText = `${describeLevel(status.level)} pressure`;
+  const rssTelemetry = snapshot.rssTelemetry;
   const lines: MemoryInsightLine[] = [
     {
       text: `Current RSS: ${formatBytes(snapshot.memory.rssBytes)}  |  thresholds green <= ${settings.greenMaxMb} MB, orange >= ${settings.orangeMinMb} MB, red >= ${settings.redMinMb} MB`,
+      tone: 'default',
+    },
+    {
+      text: `RSS focus: native gap ${formatBytes(rssTelemetry.estimatedNativeBytes)}  |  tracked JS/native ${formatBytes(rssTelemetry.trackedBytes)}  |  tracked ratio ${formatRatio(rssTelemetry.trackedRatio)}`,
       tone: 'default',
     },
     {
@@ -140,7 +170,19 @@ export function buildMemoryInsightSummary(
       tone: 'muted',
     },
     {
+      text: `RSS windows: 15m min/max ${formatBytes(rssTelemetry.windows['15m']?.minBytes ?? Number.NaN)} / ${formatBytes(rssTelemetry.windows['15m']?.maxBytes ?? Number.NaN)}  |  30m ${formatWindowGrowth(snapshot.growth.rss['30m'])}  |  60m ${formatWindowGrowth(snapshot.growth.rss['60m'])}`,
+      tone: 'muted',
+    },
+    {
+      text: `RSS trend: since start ${formatSignedBytes(rssTelemetry.sinceStartBytes)}  |  sample-to-sample ${formatSignedBytes(rssTelemetry.lastDeltaBytes)}  |  peak ${formatBytes(rssTelemetry.peakBytes)}`,
+      tone: 'muted',
+    },
+    {
       text: `Heap growth: 1m ${formatWindowGrowth(snapshot.growth.heapUsed['1m'])}  |  5m ${formatWindowGrowth(snapshot.growth.heapUsed['5m'])}  |  15m ${formatWindowGrowth(snapshot.growth.heapUsed['15m'])}`,
+      tone: 'muted',
+    },
+    {
+      text: 'Legend: RSS = total resident process memory, heap = JS-managed memory, external = JS-tracked native memory, ArrayBuffers = binary buffers, native gap = RSS not explained by heap/external.',
       tone: 'muted',
     },
     {

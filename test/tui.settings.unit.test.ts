@@ -16,6 +16,8 @@ describe('validateTuiSettingsDraft', () => {
       memoryStatusGreenMaxMb: '500',
       memoryStatusOrangeMinMb: '2048',
       memoryStatusRedMinMb: '5120',
+      memoryTelemetryEnabled: true,
+      memoryTelemetryIntervalMinutes: '30',
       messagesPosition: 'top',
       chatTimestampsVisible: true,
       tuiEmotesScale: '150',
@@ -24,6 +26,7 @@ describe('validateTuiSettingsDraft', () => {
       eventsTail: '30',
       eventsWidth: '35%',
       logsVisible: true,
+      logsLevel: 'debug',
       logsHeight: '18',
       logsTail: '40',
       youtubeShowViewers: true,
@@ -48,6 +51,8 @@ describe('validateTuiSettingsDraft', () => {
       memoryStatusGreenMaxMb: 500,
       memoryStatusOrangeMinMb: 2048,
       memoryStatusRedMinMb: 5120,
+      memoryTelemetryEnabled: true,
+      memoryTelemetryIntervalMinutes: 30,
       messagesPosition: 'top',
       chatTimestampsVisible: true,
       tuiEmotesScale: 150,
@@ -56,6 +61,7 @@ describe('validateTuiSettingsDraft', () => {
       eventsTail: 30,
       eventsWidth: '35%',
       logsVisible: true,
+      logsLevel: 'debug',
       logsHeight: 18,
       logsTail: 40,
       youtubeShowViewers: true,
@@ -81,6 +87,8 @@ describe('validateTuiSettingsDraft', () => {
       memoryStatusGreenMaxMb: '3000',
       memoryStatusOrangeMinMb: '2000',
       memoryStatusRedMinMb: '1500',
+      memoryTelemetryEnabled: false,
+      memoryTelemetryIntervalMinutes: '0',
       messagesPosition: 'middle',
       chatTimestampsVisible: false,
       tuiEmotesScale: '0',
@@ -89,6 +97,7 @@ describe('validateTuiSettingsDraft', () => {
       eventsTail: '-2',
       eventsWidth: '80%',
       logsVisible: true,
+      logsLevel: 'trace',
       logsHeight: 'abc',
       logsTail: '0',
       youtubeShowViewers: true,
@@ -112,6 +121,7 @@ describe('validateTuiSettingsDraft', () => {
     expect(result.errors).toContain('events.tail must be a positive integer.');
     expect(result.errors).toContain('logs.height must be a positive integer.');
     expect(result.errors).toContain('logs.tail must be a positive integer.');
+    expect(result.errors).toContain('logs.level must be one of: debug, info, warn, error, none');
     expect(result.errors).toContain('viewers.mode must be one of: per-platform, cumulative, both');
     expect(result.errors).toContain('messages.position must be one of: top, bottom, hide');
     expect(result.errors).toContain('events.width must be one of: 25%, 30%, 35%, 40%, 45%, 50%');
@@ -123,6 +133,7 @@ describe('validateTuiSettingsDraft', () => {
     expect(result.errors).toContain(
       'memory.status.orangeMinMb must be lower than memory.status.redMinMb.',
     );
+    expect(result.errors).toContain('memory.telemetry.intervalMinutes must be a positive integer.');
   });
 
   test('rejects activityTimeout: negative integer', () => {
@@ -288,6 +299,8 @@ describe('buildTuiSettingsEntries', () => {
       memoryStatusGreenMaxMb: 500,
       memoryStatusOrangeMinMb: 2048,
       memoryStatusRedMinMb: 5120,
+      memoryTelemetryEnabled: true,
+      memoryTelemetryIntervalMinutes: 15,
       messagesPosition: 'bottom',
       chatTimestampsVisible: true,
       tuiEmotesScale: 125,
@@ -296,6 +309,7 @@ describe('buildTuiSettingsEntries', () => {
       eventsTail: 15,
       eventsWidth: '30%',
       logsVisible: true,
+      logsLevel: 'warn',
       logsHeight: 15,
       logsTail: 20,
       youtubeShowViewers: true,
@@ -315,12 +329,15 @@ describe('buildTuiSettingsEntries', () => {
     expect(entries).toContainEqual({ key: 'memory.status.greenMaxMb', value: 500 });
     expect(entries).toContainEqual({ key: 'memory.status.orangeMinMb', value: 2048 });
     expect(entries).toContainEqual({ key: 'memory.status.redMinMb', value: 5120 });
+    expect(entries).toContainEqual({ key: 'memory.telemetry.enabled', value: true });
+    expect(entries).toContainEqual({ key: 'memory.telemetry.intervalMinutes', value: 15 });
+    expect(entries).toContainEqual({ key: 'logs.level', value: 'warn' });
     expect(entries).toContainEqual({ key: 'tui.emotes.scale', value: 125 });
     expect(entries).toContainEqual({ key: 'logs.tail', value: 20 });
     expect(entries).toContainEqual({ key: 'platforms.kick.showViewers', value: false });
     expect(entries).toContainEqual({ key: 'activity.visible', value: true });
     expect(entries).toContainEqual({ key: 'activity.mode', value: 'permanent' });
     expect(entries).toContainEqual({ key: 'activity.timeout', value: 10 });
-    expect(entries).toHaveLength(28);
+    expect(entries).toHaveLength(31);
   });
 });

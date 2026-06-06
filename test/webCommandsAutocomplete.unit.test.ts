@@ -18,6 +18,7 @@ const ALL_SETTINGS_KEYS = [
   'stream.description',
   'title.visible',
   'logs.visible',
+  'logs.level',
   'logs.height',
   'logs.tail',
   'viewers.visible',
@@ -30,6 +31,8 @@ const ALL_SETTINGS_KEYS = [
   'memory.status.greenMaxMb',
   'memory.status.orangeMinMb',
   'memory.status.redMinMb',
+  'memory.telemetry.enabled',
+  'memory.telemetry.intervalMinutes',
   'messages.position',
   'chat.timestamps.visible',
   'tui.emotes.scale',
@@ -182,9 +185,15 @@ describe('getWebAutocomplete — /settings', () => {
     expect(getWebAutocomplete('/settings get tui')).toBe('tui.emotes.scale');
   });
 
-  test('/settings get memory → only memory status keys', () => {
+  test('/settings get memory → only memory keys', () => {
     expect(getWebAutocomplete('/settings get memory')).toBe(
-      'memory.status.visible  memory.status.greenMaxMb  memory.status.orangeMinMb  memory.status.redMinMb',
+      'memory.status.visible  memory.status.greenMaxMb  memory.status.orangeMinMb  memory.status.redMinMb  memory.telemetry.enabled  memory.telemetry.intervalMinutes',
+    );
+  });
+
+  test('/settings get logs → only log keys', () => {
+    expect(getWebAutocomplete('/settings get logs')).toBe(
+      'logs.visible  logs.level  logs.height  logs.tail',
     );
   });
 
@@ -206,9 +215,15 @@ describe('getWebAutocomplete — /settings', () => {
     expect(getWebAutocomplete('/settings set tui')).toBe('tui.emotes.scale');
   });
 
-  test('/settings set memory → only memory status keys', () => {
+  test('/settings set memory → only memory keys', () => {
     expect(getWebAutocomplete('/settings set memory')).toBe(
-      'memory.status.visible  memory.status.greenMaxMb  memory.status.orangeMinMb  memory.status.redMinMb',
+      'memory.status.visible  memory.status.greenMaxMb  memory.status.orangeMinMb  memory.status.redMinMb  memory.telemetry.enabled  memory.telemetry.intervalMinutes',
+    );
+  });
+
+  test('/settings set logs → only log keys', () => {
+    expect(getWebAutocomplete('/settings set logs')).toBe(
+      'logs.visible  logs.level  logs.height  logs.tail',
     );
   });
 
@@ -236,8 +251,12 @@ describe('getWebAutocomplete — /help', () => {
 });
 
 describe('getWebAutocomplete — /memory', () => {
-  test('/memory  (trailing space) → null', () => {
-    expect(getWebAutocomplete('/memory ')).toBeNull();
+  test('/memory  (trailing space) → modal | snapshot', () => {
+    expect(getWebAutocomplete('/memory ')).toBe('modal | snapshot');
+  });
+
+  test('/memory s → snapshot', () => {
+    expect(getWebAutocomplete('/memory s')).toBe('snapshot');
   });
 });
 

@@ -55,7 +55,13 @@ Both forms are accepted — `bun run cmd marker` and `bun run cmd /marker` are e
 
 Commands invoked over IPC are also echoed into the live TUI chat pane before their output, using an `[ipc → cmd] /...` line. The same command echo exists for typed slash commands inside the TUI as `[you → cmd] /...`.
 
+`/settings` and the TUI settings modal can also change `logs.level` (`debug`, `info`, `warn`, `error`, or `none`) at runtime, so you can raise logging for live debugging without restarting YASH.
+
 `/memory` prints a live process snapshot from inside YASH itself: RSS, heap/external usage, recent growth windows, and retention probe counts for major long-lived buffers/caches. The same data is also available over HTTP at `GET /api/runtime/status`, while `/api/metrics` and `/metrics` expose the numeric gauges for scraping. For TUI leak triage, the payload includes refresh-loop counters such as `updateUiLoopRefreshCount`, `updateLoopEnabled`, and `updateLoopSkippedRefreshCount` so you can confirm whether the periodic 2s loop is actually rebuilding the UI or idling.
+
+The memory modal and `/api/runtime/status` also expose RSS-focused telemetry for cases where resident memory rises while JS heap stays flat: estimated native gap (`RSS - heapUsed - external`), since-start growth, sample-to-sample delta, peak/floor RSS, and rolling 15m/30m/60m windows.
+
+If `memory.telemetry.enabled` is turned on, YASH appends periodic JSONL memory snapshots under `YASH_DATA_DIR/logs/memory-telemetry-YYYY-MM-DD.jsonl`. The cadence is controlled by `memory.telemetry.intervalMinutes` (default `15`), and the file is daily/appended rather than one file per startup.
 
 Inside the live TUI, `/memory modal` opens the same memory status overlay as clicking the `MEM:` status-bar segment. That subcommand is TUI-only and is rejected over IPC and the WebUI command box.
 
