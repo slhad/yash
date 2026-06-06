@@ -34,11 +34,17 @@ export class MessageLog {
       timestamp INTEGER NOT NULL,
       color TEXT,
       badges TEXT,
+      profile_image_url TEXT,
       stream_id TEXT
     )`);
     // Migrate existing DBs that predate stream_id
     try {
       db.exec('ALTER TABLE messages ADD COLUMN stream_id TEXT');
+    } catch {
+      // Column already exists — ignore
+    }
+    try {
+      db.exec('ALTER TABLE messages ADD COLUMN profile_image_url TEXT');
     } catch {
       // Column already exists — ignore
     }
@@ -60,8 +66,8 @@ export class MessageLog {
     this.ensureActiveDatabase();
     // ignore if already exists (idempotent)
     this.db
-      .prepare(`INSERT OR IGNORE INTO messages (id, platform, user_id, username, message, timestamp, color, badges, stream_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .prepare(`INSERT OR IGNORE INTO messages (id, platform, user_id, username, message, timestamp, color, badges, profile_image_url, stream_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(
         msg.id,
         msg.platform,
@@ -71,6 +77,7 @@ export class MessageLog {
         msg.timestamp,
         msg.color ?? null,
         msg.badges ? JSON.stringify(msg.badges) : null,
+        msg.profileImageUrl ?? null,
         msg.streamId ?? null,
       );
   }
@@ -188,6 +195,7 @@ export class MessageLog {
       timestamp: row.timestamp as number,
       color: row.color as string | undefined,
       badges: row.badges ? (JSON.parse(row.badges as string) as Record<string, string>) : undefined,
+      profileImageUrl: (row.profile_image_url as string | null) ?? undefined,
       streamId: (row.stream_id as string | null) ?? undefined,
     };
   }

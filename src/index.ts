@@ -24,6 +24,7 @@ import {
 } from './services';
 import { messageLog } from './services/message-log';
 import './actions/markers';
+import { enrichChatMessagesForDisplay } from './utils/chatDisplayProfiles';
 import {
   buildChatHistoryMessages,
   getChatHistoryLimit,
@@ -310,7 +311,7 @@ Bun.serve({
       },
     },
     '/api/chat/history': {
-      GET: () => {
+      GET: async () => {
         const streamIds = getChatHistoryStreamIds({
           youtubeBroadcastId: youtube.getChannelInfo().broadcastId,
           twitchStreamStartTime: twitch.getStreamStartTime(),
@@ -332,8 +333,22 @@ Bun.serve({
                 maxHistory,
               )
             : chatService.getMessageHistory();
+        const displayHistory = await enrichChatMessagesForDisplay(history, {
+          youtube:
+            typeof youtube.fetchChatterInfo === 'function'
+              ? youtube.fetchChatterInfo.bind(youtube)
+              : undefined,
+          twitch:
+            typeof twitch.fetchChatterInfo === 'function'
+              ? twitch.fetchChatterInfo.bind(twitch)
+              : undefined,
+          kick:
+            typeof kick.fetchChatterInfo === 'function'
+              ? kick.fetchChatterInfo.bind(kick)
+              : undefined,
+        });
 
-        return new Response(JSON.stringify(history), {
+        return new Response(JSON.stringify(displayHistory), {
           headers: { 'Content-Type': 'application/json' },
         });
       },

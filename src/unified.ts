@@ -20,8 +20,11 @@ function formatElapsed(isoStart: string): string {
 type ChatMessage = {
   id: string;
   platform: string;
+  userId: string;
   username: string;
   message: string;
+  badges?: Record<string, string>;
+  profileImageUrl?: string | null;
 };
 
 type StatusInfo = {
@@ -48,6 +51,7 @@ const statusPlatformsEl = byId<HTMLSpanElement>('status-platforms');
 const inputHistory: string[] = [];
 let historyIdx = -1;
 const knownIds = new Set<string>();
+const renderedMessages = new Map<string, HTMLDivElement>();
 let isAtBottom = true;
 let ffzEmotes: Record<string, FfzEmoteDefinition> = {};
 
@@ -104,6 +108,58 @@ function createMessageText(message: string, platform: string): HTMLSpanElement {
   return text;
 }
 
+function createBadgeList(badges: Record<string, string> | undefined): HTMLSpanElement | null {
+  if (!badges || Object.keys(badges).length === 0) return null;
+  const wrap = document.createElement('span');
+  wrap.className = 'badge-list';
+  for (const [name, value] of Object.entries(badges)) {
+    const badge = document.createElement('span');
+    badge.className = 'chat-badge';
+    badge.textContent = value && value !== '1' ? `${name}:${value}` : name;
+    badge.title = value ? `${name} (${value})` : name;
+    wrap.appendChild(badge);
+  }
+  return wrap;
+}
+
+function syncRenderedMessage(div: HTMLDivElement, msg: ChatMessage): void {
+  const existingAvatar = div.querySelector<HTMLImageElement>('.chat-avatar');
+  if (msg.profileImageUrl) {
+    if (existingAvatar) {
+      if (existingAvatar.src !== msg.profileImageUrl) existingAvatar.src = msg.profileImageUrl;
+      existingAvatar.alt = `${msg.username} avatar`;
+    } else {
+      const avatar = document.createElement('img');
+      avatar.className = 'chat-avatar';
+      avatar.src = msg.profileImageUrl;
+      avatar.alt = `${msg.username} avatar`;
+      avatar.loading = 'lazy';
+      avatar.decoding = 'async';
+      const platformTagEl = div.querySelector('.platform-tag');
+      if (platformTagEl) {
+        platformTagEl.insertAdjacentElement('afterend', avatar);
+      } else {
+        div.prepend(avatar);
+      }
+    }
+  }
+
+  const existingBadges = div.querySelector('.badge-list');
+  const badges = createBadgeList(msg.badges);
+  if (badges) {
+    if (existingBadges) {
+      existingBadges.replaceWith(badges);
+    } else {
+      const username = div.querySelector('.username');
+      if (username) {
+        username.insertAdjacentElement('beforebegin', badges);
+      } else {
+        div.appendChild(badges);
+      }
+    }
+  }
+}
+
 function rerenderTwitchMessages(): void {
   for (const text of messagesEl.querySelectorAll<HTMLSpanElement>(
     '.msg[data-platform="twitch"] .text',
@@ -119,9 +175,23 @@ function renderMessage(msg: ChatMessage): HTMLDivElement {
   div.dataset.platform = msg.platform;
   div.innerHTML = platformTag(msg.platform);
 
+  if (msg.profileImageUrl) {
+    const avatar = document.createElement('img');
+    avatar.className = 'chat-avatar';
+    avatar.src = msg.profileImageUrl;
+    avatar.alt = `${msg.username} avatar`;
+    avatar.loading = 'lazy';
+    avatar.decoding = 'async';
+    div.appendChild(avatar);
+  }
+
   const username = document.createElement('span');
   username.className = 'username';
   username.textContent = `${msg.username}:`;
+  const badges = createBadgeList(msg.badges);
+  if (badges) {
+    div.appendChild(badges);
+  }
   div.appendChild(username);
   div.appendChild(createMessageText(msg.message, msg.platform));
   return div;
@@ -130,9 +200,15 @@ function renderMessage(msg: ChatMessage): HTMLDivElement {
 function appendMessages(msgs: ChatMessage[]): void {
   let added = false;
   for (const msg of msgs) {
-    if (knownIds.has(msg.id)) continue;
+    if (knownIds.has(msg.id)) {
+      const existing = renderedMessages.get(msg.id);
+      if (existing) syncRenderedMessage(existing, msg);
+      continue;
+    }
     knownIds.add(msg.id);
-    messagesEl.appendChild(renderMessage(msg));
+    const rendered = renderMessage(msg);
+    renderedMessages.set(msg.id, rendered);
+    messagesEl.appendChild(rendered);
     added = true;
   }
   if (added && isAtBottom) {

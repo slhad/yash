@@ -6120,7 +6120,11 @@ function openChatterInfoModal(msg: ChatMessage): void {
     }
 
     if (info.badges && Object.keys(info.badges).length > 0) {
-      rows.push(['Badges:', Object.keys(info.badges).join(', '), 'white']);
+      rows.push(['Badges:', formatBadgeLabels(info.badges).join(', '), 'white']);
+    }
+
+    if (info.profileImageUrl) {
+      rows.push(['Avatar:', info.profileImageUrl, '#7dd3fc']);
     }
 
     if (info.subscriberCount !== null && info.subscriberCount !== undefined) {
@@ -6209,6 +6213,9 @@ function openChatterInfoModal(msg: ChatMessage): void {
   function makeMessageRow(m: ChatMessage): BoxRenderable {
     const row = new BoxRenderable(renderer, { flexDirection: 'row' });
     row.add(new TextRenderable(renderer, { content: fmtTimestamp(m.timestamp), fg: '#888888' }));
+    for (const badge of formatBadgeLabels(m.badges)) {
+      row.add(new TextRenderable(renderer, { content: `[${badge}] `, fg: '#94a3b8' }));
+    }
     for (const part of buildTuiFfzMessageParts(
       m.platform,
       m.message,
@@ -6234,6 +6241,9 @@ function openChatterInfoModal(msg: ChatMessage): void {
     row.add(new TextRenderable(renderer, { content: fmtTimestamp(m.timestamp), fg: '#888888' }));
     if (isTargetUser) {
       row.add(new TextRenderable(renderer, { content: '★ ', fg: 'cyan' }));
+      for (const badge of formatBadgeLabels(m.badges)) {
+        row.add(new TextRenderable(renderer, { content: `[${badge}] `, fg: '#94a3b8' }));
+      }
       row.add(
         new TextRenderable(renderer, {
           content: `${m.username}: `,
@@ -6254,6 +6264,9 @@ function openChatterInfoModal(msg: ChatMessage): void {
       row.add(
         new TextRenderable(renderer, { content: `[${m.platform}] `, fg: platColor(m.platform) }),
       );
+      for (const badge of formatBadgeLabels(m.badges)) {
+        row.add(new TextRenderable(renderer, { content: `[${badge}] `, fg: '#94a3b8' }));
+      }
       row.add(new TextRenderable(renderer, { content: `${m.username}: `, fg: '#888888' }));
       for (const part of buildTuiFfzMessageParts(
         m.platform,
@@ -7529,6 +7542,10 @@ function transformMessage(msg: ChatMessage): ChatLine {
 
   const parts: ChatLinePart[] = [];
   parts.push({ content: `[${msg.platform}]${tsStr} `, fg: platColor });
+  for (const badge of formatBadgeLabels(msg.badges)) {
+    parts.push({ content: `[${badge}]`, fg: '#94a3b8' });
+    parts.push({ content: ' ', fg: 'white' });
+  }
   parts.push({ content: `${msg.username}: `, fg: userColor });
   parts.push(
     ...buildTuiFfzMessageParts(
@@ -7604,6 +7621,13 @@ function renderChatLine(renderer: CliRenderer, msg: ChatLine): TextRenderable | 
     return row;
   }
   return new TextRenderable(renderer, { content: msg.content, fg: msg.fg });
+}
+
+function formatBadgeLabels(badges?: Record<string, string>): string[] {
+  if (!badges) return [];
+  return Object.entries(badges).map(([name, value]) =>
+    value && value !== '1' ? `${name}:${value}` : name,
+  );
 }
 
 function renderHighlightedChatLine(

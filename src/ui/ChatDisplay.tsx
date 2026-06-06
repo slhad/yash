@@ -9,6 +9,8 @@ interface ChatDisplayProps {
     username: string;
     message: string;
     timestamp: number;
+    badges?: Record<string, string>;
+    profileImageUrl?: string | null;
   }>;
   ffzEmotes?: Record<string, FfzEmoteDefinition>;
   showTimestamps?: boolean;
@@ -69,6 +71,28 @@ export const ChatDisplay: React.FC<ChatDisplayProps> = ({
     });
   };
 
+  const renderBadges = (badges?: Record<string, string>) => {
+    if (!badges || Object.keys(badges).length === 0) return null;
+    return Object.entries(badges).map(([name, value]) => (
+      <span
+        key={`${name}:${value}`}
+        title={value ? `${name} (${value})` : name}
+        style={{
+          display: 'inline-block',
+          marginRight: '4px',
+          padding: '1px 6px',
+          borderRadius: '999px',
+          backgroundColor: '#2d3748',
+          color: '#cbd5e1',
+          fontSize: '11px',
+          lineHeight: 1.5,
+        }}
+      >
+        {value && value !== '1' ? `${name}:${value}` : name}
+      </span>
+    ));
+  };
+
   return (
     <div
       style={{
@@ -84,14 +108,45 @@ export const ChatDisplay: React.FC<ChatDisplayProps> = ({
           <span style={{ color: '#6b7280' }}>No messages yet...</span>
         ) : (
           messages.map((msg) => (
-            <div key={msg.id}>
-              <span>
+            <div
+              key={msg.id}
+              style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', marginBottom: '6px' }}
+            >
+              {msg.profileImageUrl ? (
+                <img
+                  src={msg.profileImageUrl}
+                  alt={`${msg.username} avatar`}
+                  loading="lazy"
+                  decoding="async"
+                  style={{
+                    width: '28px',
+                    height: '28px',
+                    borderRadius: '999px',
+                    objectFit: 'cover',
+                    backgroundColor: '#0f172a',
+                    flexShrink: 0,
+                  }}
+                />
+              ) : (
+                <span
+                  aria-hidden="true"
+                  style={{
+                    width: '28px',
+                    height: '28px',
+                    borderRadius: '999px',
+                    backgroundColor: '#273449',
+                    flexShrink: 0,
+                  }}
+                />
+              )}
+              <span style={{ minWidth: 0 }}>
                 {showTimestamps && (
                   <span style={{ color: '#6b7280' }}>[{formatTime(msg.timestamp)}] </span>
                 )}
                 <span style={{ color: getPlatformColor(msg.platform), fontWeight: 'bold' }}>
                   [{msg.platform}]
                 </span>{' '}
+                {renderBadges(msg.badges)}
                 <span style={{ color: '#06b6d4' }}>{msg.username}:</span>{' '}
                 {renderMessage(msg.platform, msg.message)}
               </span>

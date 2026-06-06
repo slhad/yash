@@ -23,6 +23,8 @@ interface DashboardProps {
       username: string;
       message: string;
       timestamp: number;
+      badges?: Record<string, string>;
+      profileImageUrl?: string | null;
     }>
   >;
 }
@@ -98,6 +100,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
       username: string;
       message: string;
       timestamp: number;
+      badges?: Record<string, string>;
+      profileImageUrl?: string | null;
     }>
   >([]);
   const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>([]);

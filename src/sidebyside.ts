@@ -13,8 +13,11 @@ type Platform = 'youtube' | 'twitch' | 'kick';
 type ChatMessage = {
   id: string;
   platform: Platform;
+  userId: string;
   username: string;
   message: string;
+  badges?: Record<string, string>;
+  profileImageUrl?: string | null;
 };
 
 const PLATFORMS: Platform[] = ['youtube', 'twitch', 'kick'];
@@ -37,6 +40,11 @@ const knownIds: Record<Platform, Set<string>> = {
   youtube: new Set<string>(),
   twitch: new Set<string>(),
   kick: new Set<string>(),
+};
+const renderedMessages: Record<Platform, Map<string, HTMLDivElement>> = {
+  youtube: new Map<string, HTMLDivElement>(),
+  twitch: new Map<string, HTMLDivElement>(),
+  kick: new Map<string, HTMLDivElement>(),
 };
 const atBottom: Record<Platform, boolean> = {
   youtube: true,
@@ -71,6 +79,53 @@ function createMessageText(message: string, platform: Platform): HTMLSpanElement
     text.textContent = message;
   }
   return text;
+}
+
+function createBadgeList(badges: Record<string, string> | undefined): HTMLSpanElement | null {
+  if (!badges || Object.keys(badges).length === 0) return null;
+  const wrap = document.createElement('span');
+  wrap.className = 'badge-list';
+  for (const [name, value] of Object.entries(badges)) {
+    const badge = document.createElement('span');
+    badge.className = 'chat-badge';
+    badge.textContent = value && value !== '1' ? `${name}:${value}` : name;
+    badge.title = value ? `${name} (${value})` : name;
+    wrap.appendChild(badge);
+  }
+  return wrap;
+}
+
+function syncRenderedMessage(div: HTMLDivElement, msg: ChatMessage): void {
+  const existingAvatar = div.querySelector<HTMLImageElement>('.chat-avatar');
+  if (msg.profileImageUrl) {
+    if (existingAvatar) {
+      if (existingAvatar.src !== msg.profileImageUrl) existingAvatar.src = msg.profileImageUrl;
+      existingAvatar.alt = `${msg.username} avatar`;
+    } else {
+      const avatar = document.createElement('img');
+      avatar.className = 'chat-avatar';
+      avatar.src = msg.profileImageUrl;
+      avatar.alt = `${msg.username} avatar`;
+      avatar.loading = 'lazy';
+      avatar.decoding = 'async';
+      div.prepend(avatar);
+    }
+  }
+
+  const existingBadges = div.querySelector('.badge-list');
+  const badges = createBadgeList(msg.badges);
+  if (badges) {
+    if (existingBadges) {
+      existingBadges.replaceWith(badges);
+    } else {
+      const username = div.querySelector('.username');
+      if (username) {
+        username.insertAdjacentElement('beforebegin', badges);
+      } else {
+        div.appendChild(badges);
+      }
+    }
+  }
 }
 
 function rerenderTwitchMessages(): void {
@@ -116,16 +171,34 @@ function appendMessages(msgs: ChatMessage[]): void {
     let added = false;
     for (const msg of msgs) {
       if (msg.platform !== platform) continue;
-      if (knownIds[platform].has(msg.id)) continue;
+      if (knownIds[platform].has(msg.id)) {
+        const existing = renderedMessages[platform].get(msg.id);
+        if (existing) syncRenderedMessage(existing, msg);
+        continue;
+      }
       knownIds[platform].add(msg.id);
       const div = document.createElement('div');
       div.className = 'msg';
       div.dataset.platform = msg.platform;
+      if (msg.profileImageUrl) {
+        const avatar = document.createElement('img');
+        avatar.className = 'chat-avatar';
+        avatar.src = msg.profileImageUrl;
+        avatar.alt = `${msg.username} avatar`;
+        avatar.loading = 'lazy';
+        avatar.decoding = 'async';
+        div.appendChild(avatar);
+      }
+      const badges = createBadgeList(msg.badges);
+      if (badges) {
+        div.appendChild(badges);
+      }
       const username = document.createElement('span');
       username.className = 'username';
       username.textContent = `${msg.username}:`;
       div.appendChild(username);
       div.appendChild(createMessageText(msg.message, msg.platform));
+      renderedMessages[platform].set(msg.id, div);
       el.appendChild(div);
       added = true;
     }

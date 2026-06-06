@@ -166,8 +166,40 @@ body.yash-sidebyside #system-feed::-webkit-scrollbar-thumb {
 
 body.yash-unified .msg,
 body.yash-sidebyside .msg {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
   line-height: 1.4;
   word-break: break-word;
+}
+
+body.yash-unified .msg .chat-avatar,
+body.yash-sidebyside .msg .chat-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  object-fit: cover;
+  background: #0f172a;
+  flex-shrink: 0;
+}
+
+body.yash-unified .msg .badge-list,
+body.yash-sidebyside .msg .badge-list {
+  display: inline-flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-right: 2px;
+}
+
+body.yash-unified .msg .chat-badge,
+body.yash-sidebyside .msg .chat-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #2d3748;
+  color: #cbd5e1;
+  font-size: 11px;
+  line-height: 1.5;
 }
 
 body.yash-unified .msg .platform-tag {
