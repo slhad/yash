@@ -46,6 +46,7 @@ import {
   type YouTubeLiveChatGrpcResponse,
 } from '../utils/youtubeLiveChatGrpc';
 import type {
+  ActivityEventPayload,
   AuthResult,
   ChatMessage,
   ChatterInfo,
@@ -123,6 +124,7 @@ const YT_API = 'https://www.googleapis.com/youtube/v3';
 const YOUTUBE_CHAT_STREAM_MAX_RESULTS = 200;
 const YOUTUBE_CHAT_QUOTA_BACKOFF_MS = 60 * 60_000;
 const YOUTUBE_CHAT_RECONNECT_BACKOFF_MS = 5_000;
+const YOUTUBE_CHAT_STREAM_END_RECONNECT_DELAY_MS = 2_000;
 
 interface YouTubeLiveChatStreamItem {
   id?: string;
@@ -314,23 +316,48 @@ export class YouTubeProvider implements PlatformProvider {
   private chatPollStreamDataCount = 0;
   private chatPollStreamErrorCount = 0;
   private chatPollStreamEndCount = 0;
+  private chatPollStreamSetupErrorCount = 0;
+  private chatPollStreamDisposeCount = 0;
+  private chatPollStreamDisposeCancelCount = 0;
+  private chatPollStreamDisposeDestroyCount = 0;
+  private chatPollStreamSequence = 0;
+  private chatPollReconnectScheduleCount = 0;
+  private chatPollReconnectReplaceTimerCount = 0;
+  private chatPollReconnectLastDelayMs = 0;
+  private chatPollLastStreamDurationMs = 0;
+  private chatPollMaxStreamDurationMs = 0;
+  private chatPollTotalStreamDurationMs = 0;
+  private chatPollShortStreamEndCount = 0;
+  private chatPollLastStreamDataEventCount = 0;
+  private chatPollMaxStreamDataEventCount = 0;
+  private chatPollTotalStreamDataEventCount = 0;
+  private chatPollEndWithNextPageTokenCount = 0;
+  private chatPollEndWithoutNextPageTokenCount = 0;
+  private liveChatGrpcClientCreateCount = 0;
+  private liveChatGrpcClientCloseCount = 0;
+  private chatPollLastPeerLabel = 'unknown';
+  private readonly chatPollRecentBreadcrumbs: string[] = [];
 
   // ---- chat ------------------------------------------------------------------
   private messageCallbacks: ((msg: ChatMessage) => void)[] = [];
 
   // ---- activity events -------------------------------------------------------
-  private activityCallbacks: ((event: { type: string; message: string }) => void)[] = [];
+  private activityCallbacks: ((event: ActivityEventPayload) => void)[] = [];
   private startupNoticeCallbacks: ((notice: YouTubeStartupNotice) => void)[] = [];
 
-  onActivityEvent(cb: (event: { type: string; message: string }) => void): () => void {
+  onActivityEvent(cb: (event: ActivityEventPayload) => void): () => void {
     this.activityCallbacks.push(cb);
     return () => {
       this.activityCallbacks = this.activityCallbacks.filter((c) => c !== cb);
     };
   }
 
-  private _dispatchActivity(type: string, message: string): void {
-    for (const cb of this.activityCallbacks) cb({ type, message });
+  private _dispatchActivity(
+    type: string,
+    message: string,
+    identity?: Pick<ActivityEventPayload, 'userId' | 'username'>,
+  ): void {
+    for (const cb of this.activityCallbacks) cb({ type, message, ...identity });
   }
 
   onStartupNotice(cb: (notice: YouTubeStartupNotice) => void): () => void {
@@ -527,7 +554,16 @@ export class YouTubeProvider implements PlatformProvider {
   }
 
   private _scheduleChatReconnect(delayMs: number): void {
-    this.chatPollTimer = setTimeout(() => this._doChatPoll(), delayMs);
+    this.chatPollReconnectScheduleCount += 1;
+    this.chatPollReconnectLastDelayMs = delayMs;
+    if (this.chatPollTimer) {
+      clearTimeout(this.chatPollTimer);
+      this.chatPollReconnectReplaceTimerCount += 1;
+    }
+    this.chatPollTimer = setTimeout(() => {
+      this.chatPollTimer = null;
+      void this._doChatPoll();
+    }, delayMs);
   }
 
   private _handleGrpcChatStreamFailure(err: { code?: number; details?: string }): void {
@@ -575,11 +611,47 @@ export class YouTubeProvider implements PlatformProvider {
   private _getLiveChatGrpcClient(): YouTubeLiveChatGrpcClient {
     if (this.liveChatGrpcClient) return this.liveChatGrpcClient;
 
+    this.liveChatGrpcClientCreateCount += 1;
     this.liveChatGrpcClient = new LiveChatGrpcClient(
       'youtube.googleapis.com:443',
       credentials.createSsl(),
     );
     return this.liveChatGrpcClient;
+  }
+
+  private _closeLiveChatGrpcClient(): void {
+    if (this.liveChatGrpcClient) {
+      this.liveChatGrpcClientCloseCount += 1;
+      this.liveChatGrpcClient.close();
+    }
+    this.liveChatGrpcClient = null;
+  }
+
+  private _pushChatPollBreadcrumb(message: string): void {
+    this.chatPollRecentBreadcrumbs.push(message);
+    if (this.chatPollRecentBreadcrumbs.length > 10) {
+      this.chatPollRecentBreadcrumbs.splice(0, this.chatPollRecentBreadcrumbs.length - 10);
+    }
+  }
+
+  private _disposeChatStream(
+    stream: YouTubeLiveChatStreamCall | null,
+    options: { cancel: boolean },
+  ): void {
+    if (!stream) return;
+    this.chatPollStreamDisposeCount += 1;
+    stream.removeAllListeners?.();
+    if (options.cancel) {
+      this.chatPollStreamDisposeCancelCount += 1;
+      stream.cancel();
+    }
+    if (typeof stream.destroy === 'function') {
+      this.chatPollStreamDisposeDestroyCount += 1;
+      stream.destroy();
+    }
+    if (this.chatStream === stream) {
+      this.chatStream = null;
+    }
   }
 
   private _createChatStreamCall(liveChatId: string, pageToken?: string): YouTubeLiveChatStreamCall {
@@ -624,35 +696,39 @@ export class YouTubeProvider implements PlatformProvider {
       // type, and publishedAt, so detail fields may be absent; fall back to displayMessage.
       if (normalizedMessageType === 'superchatevent') {
         const who = item.authorDetails?.displayName ?? 'someone';
+        const authorId = item.authorDetails?.channelId ?? undefined;
         const amount = String((snippet as any)?.superChatDetails?.amountDisplayString ?? '');
         const msg = amount
           ? `${who} sent a Super Chat of ${amount}`
           : displayMessage || `${who} sent a Super Chat`;
-        this._dispatchActivity('superchat', msg);
+        this._dispatchActivity('superchat', msg, { userId: authorId, username: who });
         continue;
       }
       if (isYouTubeSubscriptionActivityType(messageType)) {
         const who = item.authorDetails?.displayName ?? 'someone';
+        const authorId = item.authorDetails?.channelId ?? undefined;
         const level = String((snippet as any)?.newSponsorDetails?.memberLevelName ?? '');
         const msg = displayMessage || `${who} became a member${level ? ` (${level})` : ''}`;
-        this._dispatchActivity('member', msg);
+        this._dispatchActivity('member', msg, { userId: authorId, username: who });
         continue;
       }
       if (isYouTubeMemberMilestoneActivityType(messageType)) {
         const who = item.authorDetails?.displayName ?? 'someone';
+        const authorId = item.authorDetails?.channelId ?? undefined;
         const level = String((snippet as any)?.memberMilestoneChatDetails?.memberLevelName ?? '');
         const msg = displayMessage || `${who} became a member${level ? ` (${level})` : ''}`;
-        this._dispatchActivity('member', msg);
+        this._dispatchActivity('member', msg, { userId: authorId, username: who });
         continue;
       }
       if (isYouTubeMembershipGiftActivityType(messageType)) {
         const who = item.authorDetails?.displayName ?? 'someone';
+        const authorId = item.authorDetails?.channelId ?? undefined;
         const count = Number((snippet as any)?.membershipGiftingDetails?.giftMembershipsCount ?? 0);
         const msg =
           count > 0
             ? `${who} gifted ${count} membership${count !== 1 ? 's' : ''}`
             : displayMessage || `${who} gifted memberships`;
-        this._dispatchActivity('gift', msg);
+        this._dispatchActivity('gift', msg, { userId: authorId, username: who });
         continue;
       }
       if (isYouTubeGiftMembershipReceivedActivityType(messageType)) {
@@ -1122,8 +1198,7 @@ export class YouTubeProvider implements PlatformProvider {
 
   async logout(): Promise<void> {
     this._stopPolling();
-    this.liveChatGrpcClient?.close();
-    this.liveChatGrpcClient = null;
+    this._closeLiveChatGrpcClient();
 
     if (this.tokenData?.accessToken) {
       try {
@@ -1464,7 +1539,9 @@ export class YouTubeProvider implements PlatformProvider {
 
     const shouldStartChatPoll =
       !!broadcast.liveChatId &&
-      (broadcastChanged || previousLiveChatId !== broadcast.liveChatId || this.chatStream === null);
+      (broadcastChanged ||
+        previousLiveChatId !== broadcast.liveChatId ||
+        (this.chatStream === null && this.chatPollTimer === null));
     if (shouldStartChatPoll) this._startChatPoll();
 
     if (!broadcastChanged) return;
@@ -1515,6 +1592,7 @@ export class YouTubeProvider implements PlatformProvider {
 
   private _startChatPoll(): void {
     this._stopChatPoll();
+    this._closeLiveChatGrpcClient();
     this.chatNextPageToken = null;
     this.chatInitialized = false;
     this.chatHistoryCutoffMs = Date.now();
@@ -1526,10 +1604,7 @@ export class YouTubeProvider implements PlatformProvider {
       clearTimeout(this.chatPollTimer);
       this.chatPollTimer = null;
     }
-    if (this.chatStream) {
-      this.chatStream.cancel();
-      this.chatStream = null;
-    }
+    this._disposeChatStream(this.chatStream, { cancel: true });
     this.chatHistoryCutoffMs = null;
   }
 
@@ -1548,16 +1623,29 @@ export class YouTubeProvider implements PlatformProvider {
 
     try {
       const resumeFromPageToken = !!this.chatNextPageToken;
+      const requestedPageToken = this.chatNextPageToken;
       const stream = this._createChatStreamCall(
         this.liveChatId,
         this.chatNextPageToken ?? undefined,
       );
+      const streamSequence = ++this.chatPollStreamSequence;
+      const streamStartedAt = Date.now();
+      const peerLabel = stream.getPeer?.() ?? 'unknown';
+      let streamDataEventCount = 0;
+      let streamSawNextPageToken = false;
       this.chatStream = stream;
+      this.chatPollLastPeerLabel = peerLabel;
+      this._pushChatPollBreadcrumb(
+        `#${streamSequence} start peer=${peerLabel} resume=${requestedPageToken ? 'yes' : 'no'} pageToken=${requestedPageToken ? 'set' : 'none'}`,
+      );
 
       stream.on('data', (data: YouTubeLiveChatStreamResponse) => {
         if (this.chatStream !== stream) return;
         this.chatPollStreamDataCount += 1;
+        streamDataEventCount += 1;
+        this.chatPollTotalStreamDataEventCount += 1;
         if (data.nextPageToken) {
+          streamSawNextPageToken = true;
           this.chatNextPageToken = data.nextPageToken;
         }
         if (data.offlineAt) {
@@ -1573,9 +1661,17 @@ export class YouTubeProvider implements PlatformProvider {
 
       stream.on('error', (err: { code?: number; details?: string; message?: string }) => {
         if (this.chatStream !== stream) return;
-        this.chatStream = null;
+        this.chatPollLastStreamDataEventCount = streamDataEventCount;
+        this.chatPollMaxStreamDataEventCount = Math.max(
+          this.chatPollMaxStreamDataEventCount,
+          streamDataEventCount,
+        );
+        this._disposeChatStream(stream, { cancel: false });
         if (err.code === GrpcStatus.CANCELLED) return;
         this.chatPollStreamErrorCount += 1;
+        this._pushChatPollBreadcrumb(
+          `#${streamSequence} error peer=${peerLabel} data=${streamDataEventCount} nextPageToken=${streamSawNextPageToken ? 'yes' : 'no'} details=${err.details ?? err.message ?? String(err.code ?? 'unknown')}`,
+        );
         defaultLogger.error(
           `[YouTube] live chat stream error: ${err.details ?? err.message ?? String(err.code ?? 'unknown')}`,
         );
@@ -1584,12 +1680,39 @@ export class YouTubeProvider implements PlatformProvider {
 
       stream.on('end', () => {
         if (this.chatStream !== stream) return;
-        this.chatStream = null;
+        const streamDurationMs = Date.now() - streamStartedAt;
+        this.chatPollLastStreamDataEventCount = streamDataEventCount;
+        this.chatPollMaxStreamDataEventCount = Math.max(
+          this.chatPollMaxStreamDataEventCount,
+          streamDataEventCount,
+        );
+        this.chatPollLastStreamDurationMs = streamDurationMs;
+        this.chatPollMaxStreamDurationMs = Math.max(
+          this.chatPollMaxStreamDurationMs,
+          streamDurationMs,
+        );
+        this.chatPollTotalStreamDurationMs += streamDurationMs;
+        if (streamSawNextPageToken) {
+          this.chatPollEndWithNextPageTokenCount += 1;
+        } else {
+          this.chatPollEndWithoutNextPageTokenCount += 1;
+        }
+        if (streamDurationMs < YOUTUBE_CHAT_STREAM_END_RECONNECT_DELAY_MS) {
+          this.chatPollShortStreamEndCount += 1;
+        }
+        this._disposeChatStream(stream, { cancel: false });
         this.chatPollStreamEndCount += 1;
+        this._pushChatPollBreadcrumb(
+          `#${streamSequence} end peer=${peerLabel} durationMs=${streamDurationMs} data=${streamDataEventCount} nextPageToken=${streamSawNextPageToken ? 'yes' : 'no'}`,
+        );
         if (!this.liveChatId || !this.isAuthenticated()) return;
-        this._scheduleChatReconnect(0);
+        defaultLogger.debug(
+          `[YouTube] live chat stream ended after ${streamDurationMs}ms; reconnecting in ${YOUTUBE_CHAT_STREAM_END_RECONNECT_DELAY_MS}ms`,
+        );
+        this._scheduleChatReconnect(YOUTUBE_CHAT_STREAM_END_RECONNECT_DELAY_MS);
       });
     } catch (err) {
+      this.chatPollStreamSetupErrorCount += 1;
       const message = describeError(err);
       defaultLogger.error(`[YouTube] live chat stream setup error: ${message}`);
       this._scheduleChatReconnect(YOUTUBE_CHAT_RECONNECT_BACKOFF_MS);
@@ -2234,7 +2357,37 @@ export class YouTubeProvider implements PlatformProvider {
       chatPollStreamDataCount: this.chatPollStreamDataCount,
       chatPollStreamErrorCount: this.chatPollStreamErrorCount,
       chatPollStreamEndCount: this.chatPollStreamEndCount,
+      chatPollStreamSetupErrorCount: this.chatPollStreamSetupErrorCount,
+      chatPollStreamDisposeCount: this.chatPollStreamDisposeCount,
+      chatPollStreamDisposeCancelCount: this.chatPollStreamDisposeCancelCount,
+      chatPollStreamDisposeDestroyCount: this.chatPollStreamDisposeDestroyCount,
+      chatPollReconnectScheduleCount: this.chatPollReconnectScheduleCount,
+      chatPollReconnectReplaceTimerCount: this.chatPollReconnectReplaceTimerCount,
+      chatPollReconnectLastDelayMs: this.chatPollReconnectLastDelayMs,
+      chatPollLastStreamDurationMs: this.chatPollLastStreamDurationMs,
+      chatPollMaxStreamDurationMs: this.chatPollMaxStreamDurationMs,
+      chatPollTotalStreamDurationMs: this.chatPollTotalStreamDurationMs,
+      chatPollShortStreamEndCount: this.chatPollShortStreamEndCount,
+      chatPollLastStreamDataEventCount: this.chatPollLastStreamDataEventCount,
+      chatPollMaxStreamDataEventCount: this.chatPollMaxStreamDataEventCount,
+      chatPollTotalStreamDataEventCount: this.chatPollTotalStreamDataEventCount,
+      chatPollEndWithNextPageTokenCount: this.chatPollEndWithNextPageTokenCount,
+      chatPollEndWithoutNextPageTokenCount: this.chatPollEndWithoutNextPageTokenCount,
+      liveChatGrpcClientCreateCount: this.liveChatGrpcClientCreateCount,
+      liveChatGrpcClientCloseCount: this.liveChatGrpcClientCloseCount,
     };
+  }
+
+  getDebugNotes(): string[] {
+    const notes: string[] = [
+      `[youtube-debug] lastPeer=${this.chatPollLastPeerLabel} streamSeq=${this.chatPollStreamSequence}`,
+      `[youtube-debug] streamData last=${this.chatPollLastStreamDataEventCount} max=${this.chatPollMaxStreamDataEventCount} total=${this.chatPollTotalStreamDataEventCount}`,
+      `[youtube-debug] streamEnd nextPageToken yes=${this.chatPollEndWithNextPageTokenCount} no=${this.chatPollEndWithoutNextPageTokenCount}`,
+    ];
+    for (const breadcrumb of this.chatPollRecentBreadcrumbs) {
+      notes.push(`[youtube-debug] ${breadcrumb}`);
+    }
+    return notes;
   }
 
   // ---------------------------------------------------------------------------

@@ -35,6 +35,7 @@ import { getConfig, reloadConfig } from '../utils/config';
 import { defaultLogger } from '../utils/logger';
 import { SmeeRelay } from '../utils/smee';
 import type {
+  ActivityEventPayload,
   AuthResult,
   ChatMessage,
   ChatterInfo,
@@ -122,17 +123,21 @@ export class KickProvider implements PlatformProvider {
   private messageCallbacks: ((msg: ChatMessage) => void)[] = [];
 
   // ---- activity events -------------------------------------------------------
-  private activityCallbacks: ((event: { type: string; message: string }) => void)[] = [];
+  private activityCallbacks: ((event: ActivityEventPayload) => void)[] = [];
 
-  onActivityEvent(cb: (event: { type: string; message: string }) => void): () => void {
+  onActivityEvent(cb: (event: ActivityEventPayload) => void): () => void {
     this.activityCallbacks.push(cb);
     return () => {
       this.activityCallbacks = this.activityCallbacks.filter((c) => c !== cb);
     };
   }
 
-  private _dispatchActivity(type: string, message: string): void {
-    for (const cb of this.activityCallbacks) cb({ type, message });
+  private _dispatchActivity(
+    type: string,
+    message: string,
+    identity?: Pick<ActivityEventPayload, 'userId' | 'username'>,
+  ): void {
+    for (const cb of this.activityCallbacks) cb({ type, message, ...identity });
   }
 
   // ---- smee webhook relay ----------------------------------------------------
@@ -783,20 +788,16 @@ export class KickProvider implements PlatformProvider {
     const runPoll = async (delayMs: number) => {
       this.pollTimer = setTimeout(async () => {
         this.pollTimer = null;
+        if (!this.pollEnabled || this.pollGeneration !== generation) return;
+        if (this.pollInFlight > 0) {
+          void runPoll(50);
+          return;
+        }
         await this._pollStatus();
         if (!this.pollEnabled || this.pollGeneration !== generation) return;
         void runPoll(60_000);
       }, delayMs);
     };
-    if (this.pollInFlight > 0) {
-      this.pollTimer = setTimeout(() => {
-        if (!this.pollEnabled || this.pollGeneration !== generation || this.pollInFlight > 0) {
-          return;
-        }
-        void runPoll(0);
-      }, 50);
-      return;
-    }
     void runPoll(0);
   }
 
@@ -928,14 +929,20 @@ export class KickProvider implements PlatformProvider {
       const data = body?.data as Record<string, unknown> | undefined;
       const user = (data?.user ?? body?.follower) as Record<string, unknown> | undefined;
       const username = String(user?.username ?? 'someone');
-      this._dispatchActivity('follow', `${username} followed`);
+      this._dispatchActivity('follow', `${username} followed`, {
+        userId: String(user?.id ?? username),
+        username,
+      });
       return;
     }
     if (eventType === 'channel.subscription.new' || eventType === 'channel.subscription.renewal') {
       const data = body?.data as Record<string, unknown> | undefined;
       const userData = data?.user as Record<string, unknown> | undefined;
       const username = String(userData?.username ?? 'someone');
-      this._dispatchActivity('sub', `${username} subscribed`);
+      this._dispatchActivity('sub', `${username} subscribed`, {
+        userId: String(userData?.id ?? username),
+        username,
+      });
       return;
     }
     if (eventType === 'channel.subscription.gifted') {
@@ -944,7 +951,10 @@ export class KickProvider implements PlatformProvider {
       const username = String(userData?.username ?? 'someone');
       const giftee = data?.user as Record<string, unknown> | undefined;
       const gifteeName = String(giftee?.username ?? 'someone');
-      this._dispatchActivity('gift', `${username} gifted a sub to ${gifteeName}`);
+      this._dispatchActivity('gift', `${username} gifted a sub to ${gifteeName}`, {
+        userId: String(userData?.id ?? username),
+        username,
+      });
       return;
     }
     if (eventType !== 'chat.message.sent') {

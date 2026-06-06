@@ -97,14 +97,17 @@ const HELP_ENTRIES: SharedHelpEntry[] = [
     command: '/memory',
     surfaces: ['tui', 'api'],
     descriptions: {
-      tui: 'Show runtime memory telemetry or open the memory status modal',
+      tui: 'Show runtime memory telemetry, open the memory modal, or write a heap snapshot',
       api: 'Show runtime memory and retention telemetry',
     },
     usages: {
-      tui: '/memory [modal]',
+      tui: '/memory [modal|snapshot [label]]',
       api: '/memory',
     },
-    tuiExamples: ['/memory modal  — open the live memory status modal'],
+    tuiExamples: [
+      '/memory modal  — open the live memory status modal',
+      '/memory snapshot before-youtube-rotation  — write a heap snapshot file',
+    ],
   },
   {
     command: '/inject',
@@ -127,7 +130,8 @@ const HELP_ENTRIES: SharedHelpEntry[] = [
   {
     command: '/activity',
     surfaces: ['tui'],
-    description: 'Open the activity bar modal (follows, subs, cheers, raids)',
+    description:
+      'Open the activity bar modal (follows, subs, cheers, raids); keyboard shortcut: Ctrl+G',
     usage: '/activity',
   },
   {
@@ -151,10 +155,11 @@ const HELP_ENTRIES: SharedHelpEntry[] = [
       tui: '/settings',
       api: '/settings get <key> | /settings set <key> <value>',
     },
-    example: '/settings set title.visible true',
+    example: '/settings set logs.level debug',
     tuiExamples: [
       '/settings get <key>  — get a setting value',
       '/settings set <key> <value>  — set a setting value',
+      '/settings set logs.level debug  — set the minimum log level',
     ],
   },
   {

@@ -1,8 +1,12 @@
+import * as fs from 'node:fs';
 import { metrics } from './metrics';
+import { getDataDir } from './settings';
 
 const DEFAULT_SAMPLE_INTERVAL_MS = 15_000;
 const DEFAULT_MAX_SAMPLES = 240;
 const FRESH_SAMPLE_MAX_AGE_MS = 5_000;
+const DEFAULT_TELEMETRY_INTERVAL_MINUTES = 15;
+const MEMORY_TELEMETRY_LOG_PREFIX = 'memory-telemetry';
 
 type ProbeMetricValue = number | boolean | null | undefined;
 
@@ -43,8 +47,29 @@ export interface RuntimeStatusSnapshot {
     arrayBuffersBytes: number;
   };
   growth: {
-    rss: Record<'1m' | '5m' | '15m', GrowthStat | null>;
+    rss: Record<'1m' | '5m' | '15m' | '30m' | '60m', GrowthStat | null>;
     heapUsed: Record<'1m' | '5m' | '15m', GrowthStat | null>;
+  };
+  rssTelemetry: {
+    firstSampleAt: string;
+    lastSampleAt: string;
+    sinceStartBytes: number;
+    lastDeltaBytes: number | null;
+    peakBytes: number;
+    floorBytes: number;
+    trackedBytes: number;
+    trackedRatio: number;
+    estimatedNativeBytes: number;
+    windows: Record<
+      '5m' | '15m' | '30m' | '60m',
+      {
+        minBytes: number;
+        maxBytes: number;
+        avgBytes: number;
+        sampleCount: number;
+        windowMs: number;
+      } | null
+    >;
   };
   probes: Record<string, { metrics: Record<string, number>; warnings: string[] }>;
   warnings: string[];
@@ -79,8 +104,11 @@ class RuntimeMonitor {
   private readonly probes = new Map<string, RuntimeProbe>();
   private readonly sampleHistory: MemorySample[] = [];
   private timer: ReturnType<typeof setTimeout> | null = null;
+  private telemetryLogTimer: ReturnType<typeof setTimeout> | null = null;
   private sampleIntervalMs = DEFAULT_SAMPLE_INTERVAL_MS;
   private maxSamples = DEFAULT_MAX_SAMPLES;
+  private telemetryLoggingEnabled = false;
+  private telemetryIntervalMs = DEFAULT_TELEMETRY_INTERVAL_MINUTES * 60_000;
 
   registerProbe(name: string, probe: RuntimeProbe): () => void {
     this.probes.set(name, probe);
@@ -101,6 +129,23 @@ class RuntimeMonitor {
   stop(): void {
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
+    if (this.telemetryLogTimer) clearTimeout(this.telemetryLogTimer);
+    this.telemetryLogTimer = null;
+  }
+
+  configureTelemetryLogging(
+    enabled: boolean,
+    intervalMinutes = DEFAULT_TELEMETRY_INTERVAL_MINUTES,
+  ): void {
+    this.telemetryLoggingEnabled = enabled;
+    this.telemetryIntervalMs = Math.max(1, Math.floor(intervalMinutes)) * 60_000;
+    if (this.telemetryLogTimer) {
+      clearTimeout(this.telemetryLogTimer);
+      this.telemetryLogTimer = null;
+    }
+    if (!enabled) return;
+    this.writeTelemetryLog('enabled');
+    this.scheduleNextTelemetryLog();
   }
 
   captureNow(): RuntimeStatusSnapshot {
@@ -136,6 +181,14 @@ class RuntimeMonitor {
       this.captureNow();
       this.scheduleNextSample();
     }, this.sampleIntervalMs);
+  }
+
+  private scheduleNextTelemetryLog(): void {
+    if (!this.telemetryLoggingEnabled) return;
+    this.telemetryLogTimer = setTimeout(() => {
+      this.writeTelemetryLog('interval');
+      this.scheduleNextTelemetryLog();
+    }, this.telemetryIntervalMs);
   }
 
   private writeProcessMetrics(sample: MemorySample): void {
@@ -177,6 +230,8 @@ class RuntimeMonitor {
           '1m': this.computeGrowth('rssBytes', 60_000),
           '5m': this.computeGrowth('rssBytes', 5 * 60_000),
           '15m': this.computeGrowth('rssBytes', 15 * 60_000),
+          '30m': this.computeGrowth('rssBytes', 30 * 60_000),
+          '60m': this.computeGrowth('rssBytes', 60 * 60_000),
         },
         heapUsed: {
           '1m': this.computeGrowth('heapUsedBytes', 60_000),
@@ -184,6 +239,7 @@ class RuntimeMonitor {
           '15m': this.computeGrowth('heapUsedBytes', 15 * 60_000),
         },
       },
+      rssTelemetry: this.buildRssTelemetry(latest),
       probes,
       warnings,
     };
@@ -203,6 +259,81 @@ class RuntimeMonitor {
       };
     }
     return null;
+  }
+
+  private buildRssTelemetry(latest: MemorySample): RuntimeStatusSnapshot['rssTelemetry'] {
+    const first = this.sampleHistory[0] ?? latest;
+    const trackedBytes = latest.heapUsedBytes + latest.externalBytes;
+    const estimatedNativeBytes = Math.max(0, latest.rssBytes - trackedBytes);
+    const peakBytes = this.sampleHistory.reduce((max, sample) => Math.max(max, sample.rssBytes), 0);
+    const floorBytes = this.sampleHistory.reduce(
+      (min, sample) => Math.min(min, sample.rssBytes),
+      Number.POSITIVE_INFINITY,
+    );
+    const previous = this.sampleHistory[this.sampleHistory.length - 2];
+    return {
+      firstSampleAt: new Date(first.ts).toISOString(),
+      lastSampleAt: new Date(latest.ts).toISOString(),
+      sinceStartBytes: latest.rssBytes - first.rssBytes,
+      lastDeltaBytes: previous ? latest.rssBytes - previous.rssBytes : null,
+      peakBytes,
+      floorBytes: Number.isFinite(floorBytes) ? floorBytes : latest.rssBytes,
+      trackedBytes,
+      trackedRatio: latest.rssBytes > 0 ? trackedBytes / latest.rssBytes : 0,
+      estimatedNativeBytes,
+      windows: {
+        '5m': this.computeRssWindowSummary(5 * 60_000),
+        '15m': this.computeRssWindowSummary(15 * 60_000),
+        '30m': this.computeRssWindowSummary(30 * 60_000),
+        '60m': this.computeRssWindowSummary(60 * 60_000),
+      },
+    };
+  }
+
+  private computeRssWindowSummary(
+    windowMs: number,
+  ): RuntimeStatusSnapshot['rssTelemetry']['windows']['5m'] {
+    const latest = this.sampleHistory[this.sampleHistory.length - 1];
+    if (!latest) return null;
+    const windowSamples = this.sampleHistory.filter((sample) => latest.ts - sample.ts <= windowMs);
+    if (windowSamples.length === 0) return null;
+    const rssValues = windowSamples.map((sample) => sample.rssBytes);
+    const sum = rssValues.reduce((total, value) => total + value, 0);
+    return {
+      minBytes: Math.min(...rssValues),
+      maxBytes: Math.max(...rssValues),
+      avgBytes: sum / rssValues.length,
+      sampleCount: rssValues.length,
+      windowMs: latest.ts - (windowSamples[0]?.ts ?? latest.ts),
+    };
+  }
+
+  private writeTelemetryLog(reason: 'enabled' | 'interval'): void {
+    try {
+      const snapshot = this.getStatus();
+      const day = snapshot.generatedAt.slice(0, 10);
+      const logDir = `${getDataDir()}/logs`;
+      const filePath = `${logDir}/${MEMORY_TELEMETRY_LOG_PREFIX}-${day}.jsonl`;
+      const payload = {
+        type: 'memory-telemetry',
+        reason,
+        pid: process.pid,
+        generatedAt: snapshot.generatedAt,
+        uptimeSeconds: snapshot.uptimeSeconds,
+        sampleIntervalMs: snapshot.sampleIntervalMs,
+        sampleCount: snapshot.sampleCount,
+        maxSamples: snapshot.maxSamples,
+        memory: snapshot.memory,
+        growth: snapshot.growth,
+        rssTelemetry: snapshot.rssTelemetry,
+        probes: snapshot.probes,
+        warnings: snapshot.warnings,
+      };
+      fs.mkdirSync(logDir, { recursive: true });
+      fs.appendFileSync(filePath, `${JSON.stringify(payload)}\n`, 'utf8');
+    } catch {
+      // Never fail the app because telemetry logging could not be written.
+    }
   }
 
   private collectProbeSnapshot(): Record<
@@ -252,9 +383,24 @@ class RuntimeMonitor {
         `RSS grew ${formatSignedBytes(rssGrowth15m.bytes)} over ${Math.round(rssGrowth15m.windowMs / 60000)}m.`,
       );
     }
+    const rssGrowth60m = this.computeGrowth('rssBytes', 60 * 60_000);
+    if (rssGrowth60m && rssGrowth60m.bytes >= 256 * 1024 * 1024) {
+      warnings.push(
+        `RSS grew ${formatSignedBytes(rssGrowth60m.bytes)} over ${Math.round(rssGrowth60m.windowMs / 60000)}m while the process stayed alive.`,
+      );
+    }
     if (heapGrowth15m && heapGrowth15m.bytes >= 64 * 1024 * 1024) {
       warnings.push(
         `JS heap used grew ${formatSignedBytes(heapGrowth15m.bytes)} over ${Math.round(heapGrowth15m.windowMs / 60000)}m.`,
+      );
+    }
+    const estimatedNativeBytes = Math.max(
+      0,
+      latest.rssBytes - (latest.heapUsedBytes + latest.externalBytes),
+    );
+    if (estimatedNativeBytes >= 256 * 1024 * 1024) {
+      warnings.push(
+        `Estimated native/untracked RSS is ${formatBytes(estimatedNativeBytes)}; compare idle runs against sockets, images, OBS, and websocket clients.`,
       );
     }
     if (latest.arrayBuffersBytes >= 64 * 1024 * 1024) {
@@ -280,6 +426,12 @@ export function formatRuntimeStatusLines(snapshot: RuntimeStatusSnapshot): strin
   );
   lines.push(
     `[memory] growth rss: 1m ${formatSignedBytes(snapshot.growth.rss['1m']?.bytes ?? null)} | 5m ${formatSignedBytes(snapshot.growth.rss['5m']?.bytes ?? null)} | 15m ${formatSignedBytes(snapshot.growth.rss['15m']?.bytes ?? null)}`,
+  );
+  lines.push(
+    `[memory] rss telemetry: nativeGap=${formatBytes(snapshot.rssTelemetry.estimatedNativeBytes)} tracked=${formatBytes(snapshot.rssTelemetry.trackedBytes)} (${(snapshot.rssTelemetry.trackedRatio * 100).toFixed(1)}%) sinceStart=${formatSignedBytes(snapshot.rssTelemetry.sinceStartBytes)} peak=${formatBytes(snapshot.rssTelemetry.peakBytes)}`,
+  );
+  lines.push(
+    `[memory] rss windows: 15m min/max=${formatBytes(snapshot.rssTelemetry.windows['15m']?.minBytes ?? Number.NaN)}/${formatBytes(snapshot.rssTelemetry.windows['15m']?.maxBytes ?? Number.NaN)} 30m ${formatSignedBytes(snapshot.growth.rss['30m']?.bytes ?? null)} 60m ${formatSignedBytes(snapshot.growth.rss['60m']?.bytes ?? null)}`,
   );
   lines.push(
     `[memory] growth heap: 1m ${formatSignedBytes(snapshot.growth.heapUsed['1m']?.bytes ?? null)} | 5m ${formatSignedBytes(snapshot.growth.heapUsed['5m']?.bytes ?? null)} | 15m ${formatSignedBytes(snapshot.growth.heapUsed['15m']?.bytes ?? null)}`,

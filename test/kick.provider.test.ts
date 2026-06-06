@@ -343,6 +343,36 @@ describe('KickProvider — getViewerCount', () => {
   });
 });
 
+describe('KickProvider — polling', () => {
+  test('restarting poll while a poll is in flight still resumes polling', async () => {
+    const p = makeProvider() as any;
+    let resolveFirstPoll: (() => void) | null = null;
+    let pollCalls = 0;
+
+    p._pollStatus = async () => {
+      pollCalls += 1;
+      if (pollCalls === 1) {
+        await new Promise<void>((resolve) => {
+          resolveFirstPoll = resolve;
+        });
+      }
+    };
+
+    p._startPoll();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    p._startPoll();
+
+    expect(pollCalls).toBe(1);
+    const releaseFirstPoll = resolveFirstPoll as (() => void) | null;
+    if (releaseFirstPoll) releaseFirstPoll();
+
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    p._stopPoll();
+
+    expect(pollCalls).toBeGreaterThanOrEqual(2);
+  });
+});
+
 describe('KickProvider — getEventSubscriptions', () => {
   test('returns parsed event names from subscriptions API', async () => {
     const p = makeProvider() as any;
@@ -787,28 +817,36 @@ describe('KickProvider — onActivityEvent', () => {
 describe('KickProvider — handleWebhookEvent activity dispatch', () => {
   test('channel.followed dispatches follow activity', () => {
     const p = makeProvider() as any;
-    const events: { type: string; message: string }[] = [];
-    p.onActivityEvent((ev: { type: string; message: string }) => events.push(ev));
+    const events: { type: string; message: string; userId?: string; username?: string }[] = [];
+    p.onActivityEvent((ev: { type: string; message: string; userId?: string; username?: string }) =>
+      events.push(ev),
+    );
     p.handleWebhookEvent({
       'Kick-Event-Type': 'channel.followed',
-      data: { user: { username: 'FollowerUser' } },
+      data: { user: { id: 42, username: 'FollowerUser' } },
     });
     expect(events).toHaveLength(1);
     expect(events[0]?.type).toBe('follow');
     expect(events[0]?.message).toContain('FollowerUser');
+    expect(events[0]?.userId).toBe('42');
+    expect(events[0]?.username).toBe('FollowerUser');
   });
 
   test('channel.subscription.new dispatches sub activity', () => {
     const p = makeProvider() as any;
-    const events: { type: string; message: string }[] = [];
-    p.onActivityEvent((ev: { type: string; message: string }) => events.push(ev));
+    const events: { type: string; message: string; userId?: string; username?: string }[] = [];
+    p.onActivityEvent((ev: { type: string; message: string; userId?: string; username?: string }) =>
+      events.push(ev),
+    );
     p.handleWebhookEvent({
       'Kick-Event-Type': 'channel.subscription.new',
-      data: { user: { username: 'NewSubber' } },
+      data: { user: { id: 77, username: 'NewSubber' } },
     });
     expect(events).toHaveLength(1);
     expect(events[0]?.type).toBe('sub');
     expect(events[0]?.message).toContain('NewSubber');
+    expect(events[0]?.userId).toBe('77');
+    expect(events[0]?.username).toBe('NewSubber');
   });
 
   test('channel.subscription.renewal dispatches sub activity', () => {
@@ -825,15 +863,22 @@ describe('KickProvider — handleWebhookEvent activity dispatch', () => {
 
   test('channel.subscription.gifted dispatches gift activity', () => {
     const p = makeProvider() as any;
-    const events: { type: string; message: string }[] = [];
-    p.onActivityEvent((ev: { type: string; message: string }) => events.push(ev));
+    const events: { type: string; message: string; userId?: string; username?: string }[] = [];
+    p.onActivityEvent((ev: { type: string; message: string; userId?: string; username?: string }) =>
+      events.push(ev),
+    );
     p.handleWebhookEvent({
       'Kick-Event-Type': 'channel.subscription.gifted',
-      data: { gifted_by: { username: 'GifterUser' }, user: { username: 'RecipientUser' } },
+      data: {
+        gifted_by: { id: 99, username: 'GifterUser' },
+        user: { username: 'RecipientUser' },
+      },
     });
     expect(events).toHaveLength(1);
     expect(events[0]?.type).toBe('gift');
     expect(events[0]?.message).toContain('GifterUser');
+    expect(events[0]?.userId).toBe('99');
+    expect(events[0]?.username).toBe('GifterUser');
   });
 
   test('unknown event type is a no-op (does not throw)', () => {

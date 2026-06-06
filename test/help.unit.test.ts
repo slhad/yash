@@ -32,10 +32,13 @@ describe('shared help metadata', () => {
       '[help]   /stream [platform…]  — Edit stream info (opens modal, persists to settings)',
     );
     expect(lines).toContain(
-      '[help]   /memory [modal]  — Show runtime memory telemetry or open the memory status modal',
+      '[help]   /memory [modal|snapshot [label]]  — Show runtime memory telemetry, open the memory modal, or write a heap snapshot',
     );
     expect(lines).toContain(
       '[help]       e.g.  /memory modal  — open the live memory status modal',
+    );
+    expect(lines).toContain(
+      '[help]       e.g.  /memory snapshot before-youtube-rotation  — write a heap snapshot file',
     );
     expect(lines).toContain(
       '[help]       e.g.  /marker Replay|-300  (YouTube: 5 minutes before current live position)',

@@ -403,6 +403,25 @@ describe('handleWebCommand — /memory', () => {
       ['memory', 'The memory modal is TUI-only. Use /memory modal in YASH.'],
     ]);
   });
+
+  test('/memory snapshot → reports TUI-or-IPC guidance without fetch', async () => {
+    const { calls } = mockFetch(() => ({ ok: true, body: {} }));
+    const feedback: Array<[string, string]> = [];
+
+    const result = await handleWebCommand('/memory snapshot before', {
+      platforms: [],
+      feedback: (label, text) => feedback.push([label, text]),
+    });
+
+    expect(result).toBe(true);
+    expect(calls).toHaveLength(0);
+    expect(feedback).toEqual([
+      [
+        'memory',
+        'Heap snapshots are available in YASH or over IPC. Use /memory snapshot [label] there.',
+      ],
+    ]);
+  });
 });
 
 // ── /msg ──────────────────────────────────────────────────────────────────────
@@ -930,6 +949,14 @@ describe('handleWebCommand — /settings', () => {
     await handleWebCommand('/settings set messages.position bottom', { platforms: [] });
     const body = JSON.parse(calls[0]!.init!.body as string);
     expect(body.value).toBe('bottom');
+  });
+
+  test('/settings set logs.level debug → POSTs string "debug"', async () => {
+    const { calls } = mockFetch(() => ({ ok: true, body: {} }));
+    await handleWebCommand('/settings set logs.level debug', { platforms: [] });
+    const body = JSON.parse(calls[0]!.init!.body as string);
+    expect(body.key).toBe('logs.level');
+    expect(body.value).toBe('debug');
   });
 
   test('/settings set chat.timestamps.visible false → POSTs false and emits settings event', async () => {

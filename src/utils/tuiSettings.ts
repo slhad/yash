@@ -2,6 +2,7 @@ export const SETTINGS_VIEWER_MODES = ['per-platform', 'cumulative', 'both'] as c
 export const SETTINGS_MESSAGE_POSITIONS = ['top', 'bottom', 'hide'] as const;
 export const SETTINGS_WIDTH_OPTIONS = ['25%', '30%', '35%', '40%', '45%', '50%'] as const;
 export const SETTINGS_ACTIVITY_MODES = ['permanent', 'timed'] as const;
+export const SETTINGS_LOG_LEVELS = ['debug', 'info', 'warn', 'error', 'none'] as const;
 
 export interface TuiSettingsDraftInput {
   demo: boolean;
@@ -16,6 +17,8 @@ export interface TuiSettingsDraftInput {
   memoryStatusGreenMaxMb: string;
   memoryStatusOrangeMinMb: string;
   memoryStatusRedMinMb: string;
+  memoryTelemetryEnabled?: boolean;
+  memoryTelemetryIntervalMinutes?: string;
   messagesPosition: string;
   chatTimestampsVisible: boolean;
   tuiEmotesScale: string;
@@ -24,6 +27,7 @@ export interface TuiSettingsDraftInput {
   eventsTail: string;
   eventsWidth: string;
   logsVisible: boolean;
+  logsLevel?: string;
   logsHeight: string;
   logsTail: string;
   youtubeShowViewers: boolean;
@@ -47,6 +51,8 @@ export interface TuiSettingsValues {
   memoryStatusGreenMaxMb: number;
   memoryStatusOrangeMinMb: number;
   memoryStatusRedMinMb: number;
+  memoryTelemetryEnabled: boolean;
+  memoryTelemetryIntervalMinutes: number;
   messagesPosition: (typeof SETTINGS_MESSAGE_POSITIONS)[number];
   chatTimestampsVisible: boolean;
   tuiEmotesScale: number;
@@ -55,6 +61,7 @@ export interface TuiSettingsValues {
   eventsTail: number;
   eventsWidth: (typeof SETTINGS_WIDTH_OPTIONS)[number];
   logsVisible: boolean;
+  logsLevel: (typeof SETTINGS_LOG_LEVELS)[number];
   logsHeight: number;
   logsTail: number;
   youtubeShowViewers: boolean;
@@ -120,6 +127,11 @@ export function validateTuiSettingsDraft(draft: TuiSettingsDraftInput): {
     'memory.status.redMinMb',
     errors,
   );
+  const memoryTelemetryIntervalMinutes = parsePositiveInt(
+    draft.memoryTelemetryIntervalMinutes ?? '15',
+    'memory.telemetry.intervalMinutes',
+    errors,
+  );
   const eventsTail = parsePositiveInt(draft.eventsTail, 'events.tail', errors);
   const logsHeight = parsePositiveInt(draft.logsHeight, 'logs.height', errors);
   const logsTail = parsePositiveInt(draft.logsTail, 'logs.tail', errors);
@@ -141,6 +153,10 @@ export function validateTuiSettingsDraft(draft: TuiSettingsDraftInput): {
     !SETTINGS_WIDTH_OPTIONS.includes(draft.eventsWidth as (typeof SETTINGS_WIDTH_OPTIONS)[number])
   ) {
     errors.push(`events.width must be one of: ${SETTINGS_WIDTH_OPTIONS.join(', ')}`);
+  }
+  const logsLevel = draft.logsLevel ?? 'info';
+  if (!SETTINGS_LOG_LEVELS.includes(logsLevel as (typeof SETTINGS_LOG_LEVELS)[number])) {
+    errors.push(`logs.level must be one of: ${SETTINGS_LOG_LEVELS.join(', ')}`);
   }
   if (
     !SETTINGS_ACTIVITY_MODES.includes(
@@ -182,6 +198,8 @@ export function validateTuiSettingsDraft(draft: TuiSettingsDraftInput): {
       memoryStatusGreenMaxMb: memoryStatusGreenMaxMb as number,
       memoryStatusOrangeMinMb: memoryStatusOrangeMinMb as number,
       memoryStatusRedMinMb: memoryStatusRedMinMb as number,
+      memoryTelemetryEnabled: draft.memoryTelemetryEnabled ?? false,
+      memoryTelemetryIntervalMinutes: memoryTelemetryIntervalMinutes as number,
       messagesPosition: draft.messagesPosition as (typeof SETTINGS_MESSAGE_POSITIONS)[number],
       chatTimestampsVisible: draft.chatTimestampsVisible,
       tuiEmotesScale: tuiEmotesScale as number,
@@ -190,6 +208,7 @@ export function validateTuiSettingsDraft(draft: TuiSettingsDraftInput): {
       eventsTail: eventsTail as number,
       eventsWidth: draft.eventsWidth as (typeof SETTINGS_WIDTH_OPTIONS)[number],
       logsVisible: draft.logsVisible,
+      logsLevel: logsLevel as (typeof SETTINGS_LOG_LEVELS)[number],
       logsHeight: logsHeight as number,
       logsTail: logsTail as number,
       youtubeShowViewers: draft.youtubeShowViewers,
@@ -217,6 +236,11 @@ export function buildTuiSettingsEntries(values: TuiSettingsValues): TuiSettingsE
     { key: 'memory.status.greenMaxMb', value: values.memoryStatusGreenMaxMb },
     { key: 'memory.status.orangeMinMb', value: values.memoryStatusOrangeMinMb },
     { key: 'memory.status.redMinMb', value: values.memoryStatusRedMinMb },
+    { key: 'memory.telemetry.enabled', value: values.memoryTelemetryEnabled },
+    {
+      key: 'memory.telemetry.intervalMinutes',
+      value: values.memoryTelemetryIntervalMinutes,
+    },
     { key: 'messages.position', value: values.messagesPosition },
     { key: 'chat.timestamps.visible', value: values.chatTimestampsVisible },
     { key: 'tui.emotes.scale', value: values.tuiEmotesScale },
@@ -225,6 +249,7 @@ export function buildTuiSettingsEntries(values: TuiSettingsValues): TuiSettingsE
     { key: 'events.tail', value: values.eventsTail },
     { key: 'events.width', value: values.eventsWidth },
     { key: 'logs.visible', value: values.logsVisible },
+    { key: 'logs.level', value: values.logsLevel },
     { key: 'logs.height', value: values.logsHeight },
     { key: 'logs.tail', value: values.logsTail },
     { key: 'platforms.youtube.showViewers', value: values.youtubeShowViewers },

@@ -36,6 +36,13 @@ export interface ChatMessage {
   streamId?: string;
 }
 
+export interface ActivityEventPayload {
+  type: string;
+  message: string;
+  userId?: string;
+  username?: string;
+}
+
 export interface ChatterInfo {
   platform: string;
   userId: string;

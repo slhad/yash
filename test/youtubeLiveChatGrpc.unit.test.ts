@@ -109,6 +109,30 @@ describe('serializeYouTubeLiveChatResponse + deserializeYouTubeLiveChatResponse 
     expect(item.authorDetails?.displayName).toBe('TestUser');
   });
 
+  test('response with unicode text preserves utf8 fields', () => {
+    const result = roundTrip({
+      items: [
+        {
+          id: 'unicode-item',
+          snippet: {
+            publishedAt: '2024-01-15T10:00:00Z',
+            displayMessage: 'héllo 👋 ありがとう',
+            type: 'textMessageEvent',
+          },
+          authorDetails: {
+            channelId: 'UC-unicode',
+            displayName: 'Créateur✨',
+          },
+        },
+      ],
+    });
+
+    expect(result.items).toHaveLength(1);
+    const item = result.items![0]!;
+    expect(item.snippet?.displayMessage).toBe('héllo 👋 ありがとう');
+    expect(item.authorDetails?.displayName).toBe('Créateur✨');
+  });
+
   test('response with multiple items preserves all items in order', () => {
     const result = roundTrip({
       items: [

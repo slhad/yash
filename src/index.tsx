@@ -1,6 +1,7 @@
 // Suppress EventTarget MaxListeners warning from OpenTUI's CliRenderer
 process.setMaxListeners(0);
 
+import * as v8 from 'node:v8';
 import {
   BoxRenderable,
   bold,
@@ -15,7 +16,7 @@ import {
   TextRenderable,
   underline,
 } from '@opentui/core';
-import type { ChatMessage } from './platforms/base';
+import type { ActivityEventPayload, ChatMessage } from './platforms/base';
 import { YT_CATEGORY_NAMES } from './platforms/youtube';
 import {
   authService,
@@ -54,14 +55,16 @@ import { getFfzEmotePayload, type SharedTwitchEmoteDefinition } from './utils/ff
 import { renderTuiHelpLines } from './utils/help';
 import { runIpcCommand } from './utils/ipcCommandRunner';
 import logCollector from './utils/logCollector';
-import { defaultLogger } from './utils/logger';
+import { defaultLogger, parseLoggerLevelName, setDefaultLoggerLevel } from './utils/logger';
 import {
   buildMemoryInsightSummary,
   DEFAULT_MEMORY_STATUS_GREEN_MAX_MB,
   DEFAULT_MEMORY_STATUS_ORANGE_MIN_MB,
   DEFAULT_MEMORY_STATUS_RED_MIN_MB,
+  DEFAULT_MEMORY_TELEMETRY_INTERVAL_MINUTES,
   formatMemoryStatusDisplay,
   readMemoryStatusSettings,
+  readMemoryTelemetrySettings,
 } from './utils/memoryStatus';
 import {
   applyObsShutdownConfigPatch,
@@ -102,6 +105,7 @@ import { getNextAutocompleteCycleIndex, type MessageTarget } from './utils/tuiMe
 import {
   buildTuiSettingsEntries,
   SETTINGS_ACTIVITY_MODES,
+  SETTINGS_LOG_LEVELS,
   SETTINGS_MESSAGE_POSITIONS,
   SETTINGS_VIEWER_MODES,
   SETTINGS_WIDTH_OPTIONS,
@@ -166,6 +170,8 @@ interface ActivityEvent {
   platform: string;
   type: string;
   message: string;
+  userId?: string;
+  username?: string;
   sessionId?: string;
 }
 
@@ -277,7 +283,7 @@ function _scheduleActivityBarRefresh(): void {
   if (nextExpiry === undefined) return;
   activityRefreshTimer = setTimeout(
     () => {
-      if (uiNodes) updateUI(lastMessages);
+      refreshDynamicUiNodes();
       _scheduleActivityBarRefresh();
     },
     nextExpiry - now + 50,
@@ -290,22 +296,24 @@ function _rotateActivitySession(): void {
   activityEvents.length = 0;
   _saveActivityEvents();
   _scheduleActivityBarRefresh();
-  if (uiNodes) updateUI(lastMessages);
+  refreshDynamicUiNodes();
 }
 
-function pushActivityEvent(platform: string, type: string, message: string): void {
+function pushActivityEvent(platform: string, event: ActivityEventPayload): void {
   const ev: ActivityEvent = {
     ts: Date.now(),
     platform,
-    type,
-    message,
+    type: event.type,
+    message: event.message,
+    userId: event.userId,
+    username: event.username,
     sessionId: currentActivitySessionId,
   };
   activityEvents.push(ev);
   pruneActivityEvents();
   _saveActivityEvents();
   _scheduleActivityBarRefresh();
-  if (uiNodes) updateUI(lastMessages);
+  refreshDynamicUiNodes();
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -326,6 +334,22 @@ function getSettingValue(key: string): unknown {
   return settings.get(key, null);
 }
 
+function syncRuntimeMonitorTelemetrySettings(): void {
+  const telemetry = readMemoryTelemetrySettings((key, fallback) => settings.get(key, fallback));
+  runtimeMonitor.configureTelemetryLogging(telemetry.enabled, telemetry.intervalMinutes);
+}
+
+function syncDefaultLoggerLevelSetting(): void {
+  setDefaultLoggerLevel(parseLoggerLevelName(settings.get('logs.level', 'info')));
+}
+
+function normalizeSettingValueForPersistence(key: string, value: unknown): unknown {
+  if (key === 'logs.level') {
+    return parseLoggerLevelName(value);
+  }
+  return value;
+}
+
 function applySettingSideEffects(key: string, value: unknown): void {
   if (key === 'chat.maxHistorySize') {
     const parsed = typeof value === 'number' ? value : Number.parseInt(String(value), 10);
@@ -333,6 +357,12 @@ function applySettingSideEffects(key: string, value: unknown): void {
       chatService.setMaxHistorySize(parsed);
       trimUiChatMemory();
     }
+  }
+  if (key === 'memory.telemetry.enabled' || key === 'memory.telemetry.intervalMinutes') {
+    syncRuntimeMonitorTelemetrySettings();
+  }
+  if (key === 'logs.level') {
+    syncDefaultLoggerLevelSetting();
   }
   if (key === 'activity.mode') {
     pruneActivityEvents();
@@ -374,9 +404,10 @@ async function persistSettingEntries(
 ): Promise<string[]> {
   const changedKeys: string[] = [];
   for (const entry of entries) {
-    if (Object.is(settings.get(entry.key, null), entry.value)) continue;
-    await settings.set(entry.key, entry.value);
-    applySettingSideEffects(entry.key, entry.value);
+    const normalizedValue = normalizeSettingValueForPersistence(entry.key, entry.value);
+    if (Object.is(settings.get(entry.key, null), normalizedValue)) continue;
+    await settings.set(entry.key, normalizedValue);
+    applySettingSideEffects(entry.key, normalizedValue);
     changedKeys.push(entry.key);
   }
   if (changedKeys.some((key) => STRUCTURAL_SETTING_KEYS.has(key)) && cliRenderer && uiNodes) {
@@ -401,6 +432,25 @@ function formatMarkerPosition(positionInSeconds: number): string {
   return h > 0
     ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
     : `${m}:${String(s).padStart(2, '0')}`;
+}
+
+function sanitizeSnapshotLabel(raw: string): string {
+  const cleaned = raw
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 64);
+  return cleaned || 'manual';
+}
+
+function writeHeapSnapshotFile(label?: string): string {
+  const dir = `${getDataDir()}/logs/heap-snapshots`;
+  require('node:fs').mkdirSync(dir, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const suffix = label ? `-${sanitizeSnapshotLabel(label)}` : '';
+  const path = `${dir}/heap-${stamp}-pid${process.pid}${suffix}.heapsnapshot`;
+  return v8.writeHeapSnapshot(path);
 }
 
 function formatPlatformStatusLabel(
@@ -583,7 +633,7 @@ let activeChatterInfoModal: {
   refreshForMessage: (msg: ChatMessage) => void;
 } | null = null;
 let activeHistoryModal: { box: BoxRenderable } | null = null;
-let activeActivityModal: { box: BoxRenderable } | null = null;
+let activeActivityModal: { box: BoxRenderable; close: () => void } | null = null;
 let activeMemoryModal: { box: BoxRenderable } | null = null;
 
 const chatterCache = new ChatterCache();
@@ -604,6 +654,22 @@ function ensureMainInputFocus(): void {
   if (!uiNodes.inputEl.focused) {
     uiNodes.inputEl.focus();
   }
+}
+
+function closeActivityModal(): void {
+  activeActivityModal?.close();
+}
+
+function toActivityChatterMessage(event: ActivityEvent): ChatMessage | null {
+  if (!event.username) return null;
+  return {
+    id: `activity_${event.platform}_${event.userId ?? event.username}_${event.ts}`,
+    platform: event.platform,
+    userId: event.userId ?? event.username,
+    username: event.username,
+    message: event.message,
+    timestamp: event.ts,
+  };
 }
 
 function getConnectedMessageTargets(): MessageTarget[] {
@@ -798,9 +864,12 @@ function initUI(renderer: CliRenderer, messages: ChatLine[]): UINodes {
     flexDirection: 'row',
     width: '100%',
   });
+  const openActivityFromBar = (): void => openActivityModal();
   activityBar.add(activityBarLabel);
   activityBar.add(activityBarText);
-  activityBar.onMouseDown = () => openActivityModal();
+  activityBar.onMouseDown = () => openActivityFromBar();
+  activityBarLabel.onMouseDown = () => openActivityFromBar();
+  activityBarText.onMouseDown = () => openActivityFromBar();
   activityBar.onMouseOver = () => {
     activityBarHovered = true;
     if (activityRefreshTimer) {
@@ -1015,97 +1084,139 @@ function _updateActivityBarText(node: TextRenderable): void {
   if (source.length > ACTIVITY_MAX_VISIBLE) {
     parts.push(fg('gray')(` … +${source.length - ACTIVITY_MAX_VISIBLE} older`));
   }
-  parts.push(fg('#555555')('  [click to view all]'));
   node.content = new StyledText(parts);
 }
 
 function openActivityModal(): void {
-  if (
-    !uiNodes ||
-    activeActivityModal ||
-    activeMemoryModal ||
-    activeModal ||
-    activeStreamModal ||
-    activeSettingsModal ||
-    activeObsShutdownConfigModal ||
-    activeScriptConfigModal ||
-    activeChatterInfoModal ||
-    activeHistoryModal
-  )
-    return;
-  const { renderer } = uiNodes;
+  try {
+    if (
+      !uiNodes ||
+      activeActivityModal ||
+      activeMemoryModal ||
+      activeModal ||
+      activeStreamModal ||
+      activeSettingsModal ||
+      activeObsShutdownConfigModal ||
+      activeScriptConfigModal ||
+      activeChatterInfoModal ||
+      activeHistoryModal
+    )
+      return;
+    const { renderer } = uiNodes;
 
-  const box = new BoxRenderable(renderer, {
-    position: 'absolute',
-    top: '5%',
-    left: '5%',
-    width: '90%',
-    zIndex: 110,
-    border: true,
-    borderStyle: 'rounded',
-    borderColor: 'yellow',
-    backgroundColor: 'black',
-    shouldFill: true,
-    padding: 1,
-    flexDirection: 'column',
-    gap: 0,
-    title: ' Activity Events ',
-  });
+    const box = new BoxRenderable(renderer, {
+      position: 'absolute',
+      top: '5%',
+      left: '5%',
+      width: '90%',
+      height: '72%',
+      zIndex: 110,
+      border: true,
+      borderStyle: 'rounded',
+      borderColor: 'yellow',
+      backgroundColor: 'black',
+      shouldFill: true,
+      padding: 1,
+      flexDirection: 'column',
+      gap: 0,
+      title: ' Activity Events ',
+    });
 
-  box.add(
-    new TextRenderable(renderer, {
-      content: '  ↑↓ scroll  •  Esc close',
-      fg: 'gray',
-    }),
-  );
+    box.add(
+      new TextRenderable(renderer, {
+        content: '  ↑↓ scroll  •  Esc close',
+        fg: 'gray',
+      }),
+    );
 
-  const scroll = new ScrollBoxRenderable(renderer, {
-    flexGrow: 1,
-    stickyScroll: false,
-    stickyStart: 'bottom',
-  });
+    const scroll = new ScrollBoxRenderable(renderer, {
+      flexGrow: 1,
+      stickyScroll: false,
+      stickyStart: 'bottom',
+    });
 
-  const events = [...activityEvents].reverse();
-  if (events.length === 0) {
-    scroll.add(new TextRenderable(renderer, { content: '  No activity events yet.', fg: 'gray' }));
-  } else {
-    for (const ev of events) {
-      const time = new Date(ev.ts).toLocaleTimeString();
+    const events = [...activityEvents].reverse();
+    if (events.length === 0) {
       scroll.add(
-        new TextRenderable(renderer, {
-          content: new StyledText([
-            fg('gray')(`  [${time}] `),
-            fg(_activityPlatformColor(ev.platform))(`[${ev.platform}] ${ev.type}: ${ev.message}`),
-          ]),
-        }),
+        new TextRenderable(renderer, { content: '  No activity events yet.', fg: 'gray' }),
       );
+    } else {
+      for (const ev of events) {
+        const time = new Date(ev.ts).toLocaleTimeString();
+        const row = new BoxRenderable(renderer, { flexDirection: 'row', width: '100%' });
+        row.add(new TextRenderable(renderer, { content: `  [${time}] `, fg: 'gray' }));
+        row.add(
+          new TextRenderable(renderer, {
+            content: `[${ev.platform}] ${ev.type}: `,
+            fg: _activityPlatformColor(ev.platform),
+          }),
+        );
+        const activityMessage = toActivityChatterMessage(ev);
+        if (activityMessage) {
+          const prefix = `${ev.username} `;
+          const suffix = ev.message.startsWith(prefix)
+            ? ev.message.slice(prefix.length)
+            : ev.message;
+          const usernameNode = new TextRenderable(renderer, {
+            content: ev.username,
+            fg: _activityPlatformColor(ev.platform),
+            attributes: TextAttributes.UNDERLINE,
+          });
+          usernameNode.onMouseDown = (e) => {
+            if (e.button !== 0) return;
+            closeActivityModal();
+            openChatterInfoModal(activityMessage);
+          };
+          row.add(usernameNode);
+          row.add(
+            new TextRenderable(renderer, {
+              content: suffix ? ` ${suffix}` : '',
+              fg: _activityPlatformColor(ev.platform),
+            }),
+          );
+        } else {
+          row.add(
+            new TextRenderable(renderer, {
+              content: ev.message,
+              fg: _activityPlatformColor(ev.platform),
+            }),
+          );
+        }
+        scroll.add(row);
+      }
     }
-  }
 
-  box.add(scroll);
-  renderer.root.add(box);
-  activeActivityModal = { box };
-
-  const keyHandler = (sequence: string): boolean => {
-    if (!activeActivityModal) return false;
-    if (sequence === '\x1b' || sequence === '\x1b\x1b') {
+    box.add(scroll);
+    renderer.root.add(box);
+    const keyHandler = (sequence: string): boolean => {
+      if (!activeActivityModal) return false;
+      if (sequence === '\x1b' || sequence === '\x1b\x1b') {
+        closeActivityModal();
+        return true;
+      }
+      if (sequence === '\x1b[A') {
+        scroll.scrollBy(-1);
+        return true;
+      }
+      if (sequence === '\x1b[B') {
+        scroll.scrollBy(1);
+        return true;
+      }
+      return false;
+    };
+    const close = (): void => {
+      if (!activeActivityModal) return;
       renderer.removeInputHandler(keyHandler);
       renderer.root.remove(box.id);
       activeActivityModal = null;
-      uiNodes?.inputEl.focus();
-      return true;
-    }
-    if (sequence === '\x1b[A') {
-      scroll.scrollBy(-1);
-      return true;
-    }
-    if (sequence === '\x1b[B') {
-      scroll.scrollBy(1);
-      return true;
-    }
-    return false;
-  };
-  renderer.prependInputHandler(keyHandler);
+      ensureMainInputFocus();
+    };
+    activeActivityModal = { box, close };
+    renderer.prependInputHandler(keyHandler);
+  } catch (err) {
+    lastMessages.push(`[system] Failed to open activity modal: ${String(err)}`);
+    updateUI(lastMessages);
+  }
 }
 
 function openMemoryStatusModal(): void {
@@ -1214,8 +1325,61 @@ function updateUI(messages: ChatLine[]): void {
   const startedAt = performance.now();
   trimUiChatMemory();
   pruneActivityEvents();
+  refreshDynamicUiNodes();
+  const { renderer, chatScroll, sidebarBox, sidebarScroll } = uiNodes;
+
+  // Chat: clear and refill
+  clearScrollBox(chatScroll);
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i]!;
+    let rendered: TextRenderable | BoxRenderable;
+    if (browseModeActive && i === browseSelectedIdx) {
+      rendered = renderHighlightedChatLine(renderer, msg);
+    } else {
+      rendered = renderChatLine(renderer, msg);
+    }
+    if (typeof msg !== 'string' && msg.rawMsg) {
+      const rawMsg = msg.rawMsg;
+      rendered.onMouseDown = (e) => {
+        if (e.button === 0) openChatterInfoModal(rawMsg);
+      };
+    }
+    chatScroll.add(rendered);
+  }
+
+  // Sidebar: clear and refill
+  const eventsVisible = boolSetting(settings.get('events.visible', true), true);
+  const logsVisible = boolSetting(settings.get('logs.visible', true), true);
+  const eventsTail = numSetting(settings.get('events.tail', 15), 15);
+  const logsTail = numSetting(settings.get('logs.tail', 20), 20);
+  sidebarBox.visible = eventsVisible || logsVisible;
+  clearScrollBox(sidebarScroll);
+  _fillSidebar(renderer, sidebarScroll, eventsVisible, logsVisible, eventsTail, logsTail);
+
+  ensureMainInputFocus();
+  lastUpdateLoopSignature = getUpdateLoopRefreshSignature();
+
+  const durationMs = performance.now() - startedAt;
+  updateUiCount += 1;
+  updateUiTotalDurationMs += durationMs;
+  updateUiLastDurationMs = durationMs;
+  if (durationMs > updateUiMaxDurationMs) {
+    updateUiMaxDurationMs = durationMs;
+  }
+  updateUiLastMessageCount = messages.length;
+  const chatChildren = chatScroll.getChildren().length;
+  const sidebarChildren = sidebarScroll.getChildren().length;
+  if (chatChildren > updateUiChatChildrenHighWater) {
+    updateUiChatChildrenHighWater = chatChildren;
+  }
+  if (sidebarChildren > updateUiSidebarChildrenHighWater) {
+    updateUiSidebarChildrenHighWater = sidebarChildren;
+  }
+}
+
+function refreshDynamicUiNodes(): void {
+  if (!uiNodes) return;
   const {
-    renderer,
     titleText,
     subtitleText,
     platformTexts,
@@ -1223,9 +1387,6 @@ function updateUI(messages: ChatLine[]): void {
     obsText,
     demoText,
     totalViewersText,
-    chatScroll,
-    sidebarBox,
-    sidebarScroll,
   } = uiNodes;
 
   // Title visibility
@@ -1270,25 +1431,6 @@ function updateUI(messages: ChatLine[]): void {
   memoryText.fg = memoryState.fg;
   memoryText.visible = memoryState.visible;
 
-  // Chat: clear and refill
-  clearScrollBox(chatScroll);
-  for (let i = 0; i < messages.length; i++) {
-    const msg = messages[i]!;
-    let rendered: TextRenderable | BoxRenderable;
-    if (browseModeActive && i === browseSelectedIdx) {
-      rendered = renderHighlightedChatLine(renderer, msg);
-    } else {
-      rendered = renderChatLine(renderer, msg);
-    }
-    if (typeof msg !== 'string' && msg.rawMsg) {
-      const rawMsg = msg.rawMsg;
-      rendered.onMouseDown = (e) => {
-        if (e.button === 0) openChatterInfoModal(rawMsg);
-      };
-    }
-    chatScroll.add(rendered);
-  }
-
   // Browse mode status indicator
   const { composeTargetText } = uiNodes;
   if (browseModeActive) {
@@ -1303,35 +1445,6 @@ function updateUI(messages: ChatLine[]): void {
   const { activityBar, activityBarText } = uiNodes;
   activityBar.visible = _activityBarShouldBeVisible();
   _updateActivityBarText(activityBarText);
-
-  // Sidebar: clear and refill
-  const eventsVisible = boolSetting(settings.get('events.visible', true), true);
-  const logsVisible = boolSetting(settings.get('logs.visible', true), true);
-  const eventsTail = numSetting(settings.get('events.tail', 15), 15);
-  const logsTail = numSetting(settings.get('logs.tail', 20), 20);
-  sidebarBox.visible = eventsVisible || logsVisible;
-  clearScrollBox(sidebarScroll);
-  _fillSidebar(renderer, sidebarScroll, eventsVisible, logsVisible, eventsTail, logsTail);
-
-  ensureMainInputFocus();
-  lastUpdateLoopSignature = getUpdateLoopRefreshSignature();
-
-  const durationMs = performance.now() - startedAt;
-  updateUiCount += 1;
-  updateUiTotalDurationMs += durationMs;
-  updateUiLastDurationMs = durationMs;
-  if (durationMs > updateUiMaxDurationMs) {
-    updateUiMaxDurationMs = durationMs;
-  }
-  updateUiLastMessageCount = messages.length;
-  const chatChildren = chatScroll.getChildren().length;
-  const sidebarChildren = sidebarScroll.getChildren().length;
-  if (chatChildren > updateUiChatChildrenHighWater) {
-    updateUiChatChildrenHighWater = chatChildren;
-  }
-  if (sidebarChildren > updateUiSidebarChildrenHighWater) {
-    updateUiSidebarChildrenHighWater = sidebarChildren;
-  }
 }
 
 // ─── Command dispatch ────────────────────────────────────────────────────────
@@ -3596,7 +3709,9 @@ const commandHandlers: Record<
       const changedKeys = await persistSettingEntries([{ key, value }]);
       if (changedKeys.length === 0) emit('[settings] No changes.');
       else {
-        emit(`[settings] set ${key} = ${JSON.stringify(value)}`);
+        emit(
+          `[settings] set ${key} = ${JSON.stringify(normalizeSettingValueForPersistence(key, value))}`,
+        );
         if (changedKeys.includes('tui.emotes.scale')) {
           void reloadTuiFfzEmotes('tui-emote-scale-command');
         }
@@ -3604,7 +3719,7 @@ const commandHandlers: Record<
     } else {
       emit('[system] Usage: /settings | /settings get <key> | /settings set <key> <json-value>');
       emit(
-        '[system] Common keys: stream.title, stream.description, chat.maxHistorySize, demo, title.visible, logs.visible, logs.height, logs.tail, viewers.visible, viewers.mode, status.platformIcons.visible, status.platformIcons.youtube.sizePx, status.platformIcons.twitch.sizePx, status.platformIcons.kick.sizePx, memory.status.visible, memory.status.greenMaxMb, memory.status.orangeMinMb, memory.status.redMinMb, messages.position, chat.timestamps.visible, tui.emotes.scale, events.visible, events.tail, events.width, platforms.<provider>.showViewers, platforms.youtube.setup.*',
+        '[system] Common keys: stream.title, stream.description, chat.maxHistorySize, demo, title.visible, logs.visible, logs.level, logs.height, logs.tail, viewers.visible, viewers.mode, status.platformIcons.visible, status.platformIcons.youtube.sizePx, status.platformIcons.twitch.sizePx, status.platformIcons.kick.sizePx, memory.status.visible, memory.status.greenMaxMb, memory.status.orangeMinMb, memory.status.redMinMb, memory.telemetry.enabled, memory.telemetry.intervalMinutes, messages.position, chat.timestamps.visible, tui.emotes.scale, events.visible, events.tail, events.width, platforms.<provider>.showViewers, platforms.youtube.setup.*',
       );
     }
   },
@@ -3704,11 +3819,24 @@ const commandHandlers: Record<
   },
 
   '/memory': async (_parts, emit) => {
-    if ((_parts[1] ?? '').toLowerCase() === 'modal') {
+    const sub = (_parts[1] ?? '').toLowerCase();
+    if (sub === 'modal') {
       openMemoryStatusModal();
       return;
     }
+    if (sub === 'snapshot') {
+      const label = _parts.slice(2).join(' ').trim();
+      emit(
+        '[memory] writing heap snapshot; this can pause the process and temporarily increase memory use.',
+      );
+      const snapshotPath = writeHeapSnapshotFile(label || undefined);
+      emit(`[memory] heap snapshot written to ${snapshotPath}`);
+      return;
+    }
     for (const line of formatRuntimeStatusLines(runtimeMonitor.getStatus())) {
+      emit(line);
+    }
+    for (const line of youtube.getDebugNotes()) {
       emit(line);
     }
   },
@@ -3965,6 +4093,13 @@ function openSettingsModal(): void {
         DEFAULT_MEMORY_STATUS_RED_MIN_MB,
       ),
     ),
+    memoryTelemetryEnabled: boolSetting(settings.get('memory.telemetry.enabled', false), false),
+    memoryTelemetryIntervalMinutes: String(
+      numSetting(
+        settings.get('memory.telemetry.intervalMinutes', DEFAULT_MEMORY_TELEMETRY_INTERVAL_MINUTES),
+        DEFAULT_MEMORY_TELEMETRY_INTERVAL_MINUTES,
+      ),
+    ),
     messagesPosition: String(settings.get('messages.position', 'bottom') ?? 'bottom'),
     chatTimestampsVisible: boolSetting(settings.get('chat.timestamps.visible', true), true),
     tuiEmotesScale: String(
@@ -3978,6 +4113,7 @@ function openSettingsModal(): void {
     eventsTail: String(numSetting(settings.get('events.tail', 15), 15)),
     eventsWidth: String(settings.get('events.width', '30%') ?? '30%'),
     logsVisible: boolSetting(settings.get('logs.visible', true), true),
+    logsLevel: parseLoggerLevelName(settings.get('logs.level', 'info')),
     logsHeight: String(numSetting(settings.get('logs.height', 15), 15)),
     logsTail: String(numSetting(settings.get('logs.tail', 20), 20)),
     youtubeShowViewers: boolSetting(settings.get('platforms.youtube.showViewers', true), true),
@@ -4129,6 +4265,20 @@ function openSettingsModal(): void {
     '    ',
   );
   memoryStatusRedMinMbInput.value = draft.memoryStatusRedMinMb;
+  const memoryTelemetryEnabledRow = new TextRenderable(renderer, { content: '', fg: 'white' });
+  const memoryTelemetryIntervalMinutesLabel = makeLabel(
+    '  memory.telemetry.intervalMinutes: write RSS telemetry to YASH_DATA_DIR/logs every N minutes',
+  );
+  const memoryTelemetryIntervalMinutesInput = new InputRenderable(renderer, {
+    placeholder: String(DEFAULT_MEMORY_TELEMETRY_INTERVAL_MINUTES),
+    width: '100%',
+  });
+  const memoryTelemetryIntervalMinutesInputRow = createIndentedInputRow(
+    renderer,
+    memoryTelemetryIntervalMinutesInput,
+    '    ',
+  );
+  memoryTelemetryIntervalMinutesInput.value = draft.memoryTelemetryIntervalMinutes;
   const messagesPositionRow = new TextRenderable(renderer, { content: '', fg: 'white' });
   const chatTimestampsRow = new TextRenderable(renderer, { content: '', fg: 'white' });
   const tuiEmotesScaleLabel = makeLabel(
@@ -4163,6 +4313,7 @@ function openSettingsModal(): void {
   eventsTailInput.value = draft.eventsTail;
   const eventsWidthRow = new TextRenderable(renderer, { content: '', fg: 'white' });
   const logsVisibleRow = new TextRenderable(renderer, { content: '', fg: 'white' });
+  const logsLevelRow = new TextRenderable(renderer, { content: '', fg: 'white' });
   const logsHeightLabel = makeLabel(
     '  logs.height: reserved log area height when logs are visible',
   );
@@ -4230,6 +4381,9 @@ function openSettingsModal(): void {
   contentBox.add(memoryStatusOrangeMinMbInputRow);
   contentBox.add(memoryStatusRedMinMbLabel);
   contentBox.add(memoryStatusRedMinMbInputRow);
+  contentBox.add(memoryTelemetryEnabledRow);
+  contentBox.add(memoryTelemetryIntervalMinutesLabel);
+  contentBox.add(memoryTelemetryIntervalMinutesInputRow);
   contentBox.add(messagesPositionRow);
   contentBox.add(chatTimestampsRow);
   contentBox.add(tuiEmotesScaleLabel);
@@ -4242,6 +4396,7 @@ function openSettingsModal(): void {
   contentBox.add(eventsTailInputRow);
   contentBox.add(eventsWidthRow);
   contentBox.add(logsVisibleRow);
+  contentBox.add(logsLevelRow);
   contentBox.add(logsHeightLabel);
   contentBox.add(logsHeightInputRow);
   contentBox.add(logsTailLabel);
@@ -4412,6 +4567,27 @@ function openSettingsModal(): void {
       container: memoryStatusRedMinMbInputRow,
     },
     {
+      kind: 'toggle',
+      node: memoryTelemetryEnabledRow,
+      container: memoryTelemetryEnabledRow,
+      render: (focused) => {
+        memoryTelemetryEnabledRow.content = makeToggleRow(
+          'memory.telemetry.enabled',
+          draft.memoryTelemetryEnabled,
+          focused,
+        ).concat('  - append detailed memory telemetry JSONL under YASH_DATA_DIR/logs');
+        memoryTelemetryEnabledRow.fg = focused ? 'cyan' : 'white';
+      },
+      toggle: () => {
+        draft.memoryTelemetryEnabled = !draft.memoryTelemetryEnabled;
+      },
+    },
+    {
+      kind: 'input',
+      node: memoryTelemetryIntervalMinutesInput,
+      container: memoryTelemetryIntervalMinutesInputRow,
+    },
+    {
       kind: 'enum',
       node: messagesPositionRow,
       container: messagesPositionRow,
@@ -4492,6 +4668,20 @@ function openSettingsModal(): void {
       },
       toggle: () => {
         draft.logsVisible = !draft.logsVisible;
+      },
+    },
+    {
+      kind: 'enum',
+      node: logsLevelRow,
+      container: logsLevelRow,
+      render: (focused) => {
+        logsLevelRow.content = makeEnumRow('logs.level', draft.logsLevel, focused).concat(
+          '  - choose the minimum application log level kept and shown',
+        );
+        logsLevelRow.fg = focused ? 'cyan' : 'white';
+      },
+      cycle: (direction) => {
+        draft.logsLevel = cycleOption(draft.logsLevel, SETTINGS_LOG_LEVELS, direction);
       },
     },
     { kind: 'input', node: logsHeightInput, container: logsHeightInputRow },
@@ -4615,6 +4805,7 @@ function openSettingsModal(): void {
       memoryStatusGreenMaxMb: memoryStatusGreenMaxMbInput.value,
       memoryStatusOrangeMinMb: memoryStatusOrangeMinMbInput.value,
       memoryStatusRedMinMb: memoryStatusRedMinMbInput.value,
+      memoryTelemetryIntervalMinutes: memoryTelemetryIntervalMinutesInput.value,
       tuiEmotesScale: tuiEmotesScaleInput.value,
       chatMaxHistorySize: historySizeInput.value,
       eventsTail: eventsTailInput.value,
@@ -4719,6 +4910,7 @@ function openSettingsModal(): void {
     memoryStatusGreenMaxMbInput,
     memoryStatusOrangeMinMbInput,
     memoryStatusRedMinMbInput,
+    memoryTelemetryIntervalMinutesInput,
     historySizeInput,
     eventsTailInput,
     logsHeightInput,
@@ -7574,6 +7766,7 @@ async function main() {
     screenMode:
       (process.env.YASH_SCREEN_MODE as 'main-screen' | 'alternate-screen') ?? 'main-screen',
     consoleMode: 'disabled',
+    openConsoleOnError: false,
     useKittyKeyboard: null,
     useMouse: true,
     // Intercept Tab/Up/Down at raw sequence level.
@@ -7737,6 +7930,22 @@ async function main() {
           return true;
         }
 
+        // Ctrl+G — open the activity modal from the keyboard
+        if (
+          sequence === '\x07' &&
+          !activeModal &&
+          !activeStreamModal &&
+          !activeSettingsModal &&
+          !activeObsShutdownConfigModal &&
+          !activeScriptConfigModal &&
+          !activeHistoryModal &&
+          !activeChatterInfoModal &&
+          !activeMemoryModal
+        ) {
+          openActivityModal();
+          return true;
+        }
+
         return false;
       },
     ],
@@ -7748,6 +7957,10 @@ async function main() {
   // (e.g. "Bundled page in Xms") to bleed into the TUI.  Replace those overrides
   // with no-ops after the renderer is up; all TUI output goes through logCollector.
   const noop = () => {};
+  renderer.console.hide();
+  renderer.console.show = noop;
+  renderer.console.hide = noop;
+  renderer.console.toggle = noop;
   console.log = noop;
   console.info = noop;
   console.warn = noop;
@@ -7800,14 +8013,14 @@ async function main() {
 
   // Register activity callbacks before starting services so events emitted
   // during initialization (first webhook poll, first chat page) are not dropped.
-  twitch.onActivityEvent(({ type, message }) => {
-    pushActivityEvent('twitch', type, message);
+  twitch.onActivityEvent((event) => {
+    pushActivityEvent('twitch', event);
   });
-  kick.onActivityEvent(({ type, message }) => {
-    pushActivityEvent('kick', type, message);
+  kick.onActivityEvent((event) => {
+    pushActivityEvent('kick', event);
   });
-  youtube.onActivityEvent(({ type, message }) => {
-    pushActivityEvent('youtube', type, message);
+  youtube.onActivityEvent((event) => {
+    pushActivityEvent('youtube', event);
   });
   youtube.onStartupNotice(({ line }) => {
     lastMessages.push(line);
@@ -7967,7 +8180,7 @@ async function main() {
       if (nextRefreshSignature !== lastUpdateLoopSignature) {
         lastUpdateLoopSignature = nextRefreshSignature;
         updateUiLoopRefreshCount += 1;
-        updateUI(lastMessages);
+        refreshDynamicUiNodes();
       } else {
         updateLoopSkippedRefreshCount += 1;
       }

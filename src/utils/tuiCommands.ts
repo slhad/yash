@@ -58,7 +58,7 @@ const PLATFORMS = ['youtube', 'twitch', 'kick', 'obs'];
 const INJECT_PLATFORMS = ['twitch', 'youtube', 'kick'];
 const MSG_TARGETS = ['all', 'youtube', 'twitch', 'kick'];
 const MARKERS_ARGS = ['restore', 'clear', 'edit', 'all', 'youtube', 'twitch', 'kick'];
-const MEMORY_ARGS = ['modal'];
+const MEMORY_ARGS = ['modal', 'snapshot'];
 const SETTINGS_KEYS = [
   'chat.maxHistorySize',
   'demo',
@@ -66,6 +66,7 @@ const SETTINGS_KEYS = [
   'stream.description',
   'title.visible',
   'logs.visible',
+  'logs.level',
   'logs.height',
   'logs.tail',
   'viewers.visible',
@@ -74,6 +75,12 @@ const SETTINGS_KEYS = [
   'status.platformIcons.youtube.sizePx',
   'status.platformIcons.twitch.sizePx',
   'status.platformIcons.kick.sizePx',
+  'memory.status.visible',
+  'memory.status.greenMaxMb',
+  'memory.status.orangeMinMb',
+  'memory.status.redMinMb',
+  'memory.telemetry.enabled',
+  'memory.telemetry.intervalMinutes',
   'messages.position',
   'chat.timestamps.visible',
   'tui.emotes.scale',
