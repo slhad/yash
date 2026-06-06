@@ -99,6 +99,7 @@ describe('buildChatHistoryMessages', () => {
       timestamp: 5000,
       color: '#ff0000',
       badges: { moderator: '1' },
+      profileImageUrl: 'https://example.com/avatar.png',
       streamId: 'stream-abc',
     });
     const result = buildChatHistoryMessages(

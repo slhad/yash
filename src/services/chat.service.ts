@@ -14,6 +14,7 @@ const CHAT_MESSAGE_CORE_KEYS = new Set([
   'timestamp',
   'badges',
   'color',
+  'profileImageUrl',
   'streamId',
 ]);
 

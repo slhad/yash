@@ -33,6 +33,7 @@ export interface ChatMessage {
   timestamp: number;
   badges?: Record<string, string>;
   color?: string;
+  profileImageUrl?: string | null;
   streamId?: string;
 }
 

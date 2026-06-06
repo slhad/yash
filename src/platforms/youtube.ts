@@ -766,6 +766,11 @@ export class YouTubeProvider implements PlatformProvider {
         username: (item.authorDetails?.displayName ?? 'UnknownUser').replace(/^@/, ''),
         message: displayMessage,
         timestamp: Number.isFinite(publishedAt) ? publishedAt : Date.now(),
+        profileImageUrl:
+          typeof (item.authorDetails as { profileImageUrl?: unknown } | undefined)
+            ?.profileImageUrl === 'string'
+            ? ((item.authorDetails as { profileImageUrl?: string }).profileImageUrl ?? null)
+            : null,
       });
     }
   }

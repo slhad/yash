@@ -20,8 +20,11 @@ function formatElapsed(isoStart: string): string {
 type ChatMessage = {
   id: string;
   platform: string;
+  userId: string;
   username: string;
   message: string;
+  badges?: Record<string, string>;
+  profileImageUrl?: string | null;
 };
 
 type StatusInfo = {
@@ -104,6 +107,20 @@ function createMessageText(message: string, platform: string): HTMLSpanElement {
   return text;
 }
 
+function createBadgeList(badges: Record<string, string> | undefined): HTMLSpanElement | null {
+  if (!badges || Object.keys(badges).length === 0) return null;
+  const wrap = document.createElement('span');
+  wrap.className = 'badge-list';
+  for (const [name, value] of Object.entries(badges)) {
+    const badge = document.createElement('span');
+    badge.className = 'chat-badge';
+    badge.textContent = value && value !== '1' ? `${name}:${value}` : name;
+    badge.title = value ? `${name} (${value})` : name;
+    wrap.appendChild(badge);
+  }
+  return wrap;
+}
+
 function rerenderTwitchMessages(): void {
   for (const text of messagesEl.querySelectorAll<HTMLSpanElement>(
     '.msg[data-platform="twitch"] .text',
@@ -119,9 +136,23 @@ function renderMessage(msg: ChatMessage): HTMLDivElement {
   div.dataset.platform = msg.platform;
   div.innerHTML = platformTag(msg.platform);
 
+  if (msg.profileImageUrl) {
+    const avatar = document.createElement('img');
+    avatar.className = 'chat-avatar';
+    avatar.src = msg.profileImageUrl;
+    avatar.alt = `${msg.username} avatar`;
+    avatar.loading = 'lazy';
+    avatar.decoding = 'async';
+    div.appendChild(avatar);
+  }
+
   const username = document.createElement('span');
   username.className = 'username';
   username.textContent = `${msg.username}:`;
+  const badges = createBadgeList(msg.badges);
+  if (badges) {
+    div.appendChild(badges);
+  }
   div.appendChild(username);
   div.appendChild(createMessageText(msg.message, msg.platform));
   return div;

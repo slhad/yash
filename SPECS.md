@@ -258,6 +258,7 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
     * Stream markers via Helix `POST /helix/streams/markers` (requires channel live); returns position in seconds and marker ID
     * Read markers via Helix `GET /helix/streams/markers` — filterable by videoId
     * Chat via `@twurple/chat` (IRC-over-WebSocket): send and receive messages with badge/color metadata
+    * Web chat surfaces may enrich recent rows with bounded cached chatter profile previews (for example avatar URLs and any provider badge metadata available from chatter lookups)
     * EventSub WebSocket: `stream.online`, `stream.offline`, `channel.update`, `channel.chat.message`
     * Stream status seeded from Helix on EventSub connect (handles case where stream was already live when app started)
     * Viewer count polled from Helix every 60 seconds
@@ -388,7 +389,7 @@ Pre-v1 rule: do not add migration/compatibility behavior for old user-script or 
 | GET | `/unified` | Unified chat view (all platforms) |
 | GET | `/sidebyside` | Side-by-side chat view |
 | GET | `/api/status` | Platform + stream status for all platforms; each platform entry includes `viewerCount: number` and `streamStartTime: string\|null` |
-| GET | `/api/chat/history` | Chat history for the current stream context when a live/override `streamId` is known (merged from persisted SQLite history plus matching in-memory messages); otherwise falls back to the current in-memory chat history |
+| GET | `/api/chat/history` | Chat history for the current stream context when a live/override `streamId` is known (merged from persisted SQLite history plus matching in-memory messages); otherwise falls back to the current in-memory chat history. Responses may be display-enriched with cached chatter profile metadata such as `profileImageUrl` and `badges` |
 | POST | `/api/chat/send` | Send message: `{ message, platforms? }` |
 | GET | `/api/twitch/ffz-emotes` | Cached FrankerFaceZ emote map for the authenticated Twitch channel used by WebUI and TUI render-time chat substitution |
 | GET | `/api/stream` | Read persisted stream metadata from runtime settings |

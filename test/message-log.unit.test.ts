@@ -43,15 +43,17 @@ describe('MessageLog', () => {
       expect(results).toHaveLength(1);
     });
 
-    test('inserts message without optional fields (no color, no badges)', () => {
+    test('inserts message without optional fields (no color, no badges, no avatar)', () => {
       const msg = makeMsg({ id: 'msg-minimal', timestamp: 1000 });
       delete msg.color;
       delete msg.badges;
+      delete msg.profileImageUrl;
       log.insert(msg);
       const results = log.getForUser('twitch', 'user123');
       expect(results).toHaveLength(1);
       expect(results[0]!.color == null).toBe(true);
       expect(results[0]!.badges == null).toBe(true);
+      expect(results[0]!.profileImageUrl == null).toBe(true);
     });
   });
 
@@ -109,6 +111,20 @@ describe('MessageLog', () => {
       );
       const results = log.getForUser('twitch', 'user123');
       expect(results[0]!.badges).toEqual(badges);
+    });
+
+    test('reconstructs profileImageUrl from storage', () => {
+      log.insert(
+        makeMsg({
+          id: 'avatar',
+          platform: 'youtube',
+          userId: 'user123',
+          timestamp: 1000,
+          profileImageUrl: 'https://example.com/avatar.png',
+        }),
+      );
+      const results = log.getForUser('youtube', 'user123');
+      expect(results[0]!.profileImageUrl).toBe('https://example.com/avatar.png');
     });
 
     test('handles null color and badges gracefully', () => {
