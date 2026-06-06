@@ -175,6 +175,16 @@ export class ChatService {
     );
   }
 
+  getMessageHistoryForStreamIds(streamIds: string[]): ChatMessage[] {
+    if (streamIds.length === 0) {
+      return [];
+    }
+    const allowed = new Set(streamIds);
+    return this.messageHistory.filter(
+      (msg) => typeof msg.streamId === 'string' && allowed.has(msg.streamId),
+    );
+  }
+
   /**
    * Clear message history
    */

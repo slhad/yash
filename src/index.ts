@@ -22,7 +22,14 @@ import {
   twitch,
   youtube,
 } from './services';
+import { messageLog } from './services/message-log';
 import './actions/markers';
+import {
+  buildChatHistoryMessages,
+  getChatHistoryLimit,
+  getChatHistoryStreamIds,
+  mergeChatHistoryMessages,
+} from './utils/chatHistoryLoader';
 import { isDemoMode, resolvePort } from './utils/config';
 import { getFfzEmotePayload, type TwitchEmoteFetchContext } from './utils/ffz-fetch';
 import { getHelpCommands } from './utils/help';
@@ -304,7 +311,29 @@ Bun.serve({
     },
     '/api/chat/history': {
       GET: () => {
-        return new Response(JSON.stringify(chatService.getMessageHistory()), {
+        const streamIds = getChatHistoryStreamIds({
+          youtubeBroadcastId: youtube.getChannelInfo().broadcastId,
+          twitchStreamStartTime: twitch.getStreamStartTime(),
+          kickStreamStartTime: kick.getStreamStartTime(),
+          overrideIds: settingsStore.get('chat.historyStreamIds', []),
+        });
+        const maxHistory = getChatHistoryLimit((key, fallback) => settingsStore.get(key, fallback));
+        const history =
+          streamIds.length > 0
+            ? mergeChatHistoryMessages(
+                [
+                  buildChatHistoryMessages(
+                    streamIds,
+                    (id, limit, offset) => messageLog.getForStream(id, limit, offset),
+                    maxHistory,
+                  ),
+                  chatService.getMessageHistoryForStreamIds(streamIds),
+                ],
+                maxHistory,
+              )
+            : chatService.getMessageHistory();
+
+        return new Response(JSON.stringify(history), {
           headers: { 'Content-Type': 'application/json' },
         });
       },

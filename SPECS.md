@@ -388,7 +388,7 @@ Pre-v1 rule: do not add migration/compatibility behavior for old user-script or 
 | GET | `/unified` | Unified chat view (all platforms) |
 | GET | `/sidebyside` | Side-by-side chat view |
 | GET | `/api/status` | Platform + stream status for all platforms; each platform entry includes `viewerCount: number` and `streamStartTime: string\|null` |
-| GET | `/api/chat/history` | Full chat message history |
+| GET | `/api/chat/history` | Chat history for the current stream context when a live/override `streamId` is known (merged from persisted SQLite history plus matching in-memory messages); otherwise falls back to the current in-memory chat history |
 | POST | `/api/chat/send` | Send message: `{ message, platforms? }` |
 | GET | `/api/twitch/ffz-emotes` | Cached FrankerFaceZ emote map for the authenticated Twitch channel used by WebUI and TUI render-time chat substitution |
 | GET | `/api/stream` | Read persisted stream metadata from runtime settings |
