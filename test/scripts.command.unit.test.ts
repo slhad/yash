@@ -27,7 +27,7 @@ describe('bundled example script helpers', () => {
     tempDir = await makeRepoTempDir('yash-scripts-list');
 
     const scripts = listBundledExampleScripts(tempDir);
-    expect(scripts).toHaveLength(3);
+    expect(scripts).toHaveLength(4);
     expect(scripts.find((script) => script.id === 'obs-scene-change')).toMatchObject({
       id: 'obs-scene-change',
       status: 'not-installed',
@@ -38,6 +38,10 @@ describe('bundled example script helpers', () => {
     });
     expect(scripts.find((script) => script.id === 'obs-source-recaller')).toMatchObject({
       id: 'obs-source-recaller',
+      status: 'not-installed',
+    });
+    expect(scripts.find((script) => script.id === 'obs-audio-routing')).toMatchObject({
+      id: 'obs-audio-routing',
       status: 'not-installed',
     });
   });
@@ -119,6 +123,9 @@ describe('/scripts command helper', () => {
     );
     expect(lines).toContain(
       '[scripts]   obs-source-recaller  — Per-scene OBS source snapshot saver with automatic scene-change restores. [not installed]',
+    );
+    expect(lines).toContain(
+      '[scripts]   obs-audio-routing  — Linux-first Hyprland + PipeWire audio router with persisted rules and runtime discovery. [not installed]',
     );
     expect(lines).toContain(
       '[scripts] Usage: /scripts | /scripts list | /scripts install <example-id> [repair|force] [copy|link]',

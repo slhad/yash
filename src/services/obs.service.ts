@@ -512,6 +512,13 @@ export class ObsService {
     });
   }
 
+  subscribeToStreamStateChanges(callback: (outputActive: boolean, event: any) => void): () => void {
+    return this.subscribeToMessages((event) => {
+      if (event?.eventType !== 'StreamStateChanged') return;
+      callback(Boolean(event?.eventData?.outputActive), event);
+    });
+  }
+
   private notifyStatusChange(connected: boolean): void {
     this.statusCallbacks.forEach((callback) => callback(connected));
   }

@@ -107,10 +107,21 @@ export type ScriptApi = {
     ) => Promise<void>;
     stopStream: () => Promise<void>;
     startStream: () => Promise<void>;
+    getStreamStatus: () => Promise<{
+      outputActive: boolean;
+      outputDuration?: number;
+      outputBytes?: number;
+      outputSkippedFrames?: number;
+      outputTotalFrames?: number;
+    }>;
     /** Returns an unsubscribe function. Also tracked by the loader for cleanup. */
     subscribeToStatusChanges: (cb: (connected: boolean) => void) => () => void;
     /** Filtered OBS event helper for CurrentProgramSceneChanged. */
     subscribeToSceneChanges: (cb: (sceneName: string, event: unknown) => void) => () => void;
+    /** Filtered OBS event helper for StreamStateChanged. */
+    subscribeToStreamStateChanges: (
+      cb: (outputActive: boolean, event: unknown) => void,
+    ) => () => void;
   };
   chat: {
     /** Send to all platforms (empty array) or specific ones (e.g. ['twitch']). */
@@ -125,5 +136,11 @@ export type ScriptApi = {
     info: (msg: string) => void;
     warn: (msg: string) => void;
     error: (msg: string) => void;
+  };
+  feedback: {
+    /** Append a line to the live TUI chat pane when available. No-op outside the TUI runtime. */
+    chat: (line: string) => void;
+    /** Append an operational event to the live Events & Logs sidebar when available. */
+    event: (type: string, message: string) => void;
   };
 };

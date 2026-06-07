@@ -137,6 +137,13 @@ function createMockApi(options?: {
       setSceneItemTransform,
       stopStream: async () => {},
       startStream: async () => {},
+      getStreamStatus: async () => ({
+        outputActive: false,
+        outputDuration: 0,
+        outputBytes: 0,
+        outputSkippedFrames: 0,
+        outputTotalFrames: 0,
+      }),
       subscribeToStatusChanges: () => () => {},
       subscribeToSceneChanges: (cb) => {
         sceneChangeCallback = cb;
@@ -145,6 +152,7 @@ function createMockApi(options?: {
           sceneChangeCallback = null;
         };
       },
+      subscribeToStreamStateChanges: () => () => {},
     },
     chat: {
       sendMessage: async () => {},
@@ -160,6 +168,10 @@ function createMockApi(options?: {
       info: loggerInfo,
       warn: loggerWarn,
       error: loggerError,
+    },
+    feedback: {
+      chat: () => {},
+      event: () => {},
     },
   };
 

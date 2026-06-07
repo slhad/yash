@@ -43,6 +43,14 @@ const BUNDLED_EXAMPLE_SCRIPTS: readonly BundledExampleScriptDefinition[] = [
     relativeDir: 'obs-source-recaller',
     files: ['README.md', 'config.jsonc', 'index.ts', 'types.d.ts'],
   },
+  {
+    id: 'obs-audio-routing',
+    name: 'OBS audio routing',
+    description:
+      'Linux-first Hyprland + PipeWire audio router with persisted rules and runtime discovery.',
+    relativeDir: 'obs-audio-routing',
+    files: ['README.md', 'config.jsonc', 'index.ts', 'types.d.ts'],
+  },
 ] as const;
 
 export const BUNDLED_EXAMPLE_SCRIPT_IDS = BUNDLED_EXAMPLE_SCRIPTS.map((script) => script.id);

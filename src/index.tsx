@@ -32,7 +32,7 @@ import {
 } from './services';
 import { ChatterCache } from './services/chatter-cache';
 import { messageLog, type StreamSummary } from './services/message-log';
-import { formatActionHelp, parseActionArgs, parseLooseActionArgs } from './utils/actionArgs';
+import { formatActionHelp, parseActionArgs } from './utils/actionArgs';
 import {
   clearActionAutocompleteCaches,
   invalidateActionAutocompleteForObsEvent,
@@ -3958,10 +3958,7 @@ const commandHandlers: Record<
       return;
     }
 
-    const { args, errors } =
-      def.argMode === 'kv_pairs'
-        ? { args: parseLooseActionArgs(parts.slice(2)), errors: [] as string[] }
-        : parseActionArgs(parts.slice(2), def.args);
+    const { args, errors } = parseActionArgs(parts.slice(2), def.args);
     if (errors.length > 0) {
       for (const err of errors) emit(`[action] ${err}`);
       return;
@@ -8039,7 +8036,16 @@ async function main() {
   });
 
   await initializeServices();
-  await loadUserScripts(getDataDir());
+  await loadUserScripts(getDataDir(), {
+    chat: (line) => {
+      lastMessages.push(line);
+      updateUI(lastMessages);
+    },
+    event: (platform, type, message) => {
+      pushEvent(platform, type, message);
+      updateUI(lastMessages);
+    },
+  });
   if (statusPlatformIconsEnabled()) {
     warmPlatformStatusIcons();
   }

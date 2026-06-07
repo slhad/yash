@@ -95,6 +95,7 @@ bun run cmd /scripts list
 bun run cmd /scripts install obs-scene-change
 bun run cmd /scripts install obs-startup
 bun run cmd /scripts install obs-source-recaller
+bun run cmd /scripts install obs-audio-routing
 bun run cmd /scripts install obs-source-recaller repair
 bun run cmd /scripts install obs-source-recaller copy
 ```
@@ -108,6 +109,7 @@ bun run cmd /scripts install obs-source-recaller copy
 - Repair merges the shipped `config.jsonc` defaults with your current `config.jsonc`, preserving your existing values and unknown keys
 - Restart YASH after install so the script is loaded at startup
 - `obs-scene-change` is the simplest voice-bridge-oriented example: configure a default scene or pass `scene=` and call `obs.scene-change.activate`
+- `obs-audio-routing` is a Linux-first Hyprland + PipeWire example that keeps persisted `Stream` / `Music` routing rules in `scripts/obs-audio-routing/config.jsonc`, exposes runtime `status` / `wiring` / `candidates` / `search` actions, can restore or repair shipped default exclusions, restores tracked streams to their previous sink when disabled, supports optional OBS stream start/stop and OBS connect/disconnect auto-enable flags, and ships with one enabled `cliamp -> Music` example rule
 
 ### `/action` command
 

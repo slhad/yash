@@ -101,8 +101,18 @@ export type ScriptApi = {
     ) => Promise<void>;
     stopStream: () => Promise<void>;
     startStream: () => Promise<void>;
+    getStreamStatus: () => Promise<{
+      outputActive: boolean;
+      outputDuration?: number;
+      outputBytes?: number;
+      outputSkippedFrames?: number;
+      outputTotalFrames?: number;
+    }>;
     subscribeToStatusChanges: (cb: (connected: boolean) => void) => () => void;
     subscribeToSceneChanges: (cb: (sceneName: string, event: unknown) => void) => () => void;
+    subscribeToStreamStateChanges: (
+      cb: (outputActive: boolean, event: unknown) => void,
+    ) => () => void;
   };
   chat: {
     sendMessage: (msg: string, platforms?: string[]) => Promise<void>;
@@ -115,6 +125,10 @@ export type ScriptApi = {
     info: (msg: string) => void;
     warn: (msg: string) => void;
     error: (msg: string) => void;
+  };
+  feedback: {
+    chat: (line: string) => void;
+    event: (type: string, message: string) => void;
   };
 };
 
@@ -136,7 +150,17 @@ function forceRegister(def: YashActionDefinition): void {
 
 // ─── ScriptApi factory ────────────────────────────────────────────────────────
 
-function createScriptApi(scriptId: string, cleanupFns: (() => void)[], dataDir: string): ScriptApi {
+type ScriptRuntimeFeedbackHooks = {
+  chat?: (line: string) => void;
+  event?: (platform: string, type: string, message: string) => void;
+};
+
+function createScriptApi(
+  scriptId: string,
+  cleanupFns: (() => void)[],
+  dataDir: string,
+  feedbackHooks?: ScriptRuntimeFeedbackHooks,
+): ScriptApi {
   let cachedScriptData: Record<string, unknown> | null = null;
   function scriptData(): Record<string, unknown> {
     if (!cachedScriptData) cachedScriptData = loadScriptConfig(scriptId, dataDir);
@@ -213,6 +237,7 @@ function createScriptApi(scriptId: string, cleanupFns: (() => void)[], dataDir: 
         obsService.setSceneItemEnabled(sceneName, sceneItemId, enabled),
       stopStream: () => obsService.stopStream(),
       startStream: () => obsService.startStream(),
+      getStreamStatus: () => obsService.getStreamStatus(),
       subscribeToStatusChanges: (cb) => {
         const unsub = obsService.subscribeToStatusChanges(cb);
         cleanupFns.push(unsub);
@@ -220,6 +245,11 @@ function createScriptApi(scriptId: string, cleanupFns: (() => void)[], dataDir: 
       },
       subscribeToSceneChanges: (cb) => {
         const unsub = obsService.subscribeToCurrentSceneChanges(cb);
+        cleanupFns.push(unsub);
+        return unsub;
+      },
+      subscribeToStreamStateChanges: (cb) => {
+        const unsub = obsService.subscribeToStreamStateChanges(cb);
         cleanupFns.push(unsub);
         return unsub;
       },
@@ -262,6 +292,10 @@ function createScriptApi(scriptId: string, cleanupFns: (() => void)[], dataDir: 
       info: (msg) => defaultLogger.info(`[script:${scriptId}] ${msg}`),
       warn: (msg) => defaultLogger.warn(`[script:${scriptId}] ${msg}`),
       error: (msg) => defaultLogger.error(`[script:${scriptId}] ${msg}`),
+    },
+    feedback: {
+      chat: (line) => feedbackHooks?.chat?.(line),
+      event: (type, message) => feedbackHooks?.event?.(scriptId, type, message),
     },
   };
 }
@@ -306,6 +340,7 @@ export default function setup(api) {
 - \`api.chat\` — sendMessage(text, platforms?)
 - \`api.settings\` — get(key, default), set(key, value)  [reads and writes the script-local config.jsonc in the same script folder]
 - \`api.logger\` — info/warn/error  [prefixed with [script:<filename>]]
+- \`api.feedback\` — append runtime feedback to the live TUI chat pane or Events & Logs sidebar when available
 
 ## Cleanup
 
@@ -471,8 +506,10 @@ export type ScriptApi = {
     setSceneItemEnabled: (sceneName: string, sceneItemId: number, enabled: boolean) => Promise<void>;
     stopStream: () => Promise<void>;
     startStream: () => Promise<void>;
+    getStreamStatus: () => Promise<{ outputActive: boolean; outputDuration?: number; outputBytes?: number; outputSkippedFrames?: number; outputTotalFrames?: number }>;
     subscribeToStatusChanges: (cb: (connected: boolean) => void) => () => void;
     subscribeToSceneChanges: (cb: (sceneName: string, event: unknown) => void) => () => void;
+    subscribeToStreamStateChanges: (cb: (outputActive: boolean, event: unknown) => void) => () => void;
   };
   chat: {
     sendMessage: (msg: string, platforms?: string[]) => Promise<void>;
@@ -485,6 +522,10 @@ export type ScriptApi = {
     info: (msg: string) => void;
     warn: (msg: string) => void;
     error: (msg: string) => void;
+  };
+  feedback: {
+    chat: (line: string) => void;
+    event: (type: string, message: string) => void;
   };
 };
 `;
@@ -506,7 +547,10 @@ function writeGeneratedFile(filePath: string, content: string): void {
 
 // ─── Main loader ──────────────────────────────────────────────────────────────
 
-export async function loadUserScripts(dataDir: string): Promise<void> {
+export async function loadUserScripts(
+  dataDir: string,
+  feedbackHooks?: ScriptRuntimeFeedbackHooks,
+): Promise<void> {
   const dir = path.join(dataDir, 'scripts');
 
   fs.mkdirSync(dir, { recursive: true });
@@ -559,7 +603,7 @@ export async function loadUserScripts(dataDir: string): Promise<void> {
         continue;
       }
 
-      const api = createScriptApi(scriptId, cleanupFns, dataDir);
+      const api = createScriptApi(scriptId, cleanupFns, dataDir, feedbackHooks);
       const teardown = await setup(api);
 
       if (typeof teardown === 'function') {
