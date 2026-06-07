@@ -45,6 +45,9 @@ describe('user script OBS recaller surface', () => {
 export default function setup(api) {
   const offScene = api.obs.subscribeToSceneChanges(() => {});
   const offStatus = api.obs.subscribeToStatusChanges(() => {});
+  const offStream = api.obs.subscribeToStreamStateChanges(() => {});
+  api.feedback.chat('[probe] hello chat');
+  api.feedback.event('probe', 'hello event');
 
   api.registerAction({
     id: '${ACTION_ID}',
@@ -68,6 +71,7 @@ export default function setup(api) {
   return () => {
     offScene();
     offStatus();
+    offStream();
   };
 }
 `,
@@ -76,6 +80,9 @@ export default function setup(api) {
 
     const unsubScene = vi.fn();
     const unsubStatus = vi.fn();
+    const unsubStream = vi.fn();
+    const feedbackChat = vi.fn();
+    const feedbackEvent = vi.fn();
     vi.spyOn(obsService, 'isConnected').mockReturnValue(true);
     const subscribeSceneSpy = vi
       .spyOn(obsService, 'subscribeToCurrentSceneChanges')
@@ -83,9 +90,19 @@ export default function setup(api) {
     const subscribeStatusSpy = vi
       .spyOn(obsService, 'subscribeToStatusChanges')
       .mockReturnValue(unsubStatus);
+    const subscribeStreamSpy = vi
+      .spyOn(obsService, 'subscribeToStreamStateChanges')
+      .mockReturnValue(unsubStream);
     vi.spyOn(obsService, 'getSceneList').mockResolvedValue({
       scenes: [{ sceneName: 'Gameplay' }, { sceneName: 'BRB' }],
       currentProgramSceneName: 'Gameplay',
+    });
+    vi.spyOn(obsService, 'getStreamStatus').mockResolvedValue({
+      outputActive: false,
+      outputDuration: 0,
+      outputBytes: 0,
+      outputSkippedFrames: 0,
+      outputTotalFrames: 0,
     });
     vi.spyOn(obsService, 'getCurrentScene').mockResolvedValue('Gameplay');
     vi.spyOn(obsService, 'getInputSettings').mockResolvedValue({ device_id: 'cam-1' });
@@ -104,10 +121,16 @@ export default function setup(api) {
       'utf8',
     );
 
-    await loadUserScripts(tempDir);
+    await loadUserScripts(tempDir, {
+      chat: feedbackChat,
+      event: feedbackEvent,
+    });
 
     expect(subscribeSceneSpy).toHaveBeenCalledTimes(1);
     expect(subscribeStatusSpy).toHaveBeenCalledTimes(1);
+    expect(subscribeStreamSpy).toHaveBeenCalledTimes(1);
+    expect(feedbackChat).toHaveBeenCalledWith('[probe] hello chat');
+    expect(feedbackEvent).toHaveBeenCalledWith('obs-api-probe', 'probe', 'hello event');
 
     const action = registry.getAction(ACTION_ID);
     expect(action).toBeDefined();
@@ -139,5 +162,7 @@ export default function setup(api) {
     expect(typesDts).toContain('getSceneItemState');
     expect(typesDts).toContain('setSceneItemTransform');
     expect(typesDts).toContain('subscribeToSceneChanges');
+    expect(typesDts).toContain('subscribeToStreamStateChanges');
+    expect(typesDts).toContain('feedback');
   });
 });

@@ -1,0 +1,127 @@
+{
+  "enabled": true,
+  "streamTargets": [],
+  "musicTargets": [
+    {
+      "id": "cliamp-music",
+      "enabled": true,
+      "match": {
+        "processBinary": "cliamp"
+      },
+      "notes": "Example terminal-hosted music app routed to Music."
+    }
+  ],
+  "exclusions": [
+    {
+      "id": "exclude-obs",
+      "enabled": true,
+      "match": {
+        "applicationName": "OBS"
+      },
+      "reason": "Never move OBS monitor/control-plane streams automatically."
+    },
+    {
+      "id": "exclude-routing-helpers",
+      "enabled": true,
+      "match": {
+        "processBinary": "pactl"
+      },
+      "reason": "Avoid routing helper commands."
+    },
+    {
+      "id": "exclude-wpctl",
+      "enabled": true,
+      "match": {
+        "processBinary": "wpctl"
+      },
+      "reason": "Avoid routing helper commands."
+    }
+  ],
+  "discovery": {
+    "enabled": true,
+    "minHitsBeforeCandidate": 3,
+    "fullscreenCandidate": {
+      "enabled": true,
+      "minAreaRatio": 0.9,
+      "requireFocused": true,
+      "excludeFloating": true
+    }
+  },
+  "feedback": {
+    "chat": {
+      "enabled": true
+    },
+    "eventsAndLogs": {
+      "enabled": true
+    }
+  },
+  "routing": {
+    "pollIntervalMs": 2000,
+    "cooldownMs": 5000
+  },
+  "obsStreaming": {
+    "enableOnStreamStart": false,
+    "disableOnStreamStop": false,
+    "enableOnObsConnect": false,
+    "disableOnObsDisconnect": false
+  },
+  "$ui": {
+    "enabled": {
+      "widget": "toggle",
+      "label": "enabled",
+      "description": "enable or disable automatic OBS audio routing entirely",
+      "order": 10
+    },
+    "streamTargets": {
+      "widget": "json",
+      "label": "streamTargets",
+      "description": "persisted approved rules routed to the Stream sink",
+      "order": 20
+    },
+    "musicTargets": {
+      "widget": "json",
+      "label": "musicTargets",
+      "description": "persisted approved rules routed to the Music sink",
+      "order": 30
+    },
+    "exclusions": {
+      "widget": "json",
+      "label": "exclusions",
+      "description": "persisted deny rules that prevent automatic routing",
+      "order": 40
+    },
+    "discovery": {
+      "widget": "json",
+      "label": "discovery",
+      "description": "runtime candidate heuristics and visibility thresholds",
+      "order": 50
+    },
+    "feedback": {
+      "widget": "json",
+      "label": "feedback",
+      "description": "runtime feedback toggles for Chat and Events & Logs",
+      "order": 60
+    },
+    "routing": {
+      "widget": "json",
+      "label": "routing",
+      "description": "polling cadence and route cooldown controls",
+      "order": 70
+    },
+    "obsStreaming": {
+      "widget": "json",
+      "label": "obsStreaming",
+      "description": "optional OBS stream-state automation for enable/disable behavior",
+      "order": 80
+    },
+    "streamTargets/*": {
+      "titleTemplate": "${index} - ${id}"
+    },
+    "musicTargets/*": {
+      "titleTemplate": "${index} - ${id}"
+    },
+    "exclusions/*": {
+      "titleTemplate": "${index} - ${id}"
+    }
+  }
+}

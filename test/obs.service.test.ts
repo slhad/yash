@@ -197,6 +197,31 @@ describe('ObsService', () => {
     expect(scenes).toEqual(['BRB', 'Gameplay']);
   });
 
+  test('should filter stream state change subscriptions', () => {
+    const states: boolean[] = [];
+    const unsubscribe = obsService.subscribeToStreamStateChanges((outputActive) => {
+      states.push(outputActive);
+    });
+
+    (obsService as any).notifyMessages({ eventType: 'CurrentProgramSceneChanged', eventData: {} });
+    (obsService as any).notifyMessages({
+      eventType: 'StreamStateChanged',
+      eventData: { outputActive: true },
+    });
+    (obsService as any).notifyMessages({
+      eventType: 'StreamStateChanged',
+      eventData: { outputActive: false },
+    });
+
+    unsubscribe();
+    (obsService as any).notifyMessages({
+      eventType: 'StreamStateChanged',
+      eventData: { outputActive: true },
+    });
+
+    expect(states).toEqual([true, false]);
+  });
+
   test('should unsubscribe from status changes', async () => {
     let callCount = 0;
     const unsubscribe = obsService.subscribeToStatusChanges(() => {

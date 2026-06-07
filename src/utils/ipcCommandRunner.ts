@@ -23,7 +23,11 @@ export async function runIpcCommand(
   if (cmd === '/markers' && (parts[1] ?? '').toLowerCase() === 'edit') {
     return 'This command requires the TUI';
   }
-  if (cmd === '/action' && (parts[1] ?? '').toLowerCase().endsWith('.configtui')) {
+  if (
+    cmd === '/action' &&
+    ((parts[1] ?? '').toLowerCase().endsWith('.config.tui') ||
+      (parts[1] ?? '').toLowerCase().endsWith('.configtui'))
+  ) {
     return 'This command requires the TUI';
   }
 

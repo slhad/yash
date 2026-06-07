@@ -99,8 +99,16 @@ async function createActionHarness(overrides: HarnessOptions = {}) {
       setSceneItemEnabled,
       stopStream: mock(async () => {}),
       startStream,
+      getStreamStatus: mock(async () => ({
+        outputActive: false,
+        outputDuration: 0,
+        outputBytes: 0,
+        outputSkippedFrames: 0,
+        outputTotalFrames: 0,
+      })),
       subscribeToStatusChanges,
       subscribeToSceneChanges: mock(() => () => {}),
+      subscribeToStreamStateChanges: mock(() => () => {}),
     },
     chat: {
       sendMessage,
