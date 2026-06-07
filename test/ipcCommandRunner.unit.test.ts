@@ -90,9 +90,9 @@ describe('runIpcCommand — IPC event logging', () => {
     expect(events).toHaveLength(0);
   });
 
-  test('returns TUI-only message for /action obs.shutdown.configTUI without calling onEvent', async () => {
+  test('returns TUI-only message for /action obs.shutdown.config.tui without calling onEvent', async () => {
     const events: Array<[string, string, string]> = [];
-    const result = await runIpcCommand('/action obs.shutdown.configTUI', fakeHandlers, () =>
+    const result = await runIpcCommand('/action obs.shutdown.config.tui', fakeHandlers, () =>
       events.push(['', '', '']),
     );
 
@@ -100,9 +100,9 @@ describe('runIpcCommand — IPC event logging', () => {
     expect(events).toHaveLength(0);
   });
 
-  test('returns TUI-only message for /action obs.source-recaller.configTUI without calling onEvent', async () => {
+  test('returns TUI-only message for /action obs.source-recaller.config.tui without calling onEvent', async () => {
     const events: Array<[string, string, string]> = [];
-    const result = await runIpcCommand('/action obs.source-recaller.configTUI', fakeHandlers, () =>
+    const result = await runIpcCommand('/action obs.source-recaller.config.tui', fakeHandlers, () =>
       events.push(['', '', '']),
     );
 
@@ -110,9 +110,9 @@ describe('runIpcCommand — IPC event logging', () => {
     expect(events).toHaveLength(0);
   });
 
-  test('returns TUI-only message for /action obs.startup.configTUI without calling onEvent', async () => {
+  test('returns TUI-only message for /action obs.startup.config.tui without calling onEvent', async () => {
     const events: Array<[string, string, string]> = [];
-    const result = await runIpcCommand('/action obs.startup.configTUI', fakeHandlers, () =>
+    const result = await runIpcCommand('/action obs.startup.config.tui', fakeHandlers, () =>
       events.push(['', '', '']),
     );
 

@@ -160,6 +160,7 @@ type SearchResult =
   | { type: 'window'; window: FocusedWindow & { matchLabel: string } };
 
 type CommandRunner = (cmd: string[], label: string) => Promise<CommandResult>;
+type EditorLauncher = (cmd: string[], label: string) => void | Promise<void>;
 
 const DEFAULT_CONFIG: ObsAudioRoutingConfig = {
   enabled: true,
@@ -322,8 +323,21 @@ let commandRunner: CommandRunner = async (cmd, label) => {
   };
 };
 
+let editorLauncher: EditorLauncher = (cmd) => {
+  Bun.spawn({
+    cmd,
+    stdin: 'ignore',
+    stdout: 'ignore',
+    stderr: 'ignore',
+  });
+};
+
 export function __setCommandRunnerForTests(nextRunner: CommandRunner): void {
   commandRunner = nextRunner;
+}
+
+export function __setEditorLauncherForTests(nextLauncher: EditorLauncher): void {
+  editorLauncher = nextLauncher;
 }
 
 function getDataDir(): string {
@@ -349,6 +363,39 @@ function normalizeNumber(value: unknown, fallback: number, min = 0, max = Number
   const parsed = typeof value === 'number' ? value : Number(value);
   if (!Number.isFinite(parsed)) return fallback;
   return Math.max(min, Math.min(max, Math.round(parsed)));
+}
+
+function shellEscape(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+function buildEditorOpenCommand(configPath: string): string[] {
+  const editor = normalizeString(process.env.VISUAL) || normalizeString(process.env.EDITOR);
+  if (!editor) {
+    throw new Error('No $VISUAL or $EDITOR is configured');
+  }
+  const editorName = editor.split(/\s+/)[0] ?? editor;
+  const editorBase = path.basename(editorName).toLowerCase();
+  const terminal = normalizeString(process.env.TERMINAL);
+  const guiEditors = new Set(['code', 'code-insiders', 'codium', 'zed', 'subl', 'gedit', 'kate']);
+  const terminalEditors = new Set(['nvim', 'vim', 'vi', 'nano', 'hx', 'helix', 'emacs']);
+
+  if (guiEditors.has(editorBase)) {
+    return ['sh', '-lc', `${editor} ${shellEscape(configPath)}`];
+  }
+
+  if (terminalEditors.has(editorBase)) {
+    if (!terminal) {
+      throw new Error(`$EDITOR is terminal-based (${editorBase}) but $TERMINAL is not configured`);
+    }
+    const terminalBase = path.basename(terminal.split(/\s+/)[0] ?? terminal).toLowerCase();
+    if (terminalBase === 'xdg-terminal-exec') {
+      return ['sh', '-lc', `${terminal} ${editor} ${shellEscape(configPath)}`];
+    }
+    return ['sh', '-lc', `${terminal} -e ${editor} ${shellEscape(configPath)}`];
+  }
+
+  return ['sh', '-lc', `${editor} ${shellEscape(configPath)}`];
 }
 
 function normalizeMatch(value: unknown): RouteRuleMatch {
@@ -1204,6 +1251,35 @@ export default function setup(api: ScriptApi): () => void {
   let disposed = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
 
+  const openConfigModal = async (ctx?: Parameters<UserScriptAction['invoke']>[1]) => {
+    if (!ctx?.ui?.openScriptConfigModal) {
+      throw new Error('This action requires the TUI');
+    }
+    const current = readConfig(api);
+    ctx.ui.openScriptConfigModal({
+      title: 'OBS Audio Routing Config',
+      intro:
+        ' Tab/Shift+Tab move focus. Space or arrows toggle booleans. Up/Down and PageUp/PageDown scroll nested config. Focus an array item row, then use [ to move up, ] to move down, and x to delete it. Enter saves persisted config. Esc cancels.',
+      prefix: '[obs-audio-routing]',
+      config: current,
+      onSaveConfig: async (draftConfig) => {
+        const next = normalizeConfig(draftConfig);
+        const changedKeys = await writeConfig(api, next);
+        if (current.enabled && !next.enabled) {
+          await restoreMovedStreams(api, runtime, next, 'disabled');
+          runtime.lastEnabledState = false;
+        } else if (!current.enabled && next.enabled) {
+          runtime.lastEnabledState = true;
+          resetScheduledTick(0);
+        }
+        return { changedKeys };
+      },
+    });
+    return {
+      output: ['[obs-audio-routing] opened config modal'],
+    };
+  };
+
   const resetScheduledTick = (delayMs: number) => {
     if (disposed) return;
     if (timer) clearTimeout(timer);
@@ -1440,7 +1516,7 @@ export default function setup(api: ScriptApi): () => void {
       },
     },
     {
-      id: 'obs-audio-routing.configTUI',
+      id: 'obs-audio-routing.config.tui',
       title: 'Open OBS audio routing config modal',
       description: 'Opens a TUI modal for editing persisted obs-audio-routing config.',
       domain: 'obs',
@@ -1448,32 +1524,27 @@ export default function setup(api: ScriptApi): () => void {
       readOnly: false,
       args: {},
       examples: [{ args: {}, description: 'Open the obs-audio-routing config modal in the TUI' }],
-      invoke: async (_args, ctx) => {
-        if (!ctx?.ui?.openScriptConfigModal) {
-          throw new Error('This action requires the TUI');
-        }
-        const current = readConfig(api);
-        ctx.ui.openScriptConfigModal({
-          title: 'OBS Audio Routing Config',
-          intro:
-            ' Tab/Shift+Tab move focus. Space or arrows toggle booleans. Up/Down and PageUp/PageDown scroll nested config. Focus an array item row, then use [ to move up, ] to move down, and x to delete it. Enter saves persisted config. Esc cancels.',
-          prefix: '[obs-audio-routing]',
-          config: current,
-          onSaveConfig: async (draftConfig) => {
-            const next = normalizeConfig(draftConfig);
-            const changedKeys = await writeConfig(api, next);
-            if (current.enabled && !next.enabled) {
-              await restoreMovedStreams(api, runtime, next, 'disabled');
-              runtime.lastEnabledState = false;
-            } else if (!current.enabled && next.enabled) {
-              runtime.lastEnabledState = true;
-              resetScheduledTick(0);
-            }
-            return { changedKeys };
-          },
-        });
+      invoke: async (_args, ctx) => openConfigModal(ctx),
+    },
+    {
+      id: 'obs-audio-routing.config.open',
+      title: 'Open OBS audio routing config in $EDITOR',
+      description:
+        'Opens the obs-audio-routing config.jsonc in $EDITOR, using $TERMINAL when the editor is terminal-based.',
+      domain: 'obs',
+      readOnly: false,
+      args: {},
+      examples: [{ args: {}, description: 'Open the obs-audio-routing config file in $EDITOR' }],
+      invoke: async () => {
+        const configPath = getConfigPath();
+        const cmd = buildEditorOpenCommand(configPath);
+        await editorLauncher(cmd, 'open config editor');
         return {
-          output: ['[obs-audio-routing] opened config modal'],
+          output: [`[obs-audio-routing] opening config in editor -> ${configPath}`],
+          data: {
+            configPath,
+            command: cmd,
+          },
         };
       },
     },

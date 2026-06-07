@@ -10,6 +10,7 @@ type HarnessOptions = {
     cmd: string[],
     label: string,
   ) => Promise<{ exitCode: number; stdout: string; stderr: string }>;
+  editorLauncher?: ReturnType<typeof mock>;
   ui?: {
     openScriptConfigModal?: ReturnType<typeof mock>;
   };
@@ -146,6 +147,7 @@ async function createHarness(options: HarnessOptions = {}) {
         stderr: '',
       })),
   );
+  mod.__setEditorLauncherForTests(options.editorLauncher ?? mock(() => {}));
   const teardown = mod.default(api);
 
   return {
@@ -231,14 +233,24 @@ describe('obs-audio-routing bundled example script', () => {
     expect(configJson.enabled).toBe(true);
   });
 
-  test('configTUI opens the generic persisted-config modal', async () => {
+  test('legacy configTUI action is removed', async () => {
     const openScriptConfigModal = mock(() => {});
     const harness = await createHarness({
       ui: { openScriptConfigModal },
     });
     tempDir = harness.tempDir;
     teardown = harness.teardown;
-    const action = harness.getAction('obs-audio-routing.configTUI');
+    expect(() => harness.getAction('obs-audio-routing.configTUI')).toThrow();
+  });
+
+  test('config.tui opens the generic persisted-config modal', async () => {
+    const openScriptConfigModal = mock(() => {});
+    const harness = await createHarness({
+      ui: { openScriptConfigModal },
+    });
+    tempDir = harness.tempDir;
+    teardown = harness.teardown;
+    const action = harness.getAction('obs-audio-routing.config.tui');
 
     const result = await action.invoke({}, { ui: { openScriptConfigModal } });
     expect(result.output).toEqual(['[obs-audio-routing] opened config modal']);
@@ -248,6 +260,34 @@ describe('obs-audio-routing bundled example script', () => {
       title: 'OBS Audio Routing Config',
       prefix: '[obs-audio-routing]',
     });
+  });
+
+  test('config.open launches $EDITOR for the config file', async () => {
+    const editorLauncher = mock(() => {});
+    const previousEditor = process.env.EDITOR;
+    const previousTerminal = process.env.TERMINAL;
+    process.env.EDITOR = 'nvim';
+    process.env.TERMINAL = 'xdg-terminal-exec';
+    try {
+      const harness = await createHarness({ editorLauncher });
+      tempDir = harness.tempDir;
+      teardown = harness.teardown;
+      const action = harness.getAction('obs-audio-routing.config.open');
+
+      const result = await action.invoke({});
+      expect(result.output[0]).toContain('[obs-audio-routing] opening config in editor ->');
+      expect(editorLauncher).toHaveBeenCalledTimes(1);
+      expect(editorLauncher.mock.calls[0]?.[0]).toEqual([
+        'sh',
+        '-lc',
+        `xdg-terminal-exec nvim '${path.join(tempDir, 'scripts', 'obs-audio-routing', 'config.jsonc')}'`,
+      ]);
+    } finally {
+      if (previousEditor === undefined) delete process.env.EDITOR;
+      else process.env.EDITOR = previousEditor;
+      if (previousTerminal === undefined) delete process.env.TERMINAL;
+      else process.env.TERMINAL = previousTerminal;
+    }
   });
 
   test('restoreDefaultExclusions re-adds only missing shipped defaults', async () => {
