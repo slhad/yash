@@ -11,7 +11,9 @@ const ACTION_IDS = [
   'obs.shutdown.cancel',
   'obs.shutdown.status',
   'obs.shutdown.config',
-  'obs.shutdown.configTUI',
+  'obs.shutdown.config.tui',
+  'obs.shutdown.config.open',
+  'obs.shutdown.actions',
 ];
 
 function clearObsShutdownActions() {
@@ -62,8 +64,8 @@ async function loadObsShutdownScript(opts: ShutdownConfigOptions = {}) {
   process.env.YASH_DATA_DIR = dataDir;
   await writeObsShutdownConfig(dataDir, opts);
   clearObsShutdownActions();
-  await import(`../src/scripts/obs-shutdown.ts?case=${tag}`);
-  return dataDir;
+  const mod = await import(`../src/scripts/obs-shutdown.ts?case=${tag}`);
+  return { dataDir, mod };
 }
 
 describe('obs.shutdown bundled script', () => {
@@ -94,7 +96,7 @@ describe('obs.shutdown bundled script', () => {
   });
 
   test('countdown end stops the OBS stream when stopStream=true in script config', async () => {
-    tempDir = await loadObsShutdownScript({ stopStream: true });
+    ({ dataDir: tempDir } = await loadObsShutdownScript({ stopStream: true }));
 
     const sendMessage = mock(async () => {});
     const ctx: ActionContext = {
@@ -128,7 +130,7 @@ describe('obs.shutdown bundled script', () => {
   });
 
   test('registers OBS scene/source autocomplete metadata on shutdown actions', async () => {
-    tempDir = await loadObsShutdownScript();
+    ({ dataDir: tempDir } = await loadObsShutdownScript());
 
     const initiate = getAction('obs.shutdown.initiate');
     const config = getAction('obs.shutdown.config');
@@ -181,10 +183,73 @@ describe('obs.shutdown bundled script', () => {
         },
       },
     });
+    expect(initiate.scriptId).toBe('obs-shutdown');
+    expect(initiate.scriptActionKind).toBe('behavior');
+    expect(config.scriptId).toBe('obs-shutdown');
+    expect(config.scriptActionKind).toBe('framework');
+  });
+
+  test('actions opens the generic script actions modal and stays TUI-only', async () => {
+    ({ dataDir: tempDir } = await loadObsShutdownScript());
+
+    const openScriptActionsModal = mock(() => {});
+    const action = getAction('obs.shutdown.actions');
+
+    expect(action.ipcEnabled).toBe(false);
+
+    const result = await action.invoke(
+      {},
+      {
+        chatService: {
+          sendMessage: mock(async () => {}),
+        } as unknown as ActionContext['chatService'],
+        providers: {},
+        ui: { openScriptActionsModal },
+      },
+    );
+
+    expect(result.output).toEqual(['[obs.shutdown] opened actions modal']);
+    expect(openScriptActionsModal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scriptId: 'obs-shutdown',
+        actionPrefix: 'obs.shutdown',
+        title: 'OBS Shutdown Actions',
+      }),
+    );
+  });
+
+  test('config.open launches $EDITOR for the config file', async () => {
+    const loaded = await loadObsShutdownScript();
+    tempDir = loaded.dataDir;
+    const editorLauncher = mock((_cmd: string[], _label: string) => {});
+    loaded.mod.__setEditorLauncherForTests(editorLauncher);
+    const previousEditor = process.env.EDITOR;
+    const previousTerminal = process.env.TERMINAL;
+    process.env.EDITOR = 'nvim';
+    process.env.TERMINAL = 'xdg-terminal-exec';
+    try {
+      const action = getAction('obs.shutdown.config.open');
+      const result = await action.invoke(
+        {},
+        { chatService: {} as ActionContext['chatService'], providers: {} },
+      );
+      expect(result.output?.[0]).toContain('[obs.shutdown] opening config in editor ->');
+      expect(editorLauncher).toHaveBeenCalledTimes(1);
+      expect(editorLauncher.mock.calls[0]?.[0]).toEqual([
+        'sh',
+        '-lc',
+        `xdg-terminal-exec nvim '${path.join(tempDir, 'scripts', 'obs-shutdown', 'config.jsonc')}'`,
+      ]);
+    } finally {
+      if (previousEditor === undefined) delete process.env.EDITOR;
+      else process.env.EDITOR = previousEditor;
+      if (previousTerminal === undefined) delete process.env.TERMINAL;
+      else process.env.TERMINAL = previousTerminal;
+    }
   });
 
   test('countdown end skips OBS stopStream when stopStream=false in script config', async () => {
-    tempDir = await loadObsShutdownScript({ stopStream: false });
+    ({ dataDir: tempDir } = await loadObsShutdownScript({ stopStream: false }));
 
     const sendMessage = mock(async () => {});
     const ctx: ActionContext = {
@@ -218,10 +283,10 @@ describe('obs.shutdown bundled script', () => {
   });
 
   test('initiate hides configured sources and mutes configured inputs', async () => {
-    tempDir = await loadObsShutdownScript({
+    ({ dataDir: tempDir } = await loadObsShutdownScript({
       hideSources: ['[SC] Brio NB'],
       muteSources: ['Mic/Aux'],
-    });
+    }));
 
     const sendMessage = mock(async () => {});
     const ctx: ActionContext = {
@@ -334,10 +399,10 @@ describe('obs.shutdown bundled script', () => {
   });
 
   test('cancel restores hidden sources and unmutes inputs', async () => {
-    tempDir = await loadObsShutdownScript({
+    ({ dataDir: tempDir } = await loadObsShutdownScript({
       hideSources: ['[SC] Brio NB'],
       muteSources: ['Mic/Aux'],
-    });
+    }));
 
     const sendMessage = mock(async () => {});
     const ctx: ActionContext = {
@@ -383,11 +448,11 @@ describe('obs.shutdown bundled script', () => {
   });
 
   test('countdown end does NOT restore sources or unmute inputs', async () => {
-    tempDir = await loadObsShutdownScript({
+    ({ dataDir: tempDir } = await loadObsShutdownScript({
       stopStream: false,
       hideSources: ['[SC] Brio NB'],
       muteSources: ['Mic/Aux'],
-    });
+    }));
 
     const sendMessage = mock(async () => {});
     const ctx: ActionContext = {
@@ -479,7 +544,7 @@ describe('obs.shutdown bundled script', () => {
   });
 
   test('config action reports effective values and persists overrides used by initiate', async () => {
-    tempDir = await loadObsShutdownScript({ stopStream: true });
+    ({ dataDir: tempDir } = await loadObsShutdownScript({ stopStream: true }));
 
     const ctx: ActionContext = {
       chatService: { sendMessage: mock(async () => {}) } as unknown as ActionContext['chatService'],
@@ -515,7 +580,7 @@ describe('obs.shutdown bundled script', () => {
   });
 
   test('config action accepts dotted aliases and warns when a countdown is already active', async () => {
-    tempDir = await loadObsShutdownScript({ stopStream: true });
+    ({ dataDir: tempDir } = await loadObsShutdownScript({ stopStream: true }));
 
     const ctx: ActionContext = {
       chatService: { sendMessage: mock(async () => {}) } as unknown as ActionContext['chatService'],
@@ -553,7 +618,7 @@ describe('obs.shutdown bundled script', () => {
   });
 
   test('config action rejects unknown keys and invalid arrays', async () => {
-    tempDir = await loadObsShutdownScript({ stopStream: true });
+    ({ dataDir: tempDir } = await loadObsShutdownScript({ stopStream: true }));
 
     const ctx: ActionContext = {
       chatService: { sendMessage: mock(async () => {}) } as unknown as ActionContext['chatService'],

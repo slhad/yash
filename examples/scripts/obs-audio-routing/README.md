@@ -5,15 +5,20 @@ Linux-first bundled example script that watches the focused Hyprland window and 
 Actions:
 
 - `obs-audio-routing.config`
-- `obs-audio-routing.configTUI`
+- `obs-audio-routing.config.tui`
+- `obs-audio-routing.config.open`
+- `obs-audio-routing.actions`
 - `obs-audio-routing.status`
+- `obs-audio-routing.wiring [wait=<duration>]`
 - `obs-audio-routing.candidates`
 - `obs-audio-routing.search`
+- `obs-audio-routing.restoreDefaultExclusions`
+- `obs-audio-routing.repairDefaultExclusions`
 
 Notes:
 
 - Initial scope is Linux + Hyprland + `pactl` / `ps`
-- `config` and `configTUI` edit the persisted script-local `config.jsonc`
+- `config`, `config.tui`, `config.open`, and `actions` are framework-owned actions injected by YASH
 - `status` and `candidates` expose runtime-only state
 - Unmatched apps stay on their current sink
 - Candidates are runtime-only and disappear on restart

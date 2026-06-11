@@ -1,5 +1,4 @@
-import * as path from 'node:path';
-import type { ScriptApi, UserScriptAction, UserScriptArgSchema } from './types';
+import type { ScriptApi, UserScriptAction, UserScriptArgSchema, UserScriptDefinition } from './types';
 
 const SCRIPT_ID = 'obs-scene-change';
 const DEFAULT_SCENE_KEY = 'defaultScene';
@@ -26,13 +25,18 @@ const OBS_SCENE_OPTIONAL_ARG = {
 function getDataDir(): string {
   return (
     process.env.YASH_DATA_DIR ||
-    path.join(process.env.XDG_CONFIG_HOME || path.join(process.env.HOME || '.', '.config'), 'yash')
+    `${process.env.XDG_CONFIG_HOME || `${process.env.HOME || '.'}/.config`}/yash`
   );
 }
 
 function getConfigPath(): string {
-  return path.join(getDataDir(), 'scripts', SCRIPT_ID, 'config.jsonc');
+  return `${getDataDir()}/scripts/${SCRIPT_ID}/config.jsonc`;
 }
+
+export const scriptDefinition = {
+  actionPrefix: 'obs.scene-change',
+  title: 'OBS Scene Change',
+} satisfies UserScriptDefinition;
 
 function normalizeScene(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
@@ -107,110 +111,6 @@ export default function setup(api: ScriptApi): void {
           data: {
             scene,
           },
-        };
-      },
-    },
-    {
-      id: 'obs.scene-change.config',
-      title: 'Configure OBS scene-change defaults',
-      description:
-        'Reads or updates the obs-scene-change script config stored in script-local config.jsonc.',
-      domain: 'obs',
-      argMode: 'kv_pairs',
-      readOnly: false,
-      voiceHint: true,
-      args: {
-        defaultScene: OBS_SCENE_OPTIONAL_ARG,
-      },
-      examples: [
-        { args: {}, description: 'Show the current obs-scene-change settings' },
-        {
-          args: { defaultScene: 'Starting Soon' },
-          description: 'Set the default scene used by voice-triggered calls',
-        },
-      ],
-      invoke: async (args) => {
-        const current = readConfig(api);
-        if (Object.keys(args).length === 0) {
-          return {
-            output: [
-              `[obs-scene-change] config path → ${getConfigPath()}`,
-              `[obs-scene-change] defaultScene → ${current.defaultScene || '(not set)'}`,
-            ],
-            data: {
-              configPath: getConfigPath(),
-              defaultScene: current.defaultScene || null,
-            },
-          };
-        }
-
-        const nextDefaultScene = normalizeScene(args.defaultScene);
-        if (nextDefaultScene === current.defaultScene) {
-          return {
-            output: ['[obs-scene-change] no changes'],
-            data: {
-              configPath: getConfigPath(),
-              defaultScene: current.defaultScene || null,
-            },
-          };
-        }
-
-        await api.settings.set(DEFAULT_SCENE_KEY, nextDefaultScene);
-        return {
-          output: [
-            '[obs-scene-change] updated overrides: defaultScene',
-            `[obs-scene-change] config path → ${getConfigPath()}`,
-          ],
-          data: {
-            configPath: getConfigPath(),
-            defaultScene: nextDefaultScene || null,
-          },
-        };
-      },
-    },
-    {
-      id: 'obs.scene-change.configTUI',
-      title: 'Open OBS scene-change config modal',
-      description: 'Opens a TUI modal for editing the obs-scene-change script config.',
-      domain: 'obs',
-      ipcEnabled: false,
-      readOnly: false,
-      voiceHint: true,
-      args: {},
-      examples: [{ args: {}, description: 'Open the obs-scene-change config modal in the TUI' }],
-      invoke: async (_args, ctx) => {
-        if (!ctx?.ui?.openScriptConfigModal) {
-          throw new Error('This action requires the TUI');
-        }
-
-        const current = readConfig(api);
-        ctx.ui.openScriptConfigModal({
-          title: 'OBS Scene Change Config',
-          intro:
-            ' Tab/Shift+Tab move focus. Enter saves changes. Esc cancels. Set a default scene here if your voice bridge should call the action without scene=.',
-          prefix: '[obs-scene-change]',
-          fields: [
-            {
-              key: 'defaultScene',
-              kind: 'text',
-              label: 'defaultScene',
-              description: 'OBS scene to switch to when no scene= override is passed',
-              value: current.defaultScene,
-              placeholder: 'BRB',
-            },
-          ],
-          onSave: async (values) => {
-            const nextDefaultScene = normalizeScene(values.defaultScene);
-            if (nextDefaultScene === current.defaultScene) {
-              return { changedKeys: [] };
-            }
-            await api.settings.set(DEFAULT_SCENE_KEY, nextDefaultScene);
-            return { changedKeys: [DEFAULT_SCENE_KEY] };
-          },
-        });
-
-        return {
-          output: ['[obs-scene-change] opened config modal'],
         };
       },
     },

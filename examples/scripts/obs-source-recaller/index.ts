@@ -1,5 +1,4 @@
-import * as path from 'node:path';
-import type { ScriptApi, UserScriptAction, UserScriptArgSchema } from './types';
+import type { ScriptApi, UserScriptAction, UserScriptArgSchema, UserScriptDefinition } from './types';
 
 type SceneItemTransform = Record<string, unknown>;
 type InputSettings = Record<string, unknown>;
@@ -109,16 +108,10 @@ const OBS_SCENE_AUTOCOMPLETE_OPTIONAL_ARG = {
   },
 } as const satisfies UserScriptArgSchema;
 
-function getDataDir(): string {
-  return (
-    process.env.YASH_DATA_DIR ||
-    path.join(process.env.XDG_CONFIG_HOME || path.join(process.env.HOME || '.', '.config'), 'yash')
-  );
-}
-
-function getConfigPath(scriptId: string): string {
-  return path.join(getDataDir(), 'scripts', scriptId, 'config.jsonc');
-}
+export const scriptDefinition = {
+  actionPrefix: 'obs.source-recaller',
+  title: 'OBS Source Recaller',
+} satisfies UserScriptDefinition;
 
 const APPLY_STAGE_ORDER: Array<{
   key: ApplyStageKey;
@@ -411,29 +404,6 @@ function describeSceneEntries(sourceRefs: string[], triggerSceneName: string): s
   return sourceRefs.map((sourceRef) => describeSourceRefForTrigger(sourceRef, triggerSceneName));
 }
 
-const DEFAULT_CONFIG_UI = {
-  startPaused: {
-    widget: 'toggle',
-    label: 'startPaused',
-    description: 'start future script loads with automatic scene recalls paused',
-    order: 10,
-  },
-  paused: {
-    widget: 'toggle',
-    label: 'paused',
-    description: 'pause automatic recalls immediately until resume or config change',
-    order: 20,
-  },
-  triggers: {
-    widget: 'json',
-    label: 'triggers',
-    description: 'JSON map of trigger scenes to ordered restore operations',
-    order: 30,
-    placeholder:
-      '{"[PS] PrimaryScreen":[{"sourceRef":"[SS] Common.Camera","stage":"inputSettings","priority":10,"checkIfChangedToApply":true,"data":{}}]}',
-  },
-} as const;
-
 export default function setup(api: ScriptApi): () => void {
   function readConfig(): SourceRecallerConfig {
     return {
@@ -456,40 +426,6 @@ export default function setup(api: ScriptApi): () => void {
   async function writeState(state: StoredState): Promise<void> {
     await api.settings.set(PAUSED_KEY, state.paused);
     await api.settings.set(TRIGGERS_KEY, state.triggers);
-  }
-
-  async function updateConfig(args: Record<string, unknown>) {
-    const effective = readConfig();
-    if (args.startPaused === undefined) {
-      return {
-        output: [
-          `[obs-source-recaller] config path → ${getConfigPath('obs-source-recaller')}`,
-          `[obs-source-recaller] startPaused → ${effective.startPaused ? 'ON' : 'OFF'}`,
-        ],
-        data: { configPath: getConfigPath('obs-source-recaller'), ...effective },
-      };
-    }
-
-    const nextStartPaused = Boolean(args.startPaused);
-    if (effective.startPaused === nextStartPaused) {
-      return {
-        output: ['[obs-source-recaller] no changes'],
-        data: { ...effective },
-      };
-    }
-
-    await api.settings.set(START_PAUSED_KEY, nextStartPaused);
-    return {
-      output: [
-        '[obs-source-recaller] updated overrides: startPaused',
-        `[obs-source-recaller] config path → ${getConfigPath('obs-source-recaller')}`,
-      ],
-      warnings:
-        readState().paused !== nextStartPaused
-          ? ['Current pause state is unchanged; startPaused applies the next time the script loads.']
-          : undefined,
-      data: { startPaused: nextStartPaused },
-    };
   }
 
   async function resolveTargetRef(rawTarget: unknown): Promise<TargetRef> {
@@ -695,94 +631,6 @@ export default function setup(api: ScriptApi): () => void {
   });
 
   const actions: UserScriptAction[] = [
-    {
-      id: 'obs.source-recaller.config',
-      title: 'Configure OBS source recaller defaults',
-      description:
-        'Reads or updates the obs-source-recaller script config stored in script-local config.jsonc.',
-      domain: 'obs',
-      argMode: 'kv_pairs',
-      readOnly: false,
-      voiceHint: true,
-      args: {
-        startPaused: { type: 'boolean', required: false },
-      },
-      examples: [
-        { args: {}, description: 'Show the effective obs-source-recaller settings' },
-        { args: { startPaused: true }, description: 'Start future script loads with recalls paused' },
-      ],
-      invoke: updateConfig,
-    },
-    {
-      id: 'obs.source-recaller.configTUI',
-      title: 'Open OBS source recaller config modal',
-      description: 'Opens a TUI modal for editing obs-source-recaller script config.',
-      domain: 'obs',
-      ipcEnabled: false,
-      readOnly: false,
-      voiceHint: true,
-      args: {},
-      examples: [{ args: {}, description: 'Open the obs-source-recaller config modal in the TUI' }],
-      invoke: async (_args, ctx) => {
-        const fullConfig = {
-          startPaused: readConfig().startPaused,
-          paused: readState().paused,
-          triggers: readState().triggers,
-          $ui: api.settings.get<Record<string, unknown>>('$ui', DEFAULT_CONFIG_UI),
-        };
-        if (!ctx?.ui?.openScriptConfigModal) {
-          throw new Error('This action requires the TUI');
-        }
-        ctx.ui.openScriptConfigModal({
-          title: 'OBS Source Recaller Config',
-          intro:
-            ' Tab/Shift+Tab move focus. Space or ◄/► toggles booleans. Up/Down and PageUp/PageDown scroll nested config. Focus an array item row, then use [ to move up, ] to move down, and x to delete it. Enter saves all changes. Esc cancels.',
-          prefix: '[obs-source-recaller]',
-          config: fullConfig,
-          onSaveConfig: async (nextConfig) => {
-            const changedKeys: string[] = [];
-            const errors: string[] = [];
-
-            if (typeof nextConfig.startPaused !== 'boolean') {
-              errors.push('startPaused must be a boolean');
-            }
-            if (typeof nextConfig.paused !== 'boolean') {
-              errors.push('paused must be a boolean');
-            }
-            const normalizedState = normalizeState(
-              { paused: nextConfig.paused, triggers: nextConfig.triggers },
-              Boolean(nextConfig.startPaused),
-            );
-            if (!isRecord(nextConfig.triggers)) {
-              errors.push('triggers must be a JSON object keyed by trigger scene name');
-            }
-            if (errors.length > 0) {
-              return { changedKeys: [], errors };
-            }
-
-            const currentConfig = fullConfig;
-            if (currentConfig.startPaused !== nextConfig.startPaused) {
-              await api.settings.set(START_PAUSED_KEY, nextConfig.startPaused);
-              changedKeys.push(START_PAUSED_KEY);
-            }
-            if (currentConfig.paused !== normalizedState.paused) {
-              await api.settings.set(PAUSED_KEY, normalizedState.paused);
-              changedKeys.push(PAUSED_KEY);
-            }
-            if (JSON.stringify(currentConfig.triggers) !== JSON.stringify(normalizedState.triggers)) {
-              await api.settings.set(TRIGGERS_KEY, normalizedState.triggers);
-              changedKeys.push(TRIGGERS_KEY);
-            }
-            if (JSON.stringify(currentConfig.$ui) !== JSON.stringify(nextConfig.$ui)) {
-              await api.settings.set('$ui', nextConfig.$ui);
-              changedKeys.push('$ui');
-            }
-            return { changedKeys };
-          },
-        });
-        return { output: ['[obs-source-recaller] opened config modal'] };
-      },
-    },
     {
       id: 'obs.source-recaller.save',
       title: 'Save current OBS source state',

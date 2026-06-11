@@ -3,7 +3,7 @@
 A yash user script that runs your stream startup sequence as an async 5-phase pipeline:
 **prepare → pre-start wait → stream start → countdown → go live**.
 
-Registers six actions: `obs.startup.begin`, `obs.startup.live`, `obs.startup.cancel`, `obs.startup.status`, `obs.startup.config`, and `obs.startup.configTUI`.
+YASH injects four framework-owned actions for this script: `obs.startup.config`, `obs.startup.config.tui`, `obs.startup.config.open`, and `obs.startup.actions`. The script itself registers four behavior actions: `obs.startup.begin`, `obs.startup.live`, `obs.startup.cancel`, and `obs.startup.status`.
 
 ## Install
 
@@ -27,7 +27,7 @@ typecheckers can resolve `import type { ScriptApi } from './types'` inside the s
 ## Configure
 
 Edit `config.jsonc` (or the symlinked copy in `~/.config/yash/scripts/obs-startup/`).
-Live edits from `config` / `configTUI` are written back into that same `config.jsonc`.
+YASH owns `config`, `config.tui`, `config.open`, and `actions` for this script; live edits from `config` / `config.tui` are written back into that same `config.jsonc`.
 
 ### Prepare phase
 
@@ -113,9 +113,13 @@ Examples:
 /action obs.startup.config countdown.delay=60 stream.start=true
 ```
 
-### `obs.startup.configTUI`
+### `obs.startup.config.tui`
 
 Opens the live TUI modal for editing the same runtime overrides as `obs.startup.config`. This action is TUI-only and is rejected over IPC.
+
+### `obs.startup.config.open`
+
+Opens the same `config.jsonc` in `$EDITOR`, using `$TERMINAL` when the editor is terminal-based.
 
 ## Usage examples
 
@@ -132,7 +136,8 @@ From the yash TUI command bar (using `/action <id>` syntax):
 /action obs.startup.begin delay=60 chatMessage=""
 /action obs.startup.config
 /action obs.startup.config countdownDelay=60 startStream=true
-/action obs.startup.configTUI
+/action obs.startup.config.tui
+/action obs.startup.config.open
 /action obs.startup.cancel
 /action obs.startup.status
 ```

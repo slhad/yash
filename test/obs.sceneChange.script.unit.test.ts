@@ -7,9 +7,6 @@ import { makeRepoTempDir, removeRepoTempDir } from './helpers/testDataDir';
 type HarnessOptions = {
   config?: Record<string, unknown>;
   sceneNames?: string[];
-  ui?: {
-    openScriptConfigModal?: ReturnType<typeof mock>;
-  };
 };
 
 async function writeObsSceneChangeConfig(
@@ -48,8 +45,6 @@ async function createActionHarness(overrides: HarnessOptions = {}) {
     scenes: sceneNames.map((sceneName) => ({ sceneName })),
   }));
   const setCurrentScene = mock(async () => {});
-  const openScriptConfigModal = overrides.ui?.openScriptConfigModal ?? mock(() => {});
-
   const api = {
     registerAction(action) {
       actions.set(action.id, action);
@@ -113,8 +108,9 @@ async function createActionHarness(overrides: HarnessOptions = {}) {
     spies: {
       getSceneList,
       setCurrentScene,
-      openScriptConfigModal,
     },
+    actionIds: [...actions.keys()],
+    mod,
   };
 }
 
@@ -147,61 +143,32 @@ describe('obs-scene-change bundled example script', () => {
     expect(harness.spies.setCurrentScene).toHaveBeenCalledWith('BRB');
   });
 
-  test('config persists defaultScene and activate uses it when scene= is omitted', async () => {
-    const harness = await createActionHarness();
+  test('activate uses persisted defaultScene when scene= is omitted', async () => {
+    const harness = await createActionHarness({
+      config: {
+        defaultScene: 'Starting Soon',
+      },
+    });
     tempDir = harness.tempDir;
-    const config = harness.getAction('obs.scene-change.config');
     const activate = harness.getAction('obs.scene-change.activate');
-
-    const configResult = await config.invoke({ defaultScene: 'Starting Soon' });
-    expect(configResult.output).toContain('[obs-scene-change] updated overrides: defaultScene');
-
-    const configJson = JSON.parse(
-      await fs.readFile(path.join(tempDir, 'scripts', 'obs-scene-change', 'config.jsonc'), 'utf8'),
-    );
-    expect(configJson).toMatchObject({ defaultScene: 'Starting Soon' });
 
     const activateResult = await activate.invoke({});
     expect(activateResult.output).toEqual(['[obs-scene-change] active scene → Starting Soon']);
     expect(harness.spies.setCurrentScene).toHaveBeenCalledWith('Starting Soon');
   });
 
-  test('configTUI opens the generic script config modal and saves defaultScene', async () => {
-    const openScriptConfigModal = mock(() => {});
-    const harness = await createActionHarness({
-      config: {
-        defaultScene: 'BRB',
-      },
-      ui: { openScriptConfigModal },
-    });
+  test('scriptDefinition is exported and framework-owned config actions are not script-registered', async () => {
+    const harness = await createActionHarness();
     tempDir = harness.tempDir;
-    const action = harness.getAction('obs.scene-change.configTUI');
-
-    expect(action.ipcEnabled).toBe(false);
-    const result = await action.invoke({}, { ui: { openScriptConfigModal } });
-    expect(result.output).toEqual(['[obs-scene-change] opened config modal']);
-    expect(openScriptConfigModal).toHaveBeenCalledTimes(1);
-
-    const spec = openScriptConfigModal.mock.calls[0]?.[0];
-    expect(spec).toMatchObject({
-      title: 'OBS Scene Change Config',
-      prefix: '[obs-scene-change]',
+    expect(harness.mod.scriptDefinition).toEqual({
+      actionPrefix: 'obs.scene-change',
+      title: 'OBS Scene Change',
     });
-    expect(spec.fields).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          key: 'defaultScene',
-          value: 'BRB',
-        }),
-      ]),
-    );
-
-    const saveResult = await spec.onSave({ defaultScene: 'Live' });
-    expect(saveResult).toEqual({ changedKeys: ['defaultScene'] });
-
-    const configJson = JSON.parse(
-      await fs.readFile(path.join(tempDir, 'scripts', 'obs-scene-change', 'config.jsonc'), 'utf8'),
-    );
-    expect(configJson).toMatchObject({ defaultScene: 'Live' });
+    expect(harness.actionIds).toEqual(['obs.scene-change.activate']);
+    expect(harness.actionIds).not.toContain('obs.scene-change.config');
+    expect(harness.actionIds).not.toContain('obs.scene-change.config.tui');
+    expect(harness.actionIds).not.toContain('obs.scene-change.config.open');
+    expect(harness.actionIds).not.toContain('obs.scene-change.actions');
+    expect(harness.actionIds).not.toContain('obs.scene-change.configTUI');
   });
 });

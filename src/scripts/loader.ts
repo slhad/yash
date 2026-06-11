@@ -3,14 +3,22 @@ import * as path from 'node:path';
 import type { ActionArgAutocompleteSpec } from '../actions/autocomplete';
 import { IpcActionError, registry } from '../actions/registry';
 import {
-  type ActionArgMode,
   IPC_ERROR_CODES,
+  type ScriptActionsModalSpec,
   type ScriptConfigModalSpec,
   type YashActionDefinition,
 } from '../actions/types';
 import { chatService, obsService } from '../services';
 import { defaultLogger } from '../utils/logger';
 import { getValueAtPath, loadScriptConfig, writeScriptConfig } from '../utils/scriptConfig';
+import {
+  ensureScriptConfigFileExists,
+  getReservedFrameworkActionIds,
+  registerFrameworkOwnedScriptActions,
+  type ScriptFrameworkMeta,
+} from './frameworkActions';
+
+export { __setScriptFrameworkEditorLauncherForTests } from './frameworkActions';
 
 // ─── Types (mirrored in ~/.config/yash/scripts/types.d.ts for user IDE support) ──
 
@@ -43,7 +51,7 @@ export type UserScriptAction = {
   ipcEnabled?: boolean;
   readOnly?: boolean;
   voiceHint?: boolean;
-  argMode?: ActionArgMode;
+  argMode?: 'schema' | 'kv_pairs';
   args?: Record<string, UserScriptArgSchema>;
   examples?: Array<{ args: Record<string, unknown>; description?: string }>;
   invoke: (
@@ -56,7 +64,14 @@ export type UserScriptActionContext = {
   emit?: (line: string) => void;
   ui?: {
     openScriptConfigModal?: (spec: ScriptConfigModalSpec) => void;
+    openScriptActionsModal?: (spec: ScriptActionsModalSpec) => void;
   };
+};
+
+export type UserScriptDefinition = {
+  actionPrefix?: string;
+  title?: string;
+  description?: string;
 };
 
 export type ScriptApi = {
@@ -155,19 +170,36 @@ type ScriptRuntimeFeedbackHooks = {
   event?: (platform: string, type: string, message: string) => void;
 };
 
+function normalizeString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function humanizeScriptTitle(actionPrefix: string): string {
+  return actionPrefix
+    .split(/[._-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
 function createScriptApi(
-  scriptId: string,
+  scriptMeta: ScriptFrameworkMeta,
   cleanupFns: (() => void)[],
   dataDir: string,
   feedbackHooks?: ScriptRuntimeFeedbackHooks,
 ): ScriptApi {
-  let cachedScriptData: Record<string, unknown> | null = null;
+  const { scriptId, actionPrefix } = scriptMeta;
+  const reservedFrameworkActionIds = getReservedFrameworkActionIds(actionPrefix);
   function scriptData(): Record<string, unknown> {
-    if (!cachedScriptData) cachedScriptData = loadScriptConfig(scriptId, dataDir);
-    return cachedScriptData;
+    return loadScriptConfig(scriptId, dataDir);
   }
   return {
     registerAction(action: UserScriptAction): void {
+      if (reservedFrameworkActionIds.has(action.id)) {
+        throw new Error(
+          `Action "${action.id}" is framework-owned for script "${scriptId}" and must not be registered by the script`,
+        );
+      }
       const isOverride = registry.getAction(action.id) !== undefined;
       if (isOverride) {
         defaultLogger.warn(`[user-scripts] "${scriptId}" overrides existing action "${action.id}"`);
@@ -179,6 +211,7 @@ function createScriptApi(
             emit: ctx.emit,
             ui: {
               openScriptConfigModal: ctx.ui?.openScriptConfigModal,
+              openScriptActionsModal: ctx.ui?.openScriptActionsModal,
             },
           });
         } catch (err) {
@@ -200,6 +233,8 @@ function createScriptApi(
         safety: 'safe',
         visibility: 'public',
         voiceHint: action.voiceHint,
+        scriptId,
+        scriptActionKind: 'behavior',
         argMode: action.argMode,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         args: (action.args ?? {}) as any,
@@ -284,7 +319,6 @@ function createScriptApi(
         }
         current[segments[segments.length - 1] as string] = JSON.parse(JSON.stringify(value));
         writeScriptConfig(scriptId, dataDir, nextSettings);
-        cachedScriptData = nextSettings;
       },
     },
 
@@ -310,13 +344,19 @@ actions for TUI/IPC use. Actions are IPC-accessible by default unless they set
 
 ## Script structure
 
-Each script must export a default \`setup\` function:
+Each script must export a default \`setup\` function. Optionally export
+\`scriptDefinition\` to customize the framework-owned action prefix and title:
 
 \`\`\`js
 // ~/.config/yash/scripts/my-action.js
+export const scriptDefinition = {
+  actionPrefix: 'custom.my-action',
+  title: 'Custom My Action',
+};
+
 export default function setup(api) {
   api.registerAction({
-    id: 'custom.my-action',
+    id: 'custom.my-action.run',
     title: 'My custom action',
     description: 'Does something cool',
     domain: 'custom',
@@ -334,8 +374,13 @@ export default function setup(api) {
 
 ## Available API (passed as first argument to setup)
 
-- \`api.registerAction(action)\` — register an IPC-accessible action
-- action \`invoke(args, ctx?)\` receives an optional runtime context; TUI-only actions can use \`ctx.ui?.openScriptConfigModal(...)\`
+- \`api.registerAction(action)\` — register script-owned behavior actions
+- framework-owned actions are injected automatically for every script:
+  - \`<prefix>.config\`
+  - \`<prefix>.config.tui\`
+  - \`<prefix>.config.open\`
+  - \`<prefix>.actions\`
+- action \`invoke(args, ctx?)\` receives an optional runtime context
 - \`api.obs\` — scene queries, input/source state helpers, scene-item transform/enabled helpers, scene-change subscription, plus stream controls
 - \`api.chat\` — sendMessage(text, platforms?)
 - \`api.settings\` — get(key, default), set(key, value)  [reads and writes the script-local config.jsonc in the same script folder]
@@ -356,7 +401,7 @@ export default function setup(api) {
 ## Configuration
 
 Each script reads its config from \`~/.config/yash/scripts/<scriptId>/config.jsonc\`.
-Create the file (JSONC = JSON with // and /* */ comments):
+The file is mandatory and YASH creates it automatically when missing (JSONC = JSON with // and /* */ comments):
 
 \`\`\`jsonc
 // ~/.config/yash/scripts/my-action/config.jsonc
@@ -372,9 +417,11 @@ Values written later with \`api.settings.set('myKey', value)\` persist back into
 ## Notes
 
 - Script ID is the filename without extension, lowercased (e.g. \`my-script.ts\` → \`my-script\`)
-- Config is read once at startup; restart yash to pick up config changes
+- Action prefix defaults to the script id unless \`scriptDefinition.actionPrefix\` is exported
+- Config values are re-read from config.jsonc on subsequent \`api.settings.get(...)\` calls, so framework \`config\` edits become visible without restarting yash
 - Restart yash to reload scripts after changes (no hot-reload)
 - User scripts can override bundled scripts by registering the same action id (logged as warning)
+- Scripts must not register framework-owned ids ending in \`.config\`, \`.config.tui\`, \`.config.open\`, or \`.actions\`
 - For TypeScript types, \`import type { ScriptApi } from './types'\` (see types.d.ts in this dir)
 
 ## Bundled script: obs-shutdown
@@ -484,7 +531,19 @@ export type UserScriptActionContext = {
       >;
       onSave: (values: Record<string, unknown>) => Promise<{ changedKeys: string[]; errors?: string[] }>;
     }) => void;
+    openScriptActionsModal?: (spec: {
+      scriptId: string;
+      actionPrefix: string;
+      title: string;
+      intro?: string;
+    }) => void;
   };
+};
+
+export type UserScriptDefinition = {
+  actionPrefix?: string;
+  title?: string;
+  description?: string;
 };
 
 export type ScriptApi = {
@@ -595,6 +654,7 @@ export async function loadUserScripts(
     try {
       const mod = await import(file);
       const setup = mod.default ?? mod.setup;
+      const definition = (mod.scriptDefinition ?? {}) as UserScriptDefinition;
 
       if (typeof setup !== 'function') {
         defaultLogger.warn(
@@ -603,12 +663,24 @@ export async function loadUserScripts(
         continue;
       }
 
-      const api = createScriptApi(scriptId, cleanupFns, dataDir, feedbackHooks);
+      ensureScriptConfigFileExists(scriptId, dataDir);
+      const scriptMeta: ScriptFrameworkMeta = {
+        scriptId,
+        actionPrefix: normalizeString(definition.actionPrefix) || scriptId,
+        title:
+          normalizeString(definition.title) ||
+          humanizeScriptTitle(normalizeString(definition.actionPrefix) || scriptId),
+        description: normalizeString(definition.description) || undefined,
+      };
+
+      const api = createScriptApi(scriptMeta, cleanupFns, dataDir, feedbackHooks);
       const teardown = await setup(api);
 
       if (typeof teardown === 'function') {
         cleanupFns.push(teardown);
       }
+
+      registerFrameworkOwnedScriptActions(scriptMeta, { dataDir });
 
       defaultLogger.info(`[user-scripts] loaded: ${path.basename(file)}`);
     } catch (err) {

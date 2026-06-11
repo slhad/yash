@@ -10,11 +10,36 @@ type HarnessOptions = {
     cmd: string[],
     label: string,
   ) => Promise<{ exitCode: number; stdout: string; stderr: string }>;
-  editorLauncher?: ReturnType<typeof mock>;
-  ui?: {
-    openScriptConfigModal?: ReturnType<typeof mock>;
-  };
 };
+
+function getNestedValue(target: Record<string, unknown>, key: string): unknown {
+  let current: unknown = target;
+  for (const segment of key.split('.').filter(Boolean)) {
+    if (!current || typeof current !== 'object' || Array.isArray(current)) return undefined;
+    current = (current as Record<string, unknown>)[segment];
+  }
+  return current;
+}
+
+function setNestedValue(
+  target: Record<string, unknown>,
+  key: string,
+  value: unknown,
+): Record<string, unknown> {
+  const nextTarget = JSON.parse(JSON.stringify(target)) as Record<string, unknown>;
+  const segments = key.split('.').filter(Boolean);
+  if (segments.length === 0) return nextTarget;
+  let current: Record<string, unknown> = nextTarget;
+  for (const segment of segments.slice(0, -1)) {
+    const next = current[segment];
+    if (!next || typeof next !== 'object' || Array.isArray(next)) {
+      current[segment] = {};
+    }
+    current = current[segment] as Record<string, unknown>;
+  }
+  current[segments[segments.length - 1] as string] = value;
+  return nextTarget;
+}
 
 async function writeConfig(dataDir: string, config: Record<string, unknown> = {}): Promise<void> {
   const scriptDir = path.join(dataDir, 'scripts', 'obs-audio-routing');
@@ -44,6 +69,7 @@ async function writeConfig(dataDir: string, config: Record<string, unknown> = {}
         routing: {
           pollIntervalMs: 2000,
           cooldownMs: 5000,
+          linkWhenSourceSinkMatches: [],
         },
         obsStreaming: {
           enableOnStreamStart: false,
@@ -74,21 +100,16 @@ async function createHarness(options: HarnessOptions = {}) {
   const actions = new Map();
   const feedbackChat = mock(() => {});
   const feedbackEvent = mock(() => {});
-  const openScriptConfigModal = options.ui?.openScriptConfigModal ?? mock(() => {});
-
   const api = {
     registerAction(action) {
       actions.set(action.id, action);
     },
     settings: {
       get(key: string, fallback: unknown): unknown {
-        return storedConfig[key] ?? fallback;
+        return getNestedValue(storedConfig, key) ?? fallback;
       },
       async set(key: string, value: unknown): Promise<void> {
-        storedConfig = {
-          ...storedConfig,
-          [key]: value,
-        };
+        storedConfig = setNestedValue(storedConfig, key, value);
         await writeConfig(tempDir, storedConfig);
       },
     },
@@ -147,7 +168,6 @@ async function createHarness(options: HarnessOptions = {}) {
         stderr: '',
       })),
   );
-  mod.__setEditorLauncherForTests(options.editorLauncher ?? mock(() => {}));
   const teardown = mod.default(api);
 
   return {
@@ -155,7 +175,9 @@ async function createHarness(options: HarnessOptions = {}) {
     teardown,
     feedbackChat,
     feedbackEvent,
-    openScriptConfigModal,
+    async setConfigValue(key: string, value: unknown) {
+      await api.settings.set(key, value);
+    },
     getAction(id: string) {
       const action = actions.get(id);
       expect(action).toBeDefined();
@@ -164,6 +186,8 @@ async function createHarness(options: HarnessOptions = {}) {
     getObsMock(name: string) {
       return api.obs[name];
     },
+    actionIds: [...actions.keys()],
+    mod,
   };
 }
 
@@ -185,109 +209,19 @@ describe('obs-audio-routing bundled example script', () => {
     tempDir = undefined;
   });
 
-  test('config reads and writes persisted config.jsonc', async () => {
-    const harness = await createHarness({
-      config: {
-        musicTargets: [
-          {
-            id: 'cliamp-music',
-            enabled: true,
-            match: {
-              processBinary: 'cliamp',
-            },
-          },
-        ],
-        exclusions: [
-          {
-            id: 'exclude-obs',
-            enabled: true,
-            match: {
-              applicationName: 'OBS',
-            },
-            reason: 'Never move OBS monitor/control-plane streams automatically.',
-          },
-        ],
-      },
-    });
+  test('scriptDefinition is exported and framework-owned config actions are not script-registered', async () => {
+    const harness = await createHarness();
     tempDir = harness.tempDir;
     teardown = harness.teardown;
-    const action = harness.getAction('obs-audio-routing.config');
-
-    const readResult = await action.invoke({});
-    expect(readResult.output).toContain(
-      `[obs-audio-routing] config path -> ${path.join(tempDir, 'scripts', 'obs-audio-routing', 'config.jsonc')}`,
-    );
-    expect(readResult.output).toContain(
-      '[obs-audio-routing] musicTarget -> cliamp-music [processBinary=cliamp]',
-    );
-    expect(readResult.output).toContain(
-      '[obs-audio-routing] exclusion -> exclude-obs [applicationName=OBS] reason="Never move OBS monitor/control-plane streams automatically."',
-    );
-
-    const updateResult = await action.invoke({ enabled: true });
-    expect(updateResult.output).toContain('[obs-audio-routing] updated: enabled');
-
-    const configJson = JSON.parse(
-      await fs.readFile(path.join(tempDir, 'scripts', 'obs-audio-routing', 'config.jsonc'), 'utf8'),
-    );
-    expect(configJson.enabled).toBe(true);
-  });
-
-  test('legacy configTUI action is removed', async () => {
-    const openScriptConfigModal = mock(() => {});
-    const harness = await createHarness({
-      ui: { openScriptConfigModal },
+    expect(harness.mod.scriptDefinition).toEqual({
+      actionPrefix: 'obs-audio-routing',
+      title: 'OBS Audio Routing',
     });
-    tempDir = harness.tempDir;
-    teardown = harness.teardown;
-    expect(() => harness.getAction('obs-audio-routing.configTUI')).toThrow();
-  });
-
-  test('config.tui opens the generic persisted-config modal', async () => {
-    const openScriptConfigModal = mock(() => {});
-    const harness = await createHarness({
-      ui: { openScriptConfigModal },
-    });
-    tempDir = harness.tempDir;
-    teardown = harness.teardown;
-    const action = harness.getAction('obs-audio-routing.config.tui');
-
-    const result = await action.invoke({}, { ui: { openScriptConfigModal } });
-    expect(result.output).toEqual(['[obs-audio-routing] opened config modal']);
-    expect(openScriptConfigModal).toHaveBeenCalledTimes(1);
-    const spec = openScriptConfigModal.mock.calls[0]?.[0];
-    expect(spec).toMatchObject({
-      title: 'OBS Audio Routing Config',
-      prefix: '[obs-audio-routing]',
-    });
-  });
-
-  test('config.open launches $EDITOR for the config file', async () => {
-    const editorLauncher = mock(() => {});
-    const previousEditor = process.env.EDITOR;
-    const previousTerminal = process.env.TERMINAL;
-    process.env.EDITOR = 'nvim';
-    process.env.TERMINAL = 'xdg-terminal-exec';
-    try {
-      const harness = await createHarness({ editorLauncher });
-      tempDir = harness.tempDir;
-      teardown = harness.teardown;
-      const action = harness.getAction('obs-audio-routing.config.open');
-
-      const result = await action.invoke({});
-      expect(result.output[0]).toContain('[obs-audio-routing] opening config in editor ->');
-      expect(editorLauncher).toHaveBeenCalledTimes(1);
-      expect(editorLauncher.mock.calls[0]?.[0]).toEqual([
-        'sh',
-        '-lc',
-        `xdg-terminal-exec nvim '${path.join(tempDir, 'scripts', 'obs-audio-routing', 'config.jsonc')}'`,
-      ]);
-    } finally {
-      if (previousEditor === undefined) delete process.env.EDITOR;
-      else process.env.EDITOR = previousEditor;
-      if (previousTerminal === undefined) delete process.env.TERMINAL;
-      else process.env.TERMINAL = previousTerminal;
-    }
+    expect(harness.actionIds).not.toContain('obs-audio-routing.config');
+    expect(harness.actionIds).not.toContain('obs-audio-routing.config.tui');
+    expect(harness.actionIds).not.toContain('obs-audio-routing.config.open');
+    expect(harness.actionIds).not.toContain('obs-audio-routing.actions');
+    expect(harness.actionIds).not.toContain('obs-audio-routing.configTUI');
   });
 
   test('restoreDefaultExclusions re-adds only missing shipped defaults', async () => {
@@ -462,7 +396,7 @@ describe('obs-audio-routing bundled example script', () => {
 
     const result = await action.invoke({ query: 'cliamp' });
     expect(result.output).toContain(
-      '[obs-audio-routing] matched live stream: PipeWire ALSA [cliamp]',
+      '[obs-audio-routing] matched live audio stream: PipeWire ALSA [cliamp]',
     );
     expect(result.output).toContain('[obs-audio-routing] current sink -> easyeffects_sink');
     expect(result.data.routePossible).toBe(true);
@@ -539,6 +473,14 @@ describe('obs-audio-routing bundled example script', () => {
           stderr: '',
         };
       }
+      if (joined === 'pw-link -l') {
+        return {
+          exitCode: 0,
+          stdout:
+            'Music:playback_FL\n  |<- alsa_playback.cliamp:output_FL\nMusic:playback_FR\n  |<- alsa_playback.cliamp:output_FR\n',
+          stderr: '',
+        };
+      }
       return { exitCode: 0, stdout: '[]', stderr: '' };
     };
 
@@ -548,12 +490,93 @@ describe('obs-audio-routing bundled example script', () => {
     const action = harness.getAction('obs-audio-routing.wiring');
 
     const result = await action.invoke({});
-    expect(result.output).toContain('[obs-audio-routing] live streams -> 2');
+    expect(result.output).toContain('[obs-audio-routing] live audio streams -> 2');
     expect(result.output).toContain(
       '[obs-audio-routing] wiring -> PipeWire ALSA [cliamp] -> Music [sink=Music#75, pid=101, derived=cliamp, media=ALSA Playback]',
     );
     expect(result.output).toContain(
       '[obs-audio-routing] wiring -> OBS -> Stream [sink=Stream#44, pid=2, process=obs, derived=monitor, media=Audio Monitor]',
+    );
+  });
+
+  test('wiring shows the current source sink name before routing', async () => {
+    const runner = async (cmd: string[]) => {
+      const joined = cmd.join(' ');
+      if (joined === 'hyprctl -j activewindow') {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            class: 'com.mitchellh.ghostty',
+            title: 'cliamp',
+            pid: 100,
+            floating: false,
+            monitor: 0,
+            fullscreen: 0,
+            size: [1920, 1080],
+          }),
+          stderr: '',
+        };
+      }
+      if (joined === 'hyprctl -j monitors') {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify([{ id: 0, width: 1920, height: 1080, focused: true }]),
+          stderr: '',
+        };
+      }
+      if (joined === 'pactl --format=json list sink-inputs') {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify([
+            {
+              index: 10,
+              sink: 75,
+              properties: {
+                'application.name': 'PipeWire ALSA [cliamp]',
+                'node.name': 'alsa_playback.cliamp',
+                'media.name': 'ALSA Playback',
+              },
+            },
+          ]),
+          stderr: '',
+        };
+      }
+      if (joined === 'pactl --format=json list sinks short') {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify([
+            { index: 44, name: 'Stream' },
+            { index: 75, name: 'easyeffects_sink' },
+          ]),
+          stderr: '',
+        };
+      }
+      if (joined === 'ps -eo pid=,ppid=,comm=,args=') {
+        return {
+          exitCode: 0,
+          stdout: '100 1 ghostty ghostty\n101 100 cliamp cliamp\n',
+          stderr: '',
+        };
+      }
+      if (joined === 'pw-link -l') {
+        return {
+          exitCode: 0,
+          stdout:
+            'easyeffects_sink:playback_FL\n  |<- alsa_playback.cliamp:output_FL\neasyeffects_sink:playback_FR\n  |<- alsa_playback.cliamp:output_FR\n',
+          stderr: '',
+        };
+      }
+      return { exitCode: 0, stdout: '[]', stderr: '' };
+    };
+
+    const harness = await createHarness({ runner });
+    tempDir = harness.tempDir;
+    teardown = harness.teardown;
+    const action = harness.getAction('obs-audio-routing.wiring');
+
+    const result = await action.invoke({});
+    expect(result.output).toContain(
+      '[obs-audio-routing] wiring -> PipeWire ALSA [cliamp] -> easyeffects_sink [sink=easyeffects_sink#75, derived=cliamp, media=ALSA Playback]',
     );
   });
 
@@ -617,6 +640,87 @@ describe('obs-audio-routing bundled example script', () => {
     expect(result.output).toContain('[obs-audio-routing] waited -> 50ms');
     expect(result.output).toContain(
       '[obs-audio-routing] focused window -> com.mitchellh.ghostty | delayed focus',
+    );
+  });
+
+  test('wiring shows multi-link fan-out when a stream feeds multiple sinks', async () => {
+    const runner = async (cmd: string[]) => {
+      const joined = cmd.join(' ');
+      if (joined === 'hyprctl -j activewindow') {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            class: 'com.mitchellh.ghostty',
+            title: 'cliamp',
+            pid: 100,
+            floating: false,
+            monitor: 0,
+            fullscreen: 0,
+            size: [1920, 1080],
+          }),
+          stderr: '',
+        };
+      }
+      if (joined === 'hyprctl -j monitors') {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify([{ id: 0, width: 1920, height: 1080, focused: true }]),
+          stderr: '',
+        };
+      }
+      if (joined === 'pactl --format=json list sink-inputs') {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify([
+            {
+              index: 10,
+              sink: 75,
+              properties: {
+                'application.name': 'PipeWire ALSA [cliamp]',
+                'node.name': 'alsa_playback.cliamp',
+                'media.name': 'ALSA Playback',
+              },
+            },
+          ]),
+          stderr: '',
+        };
+      }
+      if (joined === 'pactl --format=json list sinks short') {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify([
+            { index: 45, name: 'Music' },
+            { index: 75, name: 'easyeffects_sink' },
+          ]),
+          stderr: '',
+        };
+      }
+      if (joined === 'ps -eo pid=,ppid=,comm=,args=') {
+        return {
+          exitCode: 0,
+          stdout: '100 1 ghostty ghostty\n101 100 cliamp cliamp\n',
+          stderr: '',
+        };
+      }
+      if (joined === 'pw-link -l') {
+        return {
+          exitCode: 0,
+          stdout:
+            'Music:playback_FL\n  |<- alsa_playback.cliamp:output_FL\nMusic:playback_FR\n  |<- alsa_playback.cliamp:output_FR\neasyeffects_sink:playback_FL\n  |<- alsa_playback.cliamp:output_FL\neasyeffects_sink:playback_FR\n  |<- alsa_playback.cliamp:output_FR\n',
+          stderr: '',
+        };
+      }
+      return { exitCode: 0, stdout: '[]', stderr: '' };
+    };
+
+    const harness = await createHarness({ runner });
+    tempDir = harness.tempDir;
+    teardown = harness.teardown;
+    const action = harness.getAction('obs-audio-routing.wiring');
+
+    const result = await action.invoke({});
+    expect(result.output).toContain(
+      '[obs-audio-routing] wiring -> PipeWire ALSA [cliamp] -> Music + easyeffects_sink [sink=easyeffects_sink#75, links=Music, easyeffects_sink, derived=cliamp, media=ALSA Playback]',
     );
   });
 
@@ -697,6 +801,11 @@ describe('obs-audio-routing bundled example script', () => {
     const harness = await createHarness({
       config: {
         enabled: true,
+        routing: {
+          pollIntervalMs: 20,
+          cooldownMs: 5000,
+          linkWhenSourceSinkMatches: [],
+        },
         streamTargets: [
           {
             id: 'cliamp-stream',
@@ -722,6 +831,528 @@ describe('obs-audio-routing bundled example script', () => {
       'route',
       'moved PipeWire ALSA [cliamp] -> Stream (cliamp-stream)',
     );
+  });
+
+  test('intercepting source sinks auto-link to Music instead of moving', async () => {
+    const linkCalls: string[][] = [];
+    const runner = async (cmd: string[]) => {
+      const joined = cmd.join(' ');
+      if (joined === 'hyprctl -j activewindow') {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            class: 'com.mitchellh.ghostty',
+            title: 'cliamp',
+            pid: 100,
+            floating: false,
+            monitor: 0,
+            fullscreen: 0,
+            size: [1920, 1080],
+          }),
+          stderr: '',
+        };
+      }
+      if (joined === 'hyprctl -j monitors') {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify([{ id: 0, width: 1920, height: 1080, focused: true }]),
+          stderr: '',
+        };
+      }
+      if (joined === 'pactl --format=json list sink-inputs') {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify([
+            {
+              index: 10,
+              sink: 75,
+              properties: {
+                'application.name': 'PipeWire ALSA [cliamp]',
+                'node.name': 'alsa_playback.cliamp',
+                'media.name': 'ALSA Playback',
+              },
+            },
+          ]),
+          stderr: '',
+        };
+      }
+      if (joined === 'pactl --format=json list sinks short') {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify([
+            { index: 44, name: 'Stream' },
+            { index: 75, name: 'easyeffects_sink' },
+          ]),
+          stderr: '',
+        };
+      }
+      if (joined === 'ps -eo pid=,ppid=,comm=,args=') {
+        return {
+          exitCode: 0,
+          stdout: '100 1 ghostty ghostty\n101 100 cliamp cliamp\n',
+          stderr: '',
+        };
+      }
+      if (joined === 'pw-link -o') {
+        return {
+          exitCode: 0,
+          stdout: 'alsa_playback.cliamp:output_FL\nalsa_playback.cliamp:output_FR\n',
+          stderr: '',
+        };
+      }
+      if (joined === 'pw-link -i') {
+        return {
+          exitCode: 0,
+          stdout: 'Music:playback_FL\nMusic:playback_FR\n',
+          stderr: '',
+        };
+      }
+      if (joined === 'pw-link -l') {
+        return {
+          exitCode: 0,
+          stdout:
+            'easyeffects_sink:playback_FL\n  |<- alsa_playback.cliamp:output_FL\neasyeffects_sink:playback_FR\n  |<- alsa_playback.cliamp:output_FR\n',
+          stderr: '',
+        };
+      }
+      if (joined === 'pw-link -w alsa_playback.cliamp:output_FL Music:playback_FL') {
+        linkCalls.push(cmd);
+        return { exitCode: 0, stdout: '', stderr: '' };
+      }
+      if (joined === 'pw-link -w alsa_playback.cliamp:output_FR Music:playback_FR') {
+        linkCalls.push(cmd);
+        return { exitCode: 0, stdout: '', stderr: '' };
+      }
+      if (joined === 'hyprctl -j clients') {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify([]),
+          stderr: '',
+        };
+      }
+      return { exitCode: 0, stdout: '[]', stderr: '' };
+    };
+
+    const harness = await createHarness({
+      config: {
+        enabled: true,
+        musicTargets: [
+          {
+            id: 'cliamp-music',
+            enabled: true,
+            match: {
+              processBinary: 'cliamp',
+            },
+          },
+        ],
+        routing: {
+          pollIntervalMs: 25,
+          cooldownMs: 0,
+          linkWhenSourceSinkMatches: ['easyeffects_sink'],
+        },
+      },
+      runner,
+    });
+    tempDir = harness.tempDir;
+    teardown = harness.teardown;
+
+    await new Promise((resolve) => setTimeout(resolve, 120));
+
+    expect(linkCalls).toEqual([
+      ['pw-link', '-w', 'alsa_playback.cliamp:output_FL', 'Music:playback_FL'],
+      ['pw-link', '-w', 'alsa_playback.cliamp:output_FR', 'Music:playback_FR'],
+    ]);
+    expect(harness.feedbackChat).toHaveBeenCalledWith(
+      '[obs-audio-routing] linked PipeWire ALSA [cliamp] -> Music (cliamp-music)',
+    );
+    expect(harness.feedbackEvent).toHaveBeenCalledWith(
+      'route',
+      'linked PipeWire ALSA [cliamp] -> Music (cliamp-music)',
+    );
+  });
+
+  test('missing routing.linkWhenSourceSinkMatches still defaults intercepting sinks to link mode', async () => {
+    const linkCalls: string[][] = [];
+    const runner = async (cmd: string[]) => {
+      const joined = cmd.join(' ');
+      if (joined === 'hyprctl -j activewindow') {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            class: 'com.mitchellh.ghostty',
+            title: 'cliamp',
+            pid: 100,
+            floating: false,
+            monitor: 0,
+            fullscreen: 0,
+            size: [1920, 1080],
+          }),
+          stderr: '',
+        };
+      }
+      if (joined === 'hyprctl -j monitors') {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify([{ id: 0, width: 1920, height: 1080, focused: true }]),
+          stderr: '',
+        };
+      }
+      if (joined === 'pactl --format=json list sink-inputs') {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify([
+            {
+              index: 10,
+              sink: 75,
+              properties: {
+                'application.name': 'PipeWire ALSA [cliamp]',
+                'node.name': 'alsa_playback.cliamp',
+                'media.name': 'ALSA Playback',
+              },
+            },
+          ]),
+          stderr: '',
+        };
+      }
+      if (joined === 'pactl --format=json list sinks short') {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify([
+            { index: 45, name: 'Music' },
+            { index: 75, name: 'easyeffects_sink' },
+          ]),
+          stderr: '',
+        };
+      }
+      if (joined === 'ps -eo pid=,ppid=,comm=,args=') {
+        return {
+          exitCode: 0,
+          stdout: '100 1 ghostty ghostty\n101 100 cliamp cliamp\n',
+          stderr: '',
+        };
+      }
+      if (joined === 'pw-link -o') {
+        return {
+          exitCode: 0,
+          stdout: 'alsa_playback.cliamp:output_FL\nalsa_playback.cliamp:output_FR\n',
+          stderr: '',
+        };
+      }
+      if (joined === 'pw-link -i') {
+        return {
+          exitCode: 0,
+          stdout: 'Music:playback_FL\nMusic:playback_FR\n',
+          stderr: '',
+        };
+      }
+      if (joined === 'pw-link -l') {
+        return {
+          exitCode: 0,
+          stdout:
+            'easyeffects_sink:playback_FL\n  |<- alsa_playback.cliamp:output_FL\neasyeffects_sink:playback_FR\n  |<- alsa_playback.cliamp:output_FR\n',
+          stderr: '',
+        };
+      }
+      if (joined === 'pw-link -w alsa_playback.cliamp:output_FL Music:playback_FL') {
+        linkCalls.push(cmd);
+        return { exitCode: 0, stdout: '', stderr: '' };
+      }
+      if (joined === 'pw-link -w alsa_playback.cliamp:output_FR Music:playback_FR') {
+        linkCalls.push(cmd);
+        return { exitCode: 0, stdout: '', stderr: '' };
+      }
+      if (joined === 'hyprctl -j clients') {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify([]),
+          stderr: '',
+        };
+      }
+      return { exitCode: 0, stdout: '[]', stderr: '' };
+    };
+
+    const harness = await createHarness({
+      config: {
+        enabled: true,
+        musicTargets: [
+          {
+            id: 'cliamp-music',
+            enabled: true,
+            match: {
+              processBinary: 'cliamp',
+            },
+          },
+        ],
+        routing: {
+          pollIntervalMs: 25,
+          cooldownMs: 0,
+        },
+      },
+      runner,
+    });
+    tempDir = harness.tempDir;
+    teardown = harness.teardown;
+
+    await new Promise((resolve) => setTimeout(resolve, 120));
+
+    expect(linkCalls).toEqual([
+      ['pw-link', '-w', 'alsa_playback.cliamp:output_FL', 'Music:playback_FL'],
+      ['pw-link', '-w', 'alsa_playback.cliamp:output_FR', 'Music:playback_FR'],
+    ]);
+    expect(harness.feedbackChat).toHaveBeenCalledWith(
+      '[obs-audio-routing] linked PipeWire ALSA [cliamp] -> Music (cliamp-music)',
+    );
+    const persistedConfig = JSON.parse(
+      await fs.readFile(
+        path.join(tempDir!, 'scripts', 'obs-audio-routing', 'config.jsonc'),
+        'utf8',
+      ),
+    );
+    expect(persistedConfig.routing.linkWhenSourceSinkMatches).toEqual(['easyeffects_sink']);
+  });
+
+  test('link-mode relinks when external graph changes remove tracked links', async () => {
+    const linkCalls: string[][] = [];
+    let listCalls = 0;
+    const runner = async (cmd: string[]) => {
+      const joined = cmd.join(' ');
+      if (joined === 'hyprctl -j activewindow') {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            class: 'com.mitchellh.ghostty',
+            title: 'cliamp',
+            pid: 100,
+            floating: false,
+            monitor: 0,
+            fullscreen: 0,
+            size: [1920, 1080],
+          }),
+          stderr: '',
+        };
+      }
+      if (joined === 'hyprctl -j monitors') {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify([{ id: 0, width: 1920, height: 1080, focused: true }]),
+          stderr: '',
+        };
+      }
+      if (joined === 'pactl --format=json list sink-inputs') {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify([
+            {
+              index: 10,
+              sink: 75,
+              properties: {
+                'application.name': 'PipeWire ALSA [cliamp]',
+                'node.name': 'alsa_playback.cliamp',
+                'media.name': 'ALSA Playback',
+              },
+            },
+          ]),
+          stderr: '',
+        };
+      }
+      if (joined === 'pactl --format=json list sinks short') {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify([
+            { index: 45, name: 'Music' },
+            { index: 75, name: 'easyeffects_sink' },
+          ]),
+          stderr: '',
+        };
+      }
+      if (joined === 'ps -eo pid=,ppid=,comm=,args=') {
+        return {
+          exitCode: 0,
+          stdout: '100 1 ghostty ghostty\n101 100 cliamp cliamp\n',
+          stderr: '',
+        };
+      }
+      if (joined === 'pw-link -o') {
+        return {
+          exitCode: 0,
+          stdout: 'alsa_playback.cliamp:output_FL\nalsa_playback.cliamp:output_FR\n',
+          stderr: '',
+        };
+      }
+      if (joined === 'pw-link -i') {
+        return {
+          exitCode: 0,
+          stdout: 'Music:playback_FL\nMusic:playback_FR\n',
+          stderr: '',
+        };
+      }
+      if (joined === 'pw-link -l') {
+        listCalls += 1;
+        if (listCalls >= 4) {
+          return {
+            exitCode: 0,
+            stdout:
+              'Music:playback_FL\n  |<- alsa_playback.cliamp:output_FL\nMusic:playback_FR\n  |<- alsa_playback.cliamp:output_FR\neasyeffects_sink:playback_FL\n  |<- alsa_playback.cliamp:output_FL\neasyeffects_sink:playback_FR\n  |<- alsa_playback.cliamp:output_FR\n',
+            stderr: '',
+          };
+        }
+        return {
+          exitCode: 0,
+          stdout:
+            'easyeffects_sink:playback_FL\n  |<- alsa_playback.cliamp:output_FL\neasyeffects_sink:playback_FR\n  |<- alsa_playback.cliamp:output_FR\n',
+          stderr: '',
+        };
+      }
+      if (joined === 'pw-link -w alsa_playback.cliamp:output_FL Music:playback_FL') {
+        linkCalls.push(cmd);
+        return { exitCode: 0, stdout: '', stderr: '' };
+      }
+      if (joined === 'pw-link -w alsa_playback.cliamp:output_FR Music:playback_FR') {
+        linkCalls.push(cmd);
+        return { exitCode: 0, stdout: '', stderr: '' };
+      }
+      if (joined === 'hyprctl -j clients') {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify([]),
+          stderr: '',
+        };
+      }
+      return { exitCode: 0, stdout: '[]', stderr: '' };
+    };
+
+    const harness = await createHarness({
+      config: {
+        enabled: true,
+        musicTargets: [
+          {
+            id: 'cliamp-music',
+            enabled: true,
+            match: {
+              processBinary: 'cliamp',
+            },
+          },
+        ],
+        routing: {
+          pollIntervalMs: 25,
+          cooldownMs: 0,
+          linkWhenSourceSinkMatches: ['easyeffects_sink'],
+        },
+      },
+      runner,
+    });
+    tempDir = harness.tempDir;
+    teardown = harness.teardown;
+
+    await new Promise((resolve) => setTimeout(resolve, 320));
+
+    expect(linkCalls).toEqual([
+      ['pw-link', '-w', 'alsa_playback.cliamp:output_FL', 'Music:playback_FL'],
+      ['pw-link', '-w', 'alsa_playback.cliamp:output_FR', 'Music:playback_FR'],
+      ['pw-link', '-w', 'alsa_playback.cliamp:output_FL', 'Music:playback_FL'],
+      ['pw-link', '-w', 'alsa_playback.cliamp:output_FR', 'Music:playback_FR'],
+    ]);
+  });
+
+  test('status dedupes repeated recent outcomes for unchanged excluded streams', async () => {
+    const runner = async (cmd: string[]) => {
+      const joined = cmd.join(' ');
+      if (joined === 'hyprctl -j activewindow') {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            class: 'com.obsproject.Studio',
+            title: 'OBS',
+            pid: 2,
+            floating: false,
+            monitor: 0,
+            fullscreen: 0,
+            size: [1920, 1080],
+          }),
+          stderr: '',
+        };
+      }
+      if (joined === 'hyprctl -j monitors') {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify([{ id: 0, width: 1920, height: 1080, focused: true }]),
+          stderr: '',
+        };
+      }
+      if (joined === 'pactl --format=json list sink-inputs') {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify([
+            {
+              index: 10,
+              sink: 44,
+              properties: {
+                'application.name': 'OBS',
+                'application.process.binary': 'obs',
+                'application.process.id': 2,
+                'node.name': 'obs_output.monitor',
+                'media.name': 'Audio Monitor',
+              },
+            },
+          ]),
+          stderr: '',
+        };
+      }
+      if (joined === 'pactl --format=json list sinks short') {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify([{ index: 44, name: 'Stream' }]),
+          stderr: '',
+        };
+      }
+      if (joined === 'ps -eo pid=,ppid=,comm=,args=') {
+        return {
+          exitCode: 0,
+          stdout: '2 1 obs obs\n',
+          stderr: '',
+        };
+      }
+      if (joined === 'hyprctl -j clients') {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify([]),
+          stderr: '',
+        };
+      }
+      return { exitCode: 0, stdout: '[]', stderr: '' };
+    };
+
+    const harness = await createHarness({
+      config: {
+        enabled: true,
+        exclusions: [
+          {
+            id: 'exclude-obs',
+            enabled: true,
+            match: {
+              applicationName: 'OBS',
+            },
+            reason: 'Never move OBS monitor/control-plane streams automatically.',
+          },
+        ],
+        routing: {
+          pollIntervalMs: 25,
+          cooldownMs: 5000,
+        },
+      },
+      runner,
+    });
+    tempDir = harness.tempDir;
+    teardown = harness.teardown;
+
+    await new Promise((resolve) => setTimeout(resolve, 120));
+
+    const action = harness.getAction('obs-audio-routing.status');
+    const result = await action.invoke({});
+    const recentLines = result.output.filter((line: string) =>
+      line.includes('[obs-audio-routing] recent -> [obs-audio-routing] ignored OBS (excluded)'),
+    );
+    expect(recentLines).toHaveLength(1);
   });
 
   test('repeated unchanged move attempts are suppressed to avoid chat/log spam', async () => {
@@ -813,6 +1444,7 @@ describe('obs-audio-routing bundled example script', () => {
         routing: {
           pollIntervalMs: 25,
           cooldownMs: 0,
+          linkWhenSourceSinkMatches: [],
         },
       },
       runner,
@@ -825,113 +1457,6 @@ describe('obs-audio-routing bundled example script', () => {
     expect(moveCalls).toEqual([['pactl', 'move-sink-input', '10', 'Stream']]);
     expect(harness.feedbackChat).toHaveBeenCalledTimes(1);
     expect(harness.feedbackEvent).toHaveBeenCalledTimes(1);
-  });
-
-  test('disabling the script restores moved streams to their previous sink', async () => {
-    const moveCalls: string[][] = [];
-    const runner = async (cmd: string[]) => {
-      const joined = cmd.join(' ');
-      if (joined === 'hyprctl -j activewindow') {
-        return {
-          exitCode: 0,
-          stdout: JSON.stringify({
-            class: 'com.mitchellh.ghostty',
-            title: 'cliamp',
-            pid: 100,
-            floating: false,
-            monitor: 0,
-            fullscreen: 0,
-            size: [1920, 1080],
-          }),
-          stderr: '',
-        };
-      }
-      if (joined === 'hyprctl -j monitors') {
-        return {
-          exitCode: 0,
-          stdout: JSON.stringify([{ id: 0, width: 1920, height: 1080, focused: true }]),
-          stderr: '',
-        };
-      }
-      if (joined === 'pactl --format=json list sink-inputs') {
-        return {
-          exitCode: 0,
-          stdout: JSON.stringify([
-            {
-              index: 10,
-              sink: moveCalls.length >= 1 ? 44 : 75,
-              properties: {
-                'application.name': 'PipeWire ALSA [cliamp]',
-                'node.name': 'alsa_playback.cliamp',
-                'media.name': 'ALSA Playback',
-              },
-            },
-          ]),
-          stderr: '',
-        };
-      }
-      if (joined === 'pactl --format=json list sinks short') {
-        return {
-          exitCode: 0,
-          stdout: JSON.stringify([
-            { index: 44, name: 'Stream' },
-            { index: 75, name: 'easyeffects_sink' },
-          ]),
-          stderr: '',
-        };
-      }
-      if (joined === 'ps -eo pid=,ppid=,comm=,args=') {
-        return {
-          exitCode: 0,
-          stdout: '100 1 ghostty ghostty\n101 100 cliamp cliamp\n',
-          stderr: '',
-        };
-      }
-      if (joined === 'pactl move-sink-input 10 Stream') {
-        moveCalls.push(cmd);
-        return { exitCode: 0, stdout: '', stderr: '' };
-      }
-      if (joined === 'pactl move-sink-input 10 easyeffects_sink') {
-        moveCalls.push(cmd);
-        return { exitCode: 0, stdout: '', stderr: '' };
-      }
-      if (joined === 'hyprctl -j clients') {
-        return {
-          exitCode: 0,
-          stdout: JSON.stringify([]),
-          stderr: '',
-        };
-      }
-      return { exitCode: 0, stdout: '[]', stderr: '' };
-    };
-
-    const harness = await createHarness({
-      config: {
-        enabled: true,
-        streamTargets: [
-          {
-            id: 'cliamp-stream',
-            enabled: true,
-            match: {
-              processBinary: 'cliamp',
-            },
-          },
-        ],
-      },
-      runner,
-    });
-    tempDir = harness.tempDir;
-    teardown = harness.teardown;
-
-    await new Promise((resolve) => setTimeout(resolve, 50));
-
-    const configAction = harness.getAction('obs-audio-routing.config');
-    await configAction.invoke({ enabled: false });
-
-    expect(moveCalls).toEqual([
-      ['pactl', 'move-sink-input', '10', 'Stream'],
-      ['pactl', 'move-sink-input', '10', 'easyeffects_sink'],
-    ]);
   });
 
   test('OBS stream-state automation can enable on start and disable with restore on stop', async () => {
@@ -1181,6 +1706,172 @@ describe('obs-audio-routing bundled example script', () => {
     expect(moveCalls).toEqual([
       ['pactl', 'move-sink-input', '10', 'Stream'],
       ['pactl', 'move-sink-input', '10', 'easyeffects_sink'],
+    ]);
+  });
+
+  test('link-mode automation disconnects only YASH-created PipeWire links on disable', async () => {
+    let obsStatusCallback: ((connected: boolean) => void) | null = null;
+    const linkCalls: string[][] = [];
+    const unlinkCalls: string[][] = [];
+    const runner = async (cmd: string[]) => {
+      const joined = cmd.join(' ');
+      if (joined === 'hyprctl -j activewindow') {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            class: 'com.mitchellh.ghostty',
+            title: 'cliamp',
+            pid: 100,
+            floating: false,
+            monitor: 0,
+            fullscreen: 0,
+            size: [1920, 1080],
+          }),
+          stderr: '',
+        };
+      }
+      if (joined === 'hyprctl -j monitors') {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify([{ id: 0, width: 1920, height: 1080, focused: true }]),
+          stderr: '',
+        };
+      }
+      if (joined === 'pactl --format=json list sink-inputs') {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify([
+            {
+              index: 10,
+              sink: 75,
+              properties: {
+                'application.name': 'PipeWire ALSA [cliamp]',
+                'node.name': 'alsa_playback.cliamp',
+                'media.name': 'ALSA Playback',
+              },
+            },
+          ]),
+          stderr: '',
+        };
+      }
+      if (joined === 'pactl --format=json list sinks short') {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify([
+            { index: 45, name: 'Music' },
+            { index: 75, name: 'easyeffects_sink' },
+          ]),
+          stderr: '',
+        };
+      }
+      if (joined === 'ps -eo pid=,ppid=,comm=,args=') {
+        return {
+          exitCode: 0,
+          stdout: '100 1 ghostty ghostty\n101 100 cliamp cliamp\n',
+          stderr: '',
+        };
+      }
+      if (joined === 'pw-link -o') {
+        return {
+          exitCode: 0,
+          stdout: 'alsa_playback.cliamp:output_FL\nalsa_playback.cliamp:output_FR\n',
+          stderr: '',
+        };
+      }
+      if (joined === 'pw-link -i') {
+        return {
+          exitCode: 0,
+          stdout: 'Music:playback_FL\nMusic:playback_FR\n',
+          stderr: '',
+        };
+      }
+      if (joined === 'pw-link -l') {
+        if (linkCalls.length >= 2) {
+          return {
+            exitCode: 0,
+            stdout:
+              'Music:playback_FL\n  |<- alsa_playback.cliamp:output_FL\nMusic:playback_FR\n  |<- alsa_playback.cliamp:output_FR\neasyeffects_sink:playback_FL\n  |<- alsa_playback.cliamp:output_FL\neasyeffects_sink:playback_FR\n  |<- alsa_playback.cliamp:output_FR\n',
+            stderr: '',
+          };
+        }
+        return {
+          exitCode: 0,
+          stdout:
+            'easyeffects_sink:playback_FL\n  |<- alsa_playback.cliamp:output_FL\neasyeffects_sink:playback_FR\n  |<- alsa_playback.cliamp:output_FR\n',
+          stderr: '',
+        };
+      }
+      if (joined === 'pw-link -w alsa_playback.cliamp:output_FL Music:playback_FL') {
+        linkCalls.push(cmd);
+        return { exitCode: 0, stdout: '', stderr: '' };
+      }
+      if (joined === 'pw-link -w alsa_playback.cliamp:output_FR Music:playback_FR') {
+        linkCalls.push(cmd);
+        return { exitCode: 0, stdout: '', stderr: '' };
+      }
+      if (joined === 'pw-link -d alsa_playback.cliamp:output_FL Music:playback_FL') {
+        unlinkCalls.push(cmd);
+        return { exitCode: 0, stdout: '', stderr: '' };
+      }
+      if (joined === 'pw-link -d alsa_playback.cliamp:output_FR Music:playback_FR') {
+        unlinkCalls.push(cmd);
+        return { exitCode: 0, stdout: '', stderr: '' };
+      }
+      if (joined === 'hyprctl -j clients') {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify([]),
+          stderr: '',
+        };
+      }
+      return { exitCode: 0, stdout: '[]', stderr: '' };
+    };
+
+    const harness = await createHarness({
+      config: {
+        enabled: false,
+        musicTargets: [
+          {
+            id: 'cliamp-music',
+            enabled: true,
+            match: {
+              processBinary: 'cliamp',
+            },
+          },
+        ],
+        routing: {
+          pollIntervalMs: 25,
+          cooldownMs: 0,
+          linkWhenSourceSinkMatches: ['easyeffects_sink'],
+        },
+        obsStreaming: {
+          enableOnStreamStart: false,
+          disableOnStreamStop: false,
+          enableOnObsConnect: true,
+          disableOnObsDisconnect: true,
+        },
+      },
+      runner,
+    });
+    tempDir = harness.tempDir;
+    teardown = harness.teardown;
+    const statusMock = harness.getObsMock('subscribeToStatusChanges');
+    expect(statusMock).toHaveBeenCalledTimes(1);
+    obsStatusCallback = statusMock.mock.calls[0]?.[0] ?? null;
+    expect(obsStatusCallback).not.toBeNull();
+
+    await obsStatusCallback!(true);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await obsStatusCallback!(false);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(linkCalls).toEqual([
+      ['pw-link', '-w', 'alsa_playback.cliamp:output_FL', 'Music:playback_FL'],
+      ['pw-link', '-w', 'alsa_playback.cliamp:output_FR', 'Music:playback_FR'],
+    ]);
+    expect(unlinkCalls).toEqual([
+      ['pw-link', '-d', 'alsa_playback.cliamp:output_FL', 'Music:playback_FL'],
+      ['pw-link', '-d', 'alsa_playback.cliamp:output_FR', 'Music:playback_FR'],
     ]);
   });
 });

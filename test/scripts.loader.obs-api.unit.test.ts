@@ -7,10 +7,15 @@ import { obsService } from '../src/services';
 import { makeRepoTempDir, removeRepoTempDir } from './helpers/testDataDir';
 
 const ACTION_ID = 'test.obs-source-recaller-surface';
+const FRAMEWORK_PREFIX = 'custom.obs-probe';
 
 function clearAction(id: string) {
   const actions = (registry as unknown as { actions: Map<string, unknown> }).actions;
   actions.delete(id);
+}
+
+function clearActions(ids: string[]) {
+  for (const id of ids) clearAction(id);
 }
 
 describe('user script OBS recaller surface', () => {
@@ -18,12 +23,26 @@ describe('user script OBS recaller surface', () => {
   let tempDir: string | undefined;
 
   beforeEach(() => {
-    clearAction(ACTION_ID);
+    clearActions([
+      ACTION_ID,
+      `${FRAMEWORK_PREFIX}.ping`,
+      `${FRAMEWORK_PREFIX}.config`,
+      `${FRAMEWORK_PREFIX}.config.tui`,
+      `${FRAMEWORK_PREFIX}.config.open`,
+      `${FRAMEWORK_PREFIX}.actions`,
+    ]);
     vi.restoreAllMocks();
   });
 
   afterEach(async () => {
-    clearAction(ACTION_ID);
+    clearActions([
+      ACTION_ID,
+      `${FRAMEWORK_PREFIX}.ping`,
+      `${FRAMEWORK_PREFIX}.config`,
+      `${FRAMEWORK_PREFIX}.config.tui`,
+      `${FRAMEWORK_PREFIX}.config.open`,
+      `${FRAMEWORK_PREFIX}.actions`,
+    ]);
     vi.restoreAllMocks();
     if (originalDataDir === undefined) delete process.env.YASH_DATA_DIR;
     else process.env.YASH_DATA_DIR = originalDataDir;
@@ -164,5 +183,218 @@ export default function setup(api) {
     expect(typesDts).toContain('subscribeToSceneChanges');
     expect(typesDts).toContain('subscribeToStreamStateChanges');
     expect(typesDts).toContain('feedback');
+  });
+
+  test('loader injects framework-owned config/actions surface from scriptDefinition', async () => {
+    tempDir = await makeRepoTempDir('yash-script-framework-actions');
+    process.env.YASH_DATA_DIR = tempDir;
+
+    const scriptDir = path.join(tempDir, 'scripts');
+    await fs.mkdir(scriptDir, { recursive: true });
+    await fs.writeFile(
+      path.join(scriptDir, 'obs-framework-probe.js'),
+      `
+export const scriptDefinition = {
+  actionPrefix: '${FRAMEWORK_PREFIX}',
+  title: 'Custom OBS Probe',
+};
+
+export default function setup(api) {
+  api.registerAction({
+    id: '${FRAMEWORK_PREFIX}.ping',
+    title: 'Ping',
+    description: 'test behavior action',
+    domain: 'test',
+    readOnly: true,
+    invoke: async () => ({ output: ['pong'] }),
+  });
+}
+`,
+      'utf8',
+    );
+    await fs.mkdir(path.join(scriptDir, 'obs-framework-probe'), { recursive: true });
+    await fs.writeFile(
+      path.join(scriptDir, 'obs-framework-probe', 'config.jsonc'),
+      JSON.stringify(
+        { enabled: false, nested: { count: 0 }, $ui: { enabled: { label: 'Enabled' } } },
+        null,
+        2,
+      ),
+      'utf8',
+    );
+
+    await loadUserScripts(tempDir);
+
+    const behavior = registry.getAction(`${FRAMEWORK_PREFIX}.ping`);
+    const config = registry.getAction(`${FRAMEWORK_PREFIX}.config`);
+    const configTui = registry.getAction(`${FRAMEWORK_PREFIX}.config.tui`);
+    const configOpen = registry.getAction(`${FRAMEWORK_PREFIX}.config.open`);
+    const actions = registry.getAction(`${FRAMEWORK_PREFIX}.actions`);
+
+    expect(behavior).toBeDefined();
+    expect(config).toBeDefined();
+    expect(configTui).toBeDefined();
+    expect(configOpen).toBeDefined();
+    expect(actions).toBeDefined();
+    expect(config?.scriptId).toBe('obs-framework-probe');
+    expect(config?.scriptActionKind).toBe('framework');
+    expect(behavior?.scriptActionKind).toBe('behavior');
+    expect(configTui?.ipcEnabled).toBe(false);
+    expect(actions?.ipcEnabled).toBe(false);
+
+    const configPath = path.join(tempDir, 'scripts', 'obs-framework-probe', 'config.jsonc');
+    const configJson = JSON.parse(await fs.readFile(configPath, 'utf8'));
+    expect(configJson).toEqual({
+      enabled: false,
+      nested: { count: 0 },
+      $ui: { enabled: { label: 'Enabled' } },
+    });
+
+    const readResult = await config!.invoke({}, { chatService: {} as never, providers: {} });
+    expect(readResult.data).toEqual({
+      configPath,
+      config: { enabled: false, nested: { count: 0 } },
+    });
+
+    const updateResult = await config!.invoke(
+      { enabled: 'true', 'nested.count': '3' },
+      { chatService: {} as never, providers: {} },
+    );
+    expect(updateResult.data).toMatchObject({
+      changedKeys: ['enabled', 'nested.count'],
+      configPath,
+      config: {
+        enabled: true,
+        nested: { count: 3 },
+      },
+    });
+
+    await expect(
+      config!.invoke(
+        { '$ui.enabled.label': 'Broken' },
+        { chatService: {} as never, providers: {} },
+      ),
+    ).rejects.toThrow('$ui is reserved for TUI metadata');
+
+    const openScriptConfigModal = vi.fn();
+    await configTui!.invoke(
+      {},
+      {
+        chatService: {} as never,
+        providers: {},
+        ui: { openScriptConfigModal },
+      },
+    );
+    expect(openScriptConfigModal).toHaveBeenCalledTimes(1);
+
+    const openScriptActionsModal = vi.fn();
+    await actions!.invoke(
+      {},
+      {
+        chatService: {} as never,
+        providers: {},
+        ui: { openScriptActionsModal },
+      },
+    );
+    expect(openScriptActionsModal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scriptId: 'obs-framework-probe',
+        actionPrefix: FRAMEWORK_PREFIX,
+        title: 'Custom OBS Probe Actions',
+      }),
+    );
+  });
+
+  test('loader rejects scripts that try to register framework-owned ids themselves', async () => {
+    tempDir = await makeRepoTempDir('yash-script-framework-collision');
+    process.env.YASH_DATA_DIR = tempDir;
+
+    const scriptDir = path.join(tempDir, 'scripts');
+    await fs.mkdir(scriptDir, { recursive: true });
+    await fs.writeFile(
+      path.join(scriptDir, 'obs-framework-collision.js'),
+      `
+export const scriptDefinition = {
+  actionPrefix: '${FRAMEWORK_PREFIX}',
+  title: 'Collision Probe',
+};
+
+export default function setup(api) {
+  api.registerAction({
+    id: '${FRAMEWORK_PREFIX}.config',
+    title: 'Bad',
+    description: 'should be rejected',
+    domain: 'test',
+    invoke: async () => ({ output: [] }),
+  });
+}
+`,
+      'utf8',
+    );
+
+    await loadUserScripts(tempDir);
+
+    expect(registry.getAction(`${FRAMEWORK_PREFIX}.config`)).toBeUndefined();
+    expect(registry.getAction(`${FRAMEWORK_PREFIX}.config.tui`)).toBeUndefined();
+    expect(registry.getAction(`${FRAMEWORK_PREFIX}.config.open`)).toBeUndefined();
+    expect(registry.getAction(`${FRAMEWORK_PREFIX}.actions`)).toBeUndefined();
+  });
+
+  test('framework config edits are visible to running script settings reads without reload', async () => {
+    tempDir = await makeRepoTempDir('yash-script-framework-config-refresh');
+    process.env.YASH_DATA_DIR = tempDir;
+
+    const scriptDir = path.join(tempDir, 'scripts');
+    const scriptStateDir = path.join(scriptDir, 'obs-framework-refresh');
+    await fs.mkdir(scriptDir, { recursive: true });
+    await fs.mkdir(scriptStateDir, { recursive: true });
+    await fs.writeFile(
+      path.join(scriptDir, 'obs-framework-refresh.js'),
+      `
+export const scriptDefinition = {
+  actionPrefix: '${FRAMEWORK_PREFIX}',
+  title: 'Custom OBS Probe',
+};
+
+export default function setup(api) {
+  api.registerAction({
+    id: '${FRAMEWORK_PREFIX}.ping',
+    title: 'Ping',
+    description: 'test behavior action',
+    domain: 'test',
+    readOnly: true,
+    invoke: async () => ({
+      data: {
+        persistedFlag: api.settings.get('persistedFlag', false),
+      },
+    }),
+  });
+}
+`,
+      'utf8',
+    );
+    await fs.writeFile(
+      path.join(scriptStateDir, 'config.jsonc'),
+      JSON.stringify({ persistedFlag: false }, null, 2),
+      'utf8',
+    );
+
+    await loadUserScripts(tempDir);
+
+    const behaviorAction = registry.getAction(`${FRAMEWORK_PREFIX}.ping`);
+    const configAction = registry.getAction(`${FRAMEWORK_PREFIX}.config`);
+    expect(behaviorAction).toBeDefined();
+    expect(configAction).toBeDefined();
+
+    const before = await behaviorAction!.invoke({}, { chatService: {} as never, providers: {} });
+    expect(before.data).toEqual({ persistedFlag: false });
+
+    await configAction!.invoke(
+      { persistedFlag: 'true' },
+      { chatService: {} as never, providers: {} },
+    );
+
+    const after = await behaviorAction!.invoke({}, { chatService: {} as never, providers: {} });
+    expect(after.data).toEqual({ persistedFlag: true });
   });
 });

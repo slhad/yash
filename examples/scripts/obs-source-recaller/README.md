@@ -5,7 +5,9 @@ Example user script that remembers one OBS source's settings per scene and resto
 Actions:
 
 - `obs.source-recaller.config [startPaused=<true|false>]`
-- `obs.source-recaller.configTUI`
+- `obs.source-recaller.config.tui`
+- `obs.source-recaller.config.open`
+- `obs.source-recaller.actions`
 - `obs.source-recaller.save source=<source|scene.source> [stage=<inputSettings|sceneItemTransform|sceneItemEnabled>]`
 - `obs.source-recaller.load source=<source|scene.source>`
 - `obs.source-recaller.list`
@@ -28,7 +30,7 @@ Typical flow:
 State model:
 
 - Static defaults, runtime overrides, pause state, and saved snapshots all live in `config.jsonc`
-- `obs.source-recaller.config` and `configTUI` update that same file
+- `obs.source-recaller.config`, `config.tui`, `config.open`, and `actions` are framework-owned actions injected by YASH
 - Scene snapshot saves/loads also read and write that same file
 - A reserved top-level `"$ui"` object can live in that same file to describe how the generic TUI editor should render labels, widget hints, ordering, help text, and wildcard row templates for nested objects/arrays
 - In the current generic editor, `triggers` is rendered as a recursive tree of trigger scenes, array entries, and scalar leaf fields rather than one raw JSON line; scalar leaves use compact `key: type = value` rows
@@ -76,7 +78,8 @@ Ordering rules:
 Notes:
 
 - `config` shows or updates the effective `startPaused` setting
-- `configTUI` edits `startPaused`, top-level `paused`, and the `triggers` JSON map from the live TUI
+- `config.tui` edits `startPaused`, top-level `paused`, and the `triggers` JSON map from the live TUI
+- `config.open` opens that same `config.jsonc` file in `$EDITOR`
 - The shipped example `config.jsonc` includes `"triggers/*/*": { "titleTemplate": "${index} - ${sourceRef} : ${stage}" }` so each staged restore operation is labeled with its source and stage instead of a generic `0 - object`
 - In the generic TUI editor, focus an operation header row to reorder it with `[` (up) / `]` (down) or delete it with `x`; those edits stay local until you save
 - `load` restores the snapshot for the active OBS trigger scene; passing an explicit `scene.source` changes the targeted source, not the trigger scene

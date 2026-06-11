@@ -84,7 +84,26 @@ function buildRegistry(): ActionRegistry {
   );
 
   reg.registerAction(
-    makeAction('obs.shutdown.configTUI', {
+    makeAction('obs.shutdown.config.tui', {
+      domain: 'obs',
+      visibility: 'public',
+      safety: 'safe',
+      ipcEnabled: false,
+      args: {},
+    }),
+  );
+
+  reg.registerAction(
+    makeAction('obs.shutdown.config.open', {
+      domain: 'obs',
+      visibility: 'public',
+      safety: 'safe',
+      args: {},
+    }),
+  );
+
+  reg.registerAction(
+    makeAction('obs.shutdown.actions', {
       domain: 'obs',
       visibility: 'public',
       safety: 'safe',
@@ -222,13 +241,17 @@ describe('getAutocomplete /action branch', () => {
       expect(result.hints).toContain('obs.shutdown.initiate');
       expect(result.hints).toContain('obs.shutdown.cancel');
       expect(result.hints).toContain('obs.shutdown.config');
-      expect(result.hints).toContain('obs.shutdown.configTUI');
+      expect(result.hints).toContain('obs.shutdown.config.tui');
+      expect(result.hints).toContain('obs.shutdown.config.open');
+      expect(result.hints).toContain('obs.shutdown.actions');
     });
 
     test('/action obs.shutdown.c → hints prefer config actions', () => {
       const result = getAutocomplete('/action obs.shutdown.c');
       expect(result.hints).toContain('obs.shutdown.config');
-      expect(result.hints).toContain('obs.shutdown.configTUI');
+      expect(result.hints).toContain('obs.shutdown.config.tui');
+      expect(result.hints).toContain('obs.shutdown.config.open');
+      expect(result.hints).toContain('obs.shutdown.actions');
     });
 
     test('/action xyz → empty (no match)', () => {

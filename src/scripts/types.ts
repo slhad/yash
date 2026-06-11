@@ -3,7 +3,12 @@
 // User scripts (~/.config/yash/scripts/*.ts) use the ScriptApi passed to their setup function.
 
 import type { ActionArgAutocompleteSpec } from '../actions/autocomplete';
-import type { ActionArgMode, ScriptConfigModalSpec, YashActionDefinition } from '../actions/types';
+import type {
+  ActionArgMode,
+  ScriptActionsModalSpec,
+  ScriptConfigModalSpec,
+  YashActionDefinition,
+} from '../actions/types';
 
 // ─── Bundled script convention ────────────────────────────────────────────────
 
@@ -61,7 +66,14 @@ export type UserScriptActionContext = {
   emit?: (line: string) => void;
   ui?: {
     openScriptConfigModal?: (spec: ScriptConfigModalSpec) => void;
+    openScriptActionsModal?: (spec: ScriptActionsModalSpec) => void;
   };
+};
+
+export type UserScriptDefinition = {
+  actionPrefix?: string;
+  title?: string;
+  description?: string;
 };
 
 export type ScriptApi = {

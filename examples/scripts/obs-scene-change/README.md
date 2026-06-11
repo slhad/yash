@@ -6,7 +6,9 @@ Actions:
 
 - `obs.scene-change.activate [scene=<scene>]`
 - `obs.scene-change.config [defaultScene=<scene>]`
-- `obs.scene-change.configTUI`
+- `obs.scene-change.config.tui`
+- `obs.scene-change.config.open`
+- `obs.scene-change.actions`
 
 Typical flow:
 
@@ -18,5 +20,5 @@ Notes:
 
 - `activate` requires OBS to be connected
 - `activate` validates the target scene against the current OBS scene list before switching
-- `config` and `configTUI` both read and write the same `config.jsonc` file
+- `config`, `config.tui`, `config.open`, and `actions` are framework-owned actions injected by YASH from `scriptDefinition` + `config.jsonc`
 - `types.d.ts` is a local re-export of YASH's generated script types so editors and typecheckers can resolve `import type { ScriptApi } from './types'`
