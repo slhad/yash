@@ -57,7 +57,10 @@
   },
   "routing": {
     "pollIntervalMs": 2000,
-    "cooldownMs": 5000
+    "cooldownMs": 5000,
+    "linkWhenSourceSinkMatches": [
+      "easyeffects_sink"
+    ]
   },
   "obsStreaming": {
     "enableOnStreamStart": false,

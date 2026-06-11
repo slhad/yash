@@ -26,7 +26,8 @@ export async function runIpcCommand(
   if (
     cmd === '/action' &&
     ((parts[1] ?? '').toLowerCase().endsWith('.config.tui') ||
-      (parts[1] ?? '').toLowerCase().endsWith('.configtui'))
+      (parts[1] ?? '').toLowerCase().endsWith('.configtui') ||
+      (parts[1] ?? '').toLowerCase().endsWith('.actions'))
   ) {
     return 'This command requires the TUI';
   }

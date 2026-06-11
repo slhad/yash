@@ -1,11 +1,11 @@
 import * as path from 'node:path';
-import type { ScriptApi, UserScriptAction, UserScriptArgSchema } from './types';
+import type { ScriptApi, UserScriptAction, UserScriptArgSchema, UserScriptDefinition } from './types';
 
-const SCRIPT_ID = 'obs-audio-routing';
 const DEFAULT_POLL_INTERVAL_MS = 2000;
 const DEFAULT_ROUTE_COOLDOWN_MS = 5000;
 const MAX_RECENT_OUTCOMES = 50;
 const MAX_CANDIDATES = 100;
+const MISSING_SETTINGS_KEY = Symbol('missing-settings-key');
 
 type RouteRuleMatch = {
   windowClass?: string;
@@ -14,6 +14,7 @@ type RouteRuleMatch = {
   childProcessBinary?: string;
   applicationName?: string;
   mediaName?: string;
+  sourceSinkName?: string;
 };
 
 type RouteRule = {
@@ -56,6 +57,7 @@ type ObsAudioRoutingConfig = {
   routing: {
     pollIntervalMs: number;
     cooldownMs: number;
+    linkWhenSourceSinkMatches: string[];
   };
   obsStreaming: {
     enableOnStreamStart: boolean;
@@ -140,7 +142,16 @@ type RuntimeState = {
       label: string;
     }
   >;
+  linkedStreams: Map<
+    number,
+    {
+      targetSinkName: string;
+      links: Array<{ outputPort: string; inputPort: string }>;
+      label: string;
+    }
+  >;
   lastEnabledState: boolean | null;
+  persistedDefaultsEnsured: boolean;
 };
 
 type Snapshot = {
@@ -160,7 +171,6 @@ type SearchResult =
   | { type: 'window'; window: FocusedWindow & { matchLabel: string } };
 
 type CommandRunner = (cmd: string[], label: string) => Promise<CommandResult>;
-type EditorLauncher = (cmd: string[], label: string) => void | Promise<void>;
 
 const DEFAULT_CONFIG: ObsAudioRoutingConfig = {
   enabled: true,
@@ -223,6 +233,7 @@ const DEFAULT_CONFIG: ObsAudioRoutingConfig = {
   routing: {
     pollIntervalMs: DEFAULT_POLL_INTERVAL_MS,
     cooldownMs: DEFAULT_ROUTE_COOLDOWN_MS,
+    linkWhenSourceSinkMatches: ['easyeffects_sink'],
   },
   obsStreaming: {
     enableOnStreamStart: false,
@@ -270,7 +281,7 @@ const DEFAULT_CONFIG: ObsAudioRoutingConfig = {
     routing: {
       widget: 'json',
       label: 'routing',
-      description: 'polling cadence and route cooldown controls',
+      description: 'polling cadence, route cooldown controls, and automatic link-mode source sinks',
       order: 70,
     },
     obsStreaming: {
@@ -291,19 +302,17 @@ const DEFAULT_CONFIG: ObsAudioRoutingConfig = {
   },
 };
 
-const RULE_JSON_ARG = {
-  type: 'string',
-  required: false,
-  minLength: 2,
-  maxLength: 20000,
-} as const satisfies UserScriptArgSchema;
-
 const DURATION_ARG = {
   type: 'string',
   required: false,
   minLength: 1,
   maxLength: 32,
 } as const satisfies UserScriptArgSchema;
+
+export const scriptDefinition = {
+  actionPrefix: 'obs-audio-routing',
+  title: 'OBS Audio Routing',
+} satisfies UserScriptDefinition;
 
 let commandRunner: CommandRunner = async (cmd, label) => {
   const proc = Bun.spawn({
@@ -323,21 +332,8 @@ let commandRunner: CommandRunner = async (cmd, label) => {
   };
 };
 
-let editorLauncher: EditorLauncher = (cmd) => {
-  Bun.spawn({
-    cmd,
-    stdin: 'ignore',
-    stdout: 'ignore',
-    stderr: 'ignore',
-  });
-};
-
 export function __setCommandRunnerForTests(nextRunner: CommandRunner): void {
   commandRunner = nextRunner;
-}
-
-export function __setEditorLauncherForTests(nextLauncher: EditorLauncher): void {
-  editorLauncher = nextLauncher;
 }
 
 function getDataDir(): string {
@@ -345,10 +341,6 @@ function getDataDir(): string {
     process.env.YASH_DATA_DIR ||
     path.join(process.env.XDG_CONFIG_HOME || path.join(process.env.HOME || '.', '.config'), 'yash')
   );
-}
-
-function getConfigPath(): string {
-  return path.join(getDataDir(), 'scripts', SCRIPT_ID, 'config.jsonc');
 }
 
 function normalizeString(value: unknown): string {
@@ -365,37 +357,10 @@ function normalizeNumber(value: unknown, fallback: number, min = 0, max = Number
   return Math.max(min, Math.min(max, Math.round(parsed)));
 }
 
-function shellEscape(value: string): string {
-  return `'${value.replace(/'/g, `'\\''`)}'`;
-}
-
-function buildEditorOpenCommand(configPath: string): string[] {
-  const editor = normalizeString(process.env.VISUAL) || normalizeString(process.env.EDITOR);
-  if (!editor) {
-    throw new Error('No $VISUAL or $EDITOR is configured');
-  }
-  const editorName = editor.split(/\s+/)[0] ?? editor;
-  const editorBase = path.basename(editorName).toLowerCase();
-  const terminal = normalizeString(process.env.TERMINAL);
-  const guiEditors = new Set(['code', 'code-insiders', 'codium', 'zed', 'subl', 'gedit', 'kate']);
-  const terminalEditors = new Set(['nvim', 'vim', 'vi', 'nano', 'hx', 'helix', 'emacs']);
-
-  if (guiEditors.has(editorBase)) {
-    return ['sh', '-lc', `${editor} ${shellEscape(configPath)}`];
-  }
-
-  if (terminalEditors.has(editorBase)) {
-    if (!terminal) {
-      throw new Error(`$EDITOR is terminal-based (${editorBase}) but $TERMINAL is not configured`);
-    }
-    const terminalBase = path.basename(terminal.split(/\s+/)[0] ?? terminal).toLowerCase();
-    if (terminalBase === 'xdg-terminal-exec') {
-      return ['sh', '-lc', `${terminal} ${editor} ${shellEscape(configPath)}`];
-    }
-    return ['sh', '-lc', `${terminal} -e ${editor} ${shellEscape(configPath)}`];
-  }
-
-  return ['sh', '-lc', `${editor} ${shellEscape(configPath)}`];
+function normalizeStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.map((entry) => normalizeString(entry)).filter(Boolean)
+    : [];
 }
 
 function normalizeMatch(value: unknown): RouteRuleMatch {
@@ -407,6 +372,7 @@ function normalizeMatch(value: unknown): RouteRuleMatch {
     childProcessBinary: normalizeString((raw as Record<string, unknown>).childProcessBinary),
     applicationName: normalizeString((raw as Record<string, unknown>).applicationName),
     mediaName: normalizeString((raw as Record<string, unknown>).mediaName),
+    sourceSinkName: normalizeString((raw as Record<string, unknown>).sourceSinkName),
   };
 }
 
@@ -533,6 +499,9 @@ function normalizeConfig(raw: Record<string, unknown>): ObsAudioRoutingConfig {
         0,
         300000,
       ),
+      linkWhenSourceSinkMatches: normalizeStringArray(
+        routingRaw.linkWhenSourceSinkMatches ?? DEFAULT_CONFIG.routing.linkWhenSourceSinkMatches,
+      ),
     },
     obsStreaming: {
       enableOnStreamStart: normalizeBoolean(
@@ -581,6 +550,24 @@ async function writeConfig(api: ScriptApi, nextConfig: ObsAudioRoutingConfig): P
     changedKeys.push(key);
   }
   return changedKeys;
+}
+
+async function ensurePersistedRoutingDefaults(api: ScriptApi): Promise<boolean> {
+  const missingRoutingLinkDefaults = api.settings.get<symbol | string[]>(
+    'routing.linkWhenSourceSinkMatches',
+    MISSING_SETTINGS_KEY,
+  );
+  if (missingRoutingLinkDefaults !== MISSING_SETTINGS_KEY) {
+    return false;
+  }
+  await api.settings.set(
+    'routing.linkWhenSourceSinkMatches',
+    DEFAULT_CONFIG.routing.linkWhenSourceSinkMatches,
+  );
+  api.logger.info(
+    `persisted missing routing.linkWhenSourceSinkMatches default: ${JSON.stringify(DEFAULT_CONFIG.routing.linkWhenSourceSinkMatches)}`,
+  );
+  return true;
 }
 
 async function runJsonCommand<T>(cmd: string[], label: string): Promise<T> {
@@ -665,6 +652,9 @@ function matchRuleAgainstContext(
     return false;
   }
   if (match.mediaName && !stringMatches(stream.mediaName, match.mediaName)) {
+    return false;
+  }
+  if (match.sourceSinkName && !stringMatches(stream.sinkName, match.sourceSinkName)) {
     return false;
   }
   return true;
@@ -868,8 +858,14 @@ async function collectSnapshot(): Promise<Snapshot> {
 }
 
 function pushOutcome(runtime: RuntimeState, kind: RuntimeOutcome['kind'], message: string): void {
+  const now = Date.now();
+  const lastOutcome = runtime.recentOutcomes[runtime.recentOutcomes.length - 1];
+  if (lastOutcome && lastOutcome.kind === kind && lastOutcome.message === message) {
+    lastOutcome.ts = now;
+    return;
+  }
   runtime.recentOutcomes.push({
-    ts: Date.now(),
+    ts: now,
     kind,
     message,
   });
@@ -1009,6 +1005,148 @@ async function moveStreamToSink(streamId: number, targetSinkName: string): Promi
   }
 }
 
+type PipewireLinkPair = {
+  outputPort: string;
+  inputPort: string;
+};
+
+async function listPipewirePorts(direction: 'output' | 'input'): Promise<string[]> {
+  const cmd =
+    direction === 'output'
+      ? ['pw-link', '-o']
+      : ['pw-link', '-i'];
+  const output = await runTextCommand(cmd, `pw-link ${direction} ports`);
+  return output
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+async function listPipewireLinks(): Promise<Set<string>> {
+  const output = await runTextCommand(['pw-link', '-l'], 'pw-link list');
+  const lines = output.split('\n').map((line) => line.trim()).filter(Boolean);
+  const links = new Set<string>();
+  let currentPort = '';
+  for (const line of lines) {
+    if (line.startsWith('|->')) {
+      const target = line.slice(3).trim();
+      if (currentPort && target) links.add(`${currentPort}\u0000${target}`);
+      continue;
+    }
+    if (line.startsWith('|<-')) {
+      const source = line.slice(3).trim();
+      if (source && currentPort) links.add(`${source}\u0000${currentPort}`);
+      continue;
+    }
+    currentPort = line;
+  }
+  return links;
+}
+
+function extractSinkNameFromPort(port: string): string {
+  const separatorIndex = port.indexOf(':');
+  return separatorIndex >= 0 ? port.slice(0, separatorIndex) : port;
+}
+
+function getLinkedTargetSinksForStream(
+  stream: LiveStream,
+  links: Set<string>,
+): string[] {
+  const prefix = `${stream.nodeName}:`;
+  const targets = new Set<string>();
+  for (const link of links) {
+    const [outputPort, inputPort] = link.split('\u0000');
+    if (!outputPort?.startsWith(prefix) || !inputPort) continue;
+    const sinkName = extractSinkNameFromPort(inputPort);
+    if (sinkName) targets.add(sinkName);
+  }
+  return [...targets];
+}
+
+function trackedPipewireLinksStillExist(
+  trackedLinks: PipewireLinkPair[],
+  currentLinks: Set<string>,
+): boolean {
+  return trackedLinks.every((link) => currentLinks.has(`${link.outputPort}\u0000${link.inputPort}`));
+}
+
+function extractPortChannelSuffix(port: string): string {
+  const alias = port.split(':').pop() ?? port;
+  const underscoreIndex = alias.lastIndexOf('_');
+  return underscoreIndex >= 0 ? alias.slice(underscoreIndex + 1) : alias;
+}
+
+function buildLinkPairs(
+  outputPorts: string[],
+  inputPorts: string[],
+): PipewireLinkPair[] {
+  const inputBySuffix = new Map<string, string>();
+  for (const inputPort of inputPorts) {
+    inputBySuffix.set(extractPortChannelSuffix(inputPort), inputPort);
+  }
+  const exactPairs = outputPorts
+    .map((outputPort) => ({
+      outputPort,
+      inputPort: inputBySuffix.get(extractPortChannelSuffix(outputPort)) ?? '',
+    }))
+    .filter((pair) => pair.inputPort);
+  if (exactPairs.length === outputPorts.length && exactPairs.length > 0) {
+    return exactPairs;
+  }
+  const fallbackCount = Math.min(outputPorts.length, inputPorts.length);
+  return outputPorts.slice(0, fallbackCount).map((outputPort, index) => ({
+    outputPort,
+    inputPort: inputPorts[index]!,
+  }));
+}
+
+async function createPipewireLinksForStream(
+  stream: LiveStream,
+  targetSinkName: string,
+): Promise<PipewireLinkPair[]> {
+  const [outputPorts, inputPorts, existingLinks] = await Promise.all([
+    listPipewirePorts('output'),
+    listPipewirePorts('input'),
+    listPipewireLinks(),
+  ]);
+  const streamOutputPorts = outputPorts.filter((port) => port.startsWith(`${stream.nodeName}:`));
+  const targetInputPorts = inputPorts.filter((port) => port.startsWith(`${targetSinkName}:`));
+  if (streamOutputPorts.length === 0) {
+    throw new Error(`No PipeWire output ports found for ${stream.nodeName}`);
+  }
+  if (targetInputPorts.length === 0) {
+    throw new Error(`No PipeWire input ports found for sink ${targetSinkName}`);
+  }
+  const pairs = buildLinkPairs(streamOutputPorts, targetInputPorts);
+  const createdPairs: PipewireLinkPair[] = [];
+  for (const pair of pairs) {
+    if (existingLinks.has(`${pair.outputPort}\u0000${pair.inputPort}`)) continue;
+    const result = await commandRunner(
+      ['pw-link', '-w', pair.outputPort, pair.inputPort],
+      'pw-link connect',
+    );
+    if (result.exitCode !== 0) {
+      throw new Error(result.stderr.trim() || result.stdout.trim() || `exit ${result.exitCode}`);
+    }
+    createdPairs.push(pair);
+  }
+  return createdPairs;
+}
+
+async function removePipewireLinks(
+  links: PipewireLinkPair[],
+): Promise<void> {
+  for (const link of links) {
+    const result = await commandRunner(
+      ['pw-link', '-d', link.outputPort, link.inputPort],
+      'pw-link disconnect',
+    );
+    if (result.exitCode !== 0) {
+      throw new Error(result.stderr.trim() || result.stdout.trim() || `exit ${result.exitCode}`);
+    }
+  }
+}
+
 function matchesSearchQuery(query: string, candidates: string[]): boolean {
   const normalized = query.trim().toLowerCase();
   if (!normalized) return false;
@@ -1031,11 +1169,14 @@ function formatExclusion(rule: ExclusionRule): string {
   return `${rule.id}${rule.enabled ? '' : ' (disabled)'}${parts.length > 0 ? ` [${parts.join(', ')}]` : ''}${suffix}`;
 }
 
-function formatLiveStreamWiring(stream: LiveStream): string {
+function formatLiveStreamWiring(stream: LiveStream, linkedTargetSinks: string[] = []): string {
   const appLabel =
     stream.applicationName || stream.applicationProcessBinary || stream.derivedBinary || `stream #${stream.id}`;
+  const displayedTargets =
+    linkedTargetSinks.length > 0 ? linkedTargetSinks.join(' + ') : stream.sinkName;
   const details = [
     `sink=${stream.sinkName}#${stream.sinkIndex}`,
+    linkedTargetSinks.length > 1 ? `links=${linkedTargetSinks.join(', ')}` : '',
     stream.applicationProcessId === null ? '' : `pid=${stream.applicationProcessId}`,
     stream.applicationProcessBinary ? `process=${stream.applicationProcessBinary}` : '',
     stream.derivedBinary && stream.derivedBinary !== stream.applicationProcessBinary
@@ -1043,7 +1184,16 @@ function formatLiveStreamWiring(stream: LiveStream): string {
       : '',
     stream.mediaName ? `media=${stream.mediaName}` : '',
   ].filter(Boolean);
-  return `${appLabel} -> ${stream.sinkName}${details.length > 0 ? ` [${details.join(', ')}]` : ''}`;
+  return `${appLabel} -> ${displayedTargets}${details.length > 0 ? ` [${details.join(', ')}]` : ''}`;
+}
+
+function shouldLinkMatchedStream(
+  config: ObsAudioRoutingConfig,
+  stream: LiveStream,
+): boolean {
+  return config.routing.linkWhenSourceSinkMatches.some((sinkName) =>
+    stringMatches(stream.sinkName, sinkName),
+  );
 }
 
 function parseWaitDurationMs(raw: string): number {
@@ -1156,41 +1306,29 @@ async function getWindowsForSearch(): Promise<Array<FocusedWindow & { matchLabel
     .filter((entry) => entry.class || entry.title);
 }
 
-function buildConfigSummaryLines(config: ObsAudioRoutingConfig): string[] {
-  const lines = [
-    `[obs-audio-routing] config path -> ${getConfigPath()}`,
-    `[obs-audio-routing] enabled -> ${config.enabled}`,
-    `[obs-audio-routing] streamTargets -> ${config.streamTargets.length}`,
-    `[obs-audio-routing] musicTargets -> ${config.musicTargets.length}`,
-    `[obs-audio-routing] exclusions -> ${config.exclusions.length}`,
-    `[obs-audio-routing] discovery.minHitsBeforeCandidate -> ${config.discovery.minHitsBeforeCandidate}`,
-    `[obs-audio-routing] routing.pollIntervalMs -> ${config.routing.pollIntervalMs}`,
-    `[obs-audio-routing] routing.cooldownMs -> ${config.routing.cooldownMs}`,
-    `[obs-audio-routing] obsStreaming.enableOnStreamStart -> ${config.obsStreaming.enableOnStreamStart}`,
-    `[obs-audio-routing] obsStreaming.disableOnStreamStop -> ${config.obsStreaming.disableOnStreamStop}`,
-    `[obs-audio-routing] obsStreaming.enableOnObsConnect -> ${config.obsStreaming.enableOnObsConnect}`,
-    `[obs-audio-routing] obsStreaming.disableOnObsDisconnect -> ${config.obsStreaming.disableOnObsDisconnect}`,
-  ];
-
-  for (const rule of config.streamTargets) {
-    lines.push(`[obs-audio-routing] streamTarget -> ${formatRule(rule)}`);
-  }
-  for (const rule of config.musicTargets) {
-    lines.push(`[obs-audio-routing] musicTarget -> ${formatRule(rule)}`);
-  }
-  for (const rule of config.exclusions) {
-    lines.push(`[obs-audio-routing] exclusion -> ${formatExclusion(rule)}`);
-  }
-
-  return lines;
-}
-
 async function restoreMovedStreams(
   api: ScriptApi,
   runtime: RuntimeState,
   config: ObsAudioRoutingConfig,
   reason: string,
 ): Promise<void> {
+  for (const [streamId, tracked] of [...runtime.linkedStreams.entries()]) {
+    try {
+      await removePipewireLinks(tracked.links);
+      const line = `[obs-audio-routing] unlinked ${tracked.label} -> ${tracked.targetSinkName} (${reason})`;
+      pushOutcome(runtime, 'moved', line);
+      sendFeedback(api, runtime, config, 'route', line, `unlink:${streamId}:${tracked.targetSinkName}`);
+    } catch (error) {
+      const line = `[obs-audio-routing] failed to unlink ${tracked.label} -> ${tracked.targetSinkName}: ${String(error)}`;
+      pushOutcome(runtime, 'warning', line);
+      sendFeedback(api, runtime, config, 'route', line, `unlink-error:${streamId}:${tracked.targetSinkName}`);
+      continue;
+    }
+    runtime.linkedStreams.delete(streamId);
+    runtime.lastRouteAttemptSignatureByStream.delete(streamId);
+    runtime.lastRoutedAtByStream.delete(streamId);
+  }
+
   if (runtime.movedStreams.size === 0) return;
   const snapshot = await collectSnapshot();
   if (snapshot.supportReasons.length > 0) return;
@@ -1245,40 +1383,13 @@ export default function setup(api: ScriptApi): () => void {
     lastRouteAttemptSignatureByStream: new Map<number, string>(),
     lastFeedbackAtByKey: new Map<string, number>(),
     movedStreams: new Map(),
+    linkedStreams: new Map(),
     lastEnabledState: null,
+    persistedDefaultsEnsured: false,
   };
 
   let disposed = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
-
-  const openConfigModal = async (ctx?: Parameters<UserScriptAction['invoke']>[1]) => {
-    if (!ctx?.ui?.openScriptConfigModal) {
-      throw new Error('This action requires the TUI');
-    }
-    const current = readConfig(api);
-    ctx.ui.openScriptConfigModal({
-      title: 'OBS Audio Routing Config',
-      intro:
-        ' Tab/Shift+Tab move focus. Space or arrows toggle booleans. Up/Down and PageUp/PageDown scroll nested config. Focus an array item row, then use [ to move up, ] to move down, and x to delete it. Enter saves persisted config. Esc cancels.',
-      prefix: '[obs-audio-routing]',
-      config: current,
-      onSaveConfig: async (draftConfig) => {
-        const next = normalizeConfig(draftConfig);
-        const changedKeys = await writeConfig(api, next);
-        if (current.enabled && !next.enabled) {
-          await restoreMovedStreams(api, runtime, next, 'disabled');
-          runtime.lastEnabledState = false;
-        } else if (!current.enabled && next.enabled) {
-          runtime.lastEnabledState = true;
-          resetScheduledTick(0);
-        }
-        return { changedKeys };
-      },
-    });
-    return {
-      output: ['[obs-audio-routing] opened config modal'],
-    };
-  };
 
   const resetScheduledTick = (delayMs: number) => {
     if (disposed) return;
@@ -1316,6 +1427,16 @@ export default function setup(api: ScriptApi): () => void {
 
   const tick = async () => {
     if (disposed) return;
+    if (!runtime.persistedDefaultsEnsured) {
+      try {
+        await ensurePersistedRoutingDefaults(api);
+      } catch (error) {
+        api.logger.warn(
+          `failed to persist routing defaults: ${String(error)}`,
+        );
+      }
+      runtime.persistedDefaultsEnsured = true;
+    }
     const config = readConfig(api);
     if (runtime.lastEnabledState === null) {
       runtime.lastEnabledState = config.enabled;
@@ -1333,6 +1454,7 @@ export default function setup(api: ScriptApi): () => void {
     const snapshot = await collectSnapshot();
     runtime.lastFocusedWindow = snapshot.focusedWindow;
     runtime.lastSupportReasons = snapshot.supportReasons;
+    let pipewireLinksCache: Set<string> | null = null;
 
     if (snapshot.supportReasons.length > 0) {
       const message = `[obs-audio-routing] unsupported: ${snapshot.supportReasons.join('; ')}`;
@@ -1392,8 +1514,24 @@ export default function setup(api: ScriptApi): () => void {
         continue;
       }
 
+      const linkMode = shouldLinkMatchedStream(config, stream);
+      if (linkMode) {
+        const trackedLinkState = runtime.linkedStreams.get(stream.id);
+        if (trackedLinkState) {
+          pipewireLinksCache ??= await listPipewireLinks().catch(() => new Set<string>());
+          if (trackedPipewireLinksStillExist(trackedLinkState.links, pipewireLinksCache)) {
+            runtime.lastRouteAttemptSignatureByStream.delete(stream.id);
+            continue;
+          }
+          runtime.linkedStreams.delete(stream.id);
+          runtime.lastRouteAttemptSignatureByStream.delete(stream.id);
+          runtime.lastRoutedAtByStream.delete(stream.id);
+        }
+      }
+
       const now = Date.now();
-      const routeAttemptSignature = `${stream.sinkName}->${targetSinkName}`;
+      const routeMode = linkMode ? 'link' : 'move';
+      const routeAttemptSignature = `${routeMode}:${stream.sinkName}->${targetSinkName}`;
       const lastRouteAttemptSignature =
         runtime.lastRouteAttemptSignatureByStream.get(stream.id) ?? '';
       const lastMovedAt = runtime.lastRoutedAtByStream.get(stream.id) ?? 0;
@@ -1409,22 +1547,42 @@ export default function setup(api: ScriptApi): () => void {
       }
 
       try {
-        await moveStreamToSink(stream.id, targetSinkName);
         runtime.lastRouteAttemptSignatureByStream.set(stream.id, routeAttemptSignature);
         runtime.lastRoutedAtByStream.set(stream.id, now);
+        const label = stream.applicationName || stream.derivedBinary || `stream #${stream.id}`;
+        if (linkMode) {
+          const createdLinks = await createPipewireLinksForStream(stream, targetSinkName);
+          if (createdLinks.length > 0) {
+            runtime.linkedStreams.set(stream.id, {
+              targetSinkName,
+              links: createdLinks,
+              label,
+            });
+          }
+          const line =
+            createdLinks.length > 0
+              ? `[obs-audio-routing] linked ${label} -> ${targetSinkName} (${matchedRule.id})`
+              : `[obs-audio-routing] already linked ${label} -> ${targetSinkName} (${matchedRule.id})`;
+          pushOutcome(runtime, 'moved', line);
+          sendFeedback(api, runtime, config, 'route', line, `link:${stream.id}:${targetSinkName}`);
+          continue;
+        }
+
+        await moveStreamToSink(stream.id, targetSinkName);
         runtime.movedStreams.set(stream.id, {
           previousSinkName: stream.sinkName,
           targetSinkName,
-          label: stream.applicationName || stream.derivedBinary || `stream #${stream.id}`,
+          label,
         });
-        const line = `[obs-audio-routing] moved ${stream.applicationName || stream.derivedBinary || `stream #${stream.id}`} -> ${targetSinkName} (${matchedRule.id})`;
+        const line = `[obs-audio-routing] moved ${label} -> ${targetSinkName} (${matchedRule.id})`;
         pushOutcome(runtime, 'moved', line);
         sendFeedback(api, runtime, config, 'route', line, `move:${stream.id}:${targetSinkName}`);
       } catch (error) {
         runtime.lastRouteAttemptSignatureByStream.set(stream.id, routeAttemptSignature);
-        const line = `[obs-audio-routing] failed to move stream #${stream.id} -> ${targetSinkName}: ${String(error)}`;
+        const action = linkMode ? 'link' : 'move';
+        const line = `[obs-audio-routing] failed to ${action} stream #${stream.id} -> ${targetSinkName}: ${String(error)}`;
         pushOutcome(runtime, 'warning', line);
-        sendFeedback(api, runtime, config, 'route', line, `move-error:${stream.id}:${targetSinkName}`);
+        sendFeedback(api, runtime, config, 'route', line, `${action}-error:${stream.id}:${targetSinkName}`);
       }
     }
 
@@ -1432,122 +1590,6 @@ export default function setup(api: ScriptApi): () => void {
   };
 
   const actions: UserScriptAction[] = [
-    {
-      id: 'obs-audio-routing.config',
-      title: 'Read or update OBS audio routing config',
-      description: 'Reads or updates the obs-audio-routing script config stored in script-local config.jsonc.',
-      domain: 'obs',
-      argMode: 'kv_pairs',
-      readOnly: false,
-      args: {
-        enabled: { type: 'boolean', required: false },
-        streamTargets: RULE_JSON_ARG,
-        musicTargets: RULE_JSON_ARG,
-        exclusions: RULE_JSON_ARG,
-        discovery: RULE_JSON_ARG,
-        feedback: RULE_JSON_ARG,
-        routing: RULE_JSON_ARG,
-        obsStreaming: RULE_JSON_ARG,
-      },
-      examples: [
-        { args: {}, description: 'Show the current persisted obs-audio-routing settings' },
-        { args: { enabled: false }, description: 'Disable automatic routing without deleting rules' },
-      ],
-      invoke: async (args) => {
-        const current = readConfig(api);
-        if (Object.keys(args).length === 0) {
-          return {
-            output: buildConfigSummaryLines(current),
-            data: {
-              configPath: getConfigPath(),
-              config: current,
-            },
-          };
-        }
-
-        const next = normalizeConfig({
-          ...current,
-          enabled: args.enabled ?? current.enabled,
-          streamTargets:
-            typeof args.streamTargets === 'string' ? JSON.parse(args.streamTargets) : current.streamTargets,
-          musicTargets:
-            typeof args.musicTargets === 'string' ? JSON.parse(args.musicTargets) : current.musicTargets,
-          exclusions:
-            typeof args.exclusions === 'string' ? JSON.parse(args.exclusions) : current.exclusions,
-          discovery:
-            typeof args.discovery === 'string' ? JSON.parse(args.discovery) : current.discovery,
-          feedback:
-            typeof args.feedback === 'string' ? JSON.parse(args.feedback) : current.feedback,
-          routing: typeof args.routing === 'string' ? JSON.parse(args.routing) : current.routing,
-          obsStreaming:
-            typeof args.obsStreaming === 'string'
-              ? JSON.parse(args.obsStreaming)
-              : current.obsStreaming,
-          $ui: current.$ui,
-        });
-
-        const changedKeys = await writeConfig(api, next);
-        if (current.enabled && !next.enabled) {
-          await restoreMovedStreams(api, runtime, next, 'disabled');
-          runtime.lastEnabledState = false;
-        } else if (!current.enabled && next.enabled) {
-          runtime.lastEnabledState = true;
-        }
-        if (changedKeys.length === 0) {
-          return {
-            output: ['[obs-audio-routing] no changes'],
-            data: {
-              configPath: getConfigPath(),
-              config: current,
-            },
-          };
-        }
-
-        return {
-          output: [
-            `[obs-audio-routing] updated: ${changedKeys.join(', ')}`,
-            `[obs-audio-routing] config path -> ${getConfigPath()}`,
-          ],
-          data: {
-            configPath: getConfigPath(),
-            config: next,
-          },
-        };
-      },
-    },
-    {
-      id: 'obs-audio-routing.config.tui',
-      title: 'Open OBS audio routing config modal',
-      description: 'Opens a TUI modal for editing persisted obs-audio-routing config.',
-      domain: 'obs',
-      ipcEnabled: false,
-      readOnly: false,
-      args: {},
-      examples: [{ args: {}, description: 'Open the obs-audio-routing config modal in the TUI' }],
-      invoke: async (_args, ctx) => openConfigModal(ctx),
-    },
-    {
-      id: 'obs-audio-routing.config.open',
-      title: 'Open OBS audio routing config in $EDITOR',
-      description:
-        'Opens the obs-audio-routing config.jsonc in $EDITOR, using $TERMINAL when the editor is terminal-based.',
-      domain: 'obs',
-      readOnly: false,
-      args: {},
-      examples: [{ args: {}, description: 'Open the obs-audio-routing config file in $EDITOR' }],
-      invoke: async () => {
-        const configPath = getConfigPath();
-        const cmd = buildEditorOpenCommand(configPath);
-        await editorLauncher(cmd, 'open config editor');
-        return {
-          output: [`[obs-audio-routing] opening config in editor -> ${configPath}`],
-          data: {
-            configPath,
-            command: cmd,
-          },
-        };
-      },
-    },
     {
       id: 'obs-audio-routing.restoreDefaultExclusions',
       title: 'Restore missing default exclusions',
@@ -1636,7 +1678,7 @@ export default function setup(api: ScriptApi): () => void {
           `[obs-audio-routing] support -> ${snapshot.supportReasons.length === 0 ? 'ok' : snapshot.supportReasons.join('; ')}`,
           `[obs-audio-routing] focused window -> ${snapshot.focusedWindow ? `${snapshot.focusedWindow.class} | ${snapshot.focusedWindow.title}` : '(none)'}`,
           `[obs-audio-routing] sinks -> ${snapshot.sinks.map((sink) => `${sink.name}#${sink.index}`).join(', ') || '(none)'}`,
-          `[obs-audio-routing] live streams -> ${snapshot.streams.length}`,
+          `[obs-audio-routing] live audio streams -> ${snapshot.streams.length}`,
           `[obs-audio-routing] streamTargets -> ${config.streamTargets.length}`,
           `[obs-audio-routing] musicTargets -> ${config.musicTargets.length}`,
           `[obs-audio-routing] exclusions -> ${config.exclusions.length}`,
@@ -1678,7 +1720,9 @@ export default function setup(api: ScriptApi): () => void {
         if (waitMs > 0) {
           await Bun.sleep(waitMs);
         }
+        const config = readConfig(api);
         const snapshot = await collectSnapshot();
+        const pipewireLinks = await listPipewireLinks().catch(() => new Set<string>());
         if (snapshot.supportReasons.length > 0) {
           return {
             output: [`[obs-audio-routing] unsupported: ${snapshot.supportReasons.join('; ')}`],
@@ -1692,14 +1736,17 @@ export default function setup(api: ScriptApi): () => void {
           waitMs > 0 ? `[obs-audio-routing] waited -> ${waitMs}ms` : '',
           `[obs-audio-routing] focused window -> ${snapshot.focusedWindow ? `${snapshot.focusedWindow.class} | ${snapshot.focusedWindow.title}` : '(none)'}`,
           `[obs-audio-routing] sinks -> ${snapshot.sinks.map((sink) => `${sink.name}#${sink.index}`).join(', ') || '(none)'}`,
-          `[obs-audio-routing] live streams -> ${snapshot.streams.length}`,
+          `[obs-audio-routing] live audio streams -> ${snapshot.streams.length}`,
         ].filter(Boolean);
 
         if (snapshot.streams.length === 0) {
           lines.push('[obs-audio-routing] no live playback streams found');
         } else {
           for (const stream of snapshot.streams) {
-            lines.push(`[obs-audio-routing] wiring -> ${formatLiveStreamWiring(stream)}`);
+            const linkedTargetSinks = getLinkedTargetSinksForStream(stream, pipewireLinks);
+            lines.push(
+              `[obs-audio-routing] wiring -> ${formatLiveStreamWiring(stream, linkedTargetSinks)}`,
+            );
           }
         }
 
@@ -1759,7 +1806,7 @@ export default function setup(api: ScriptApi): () => void {
         },
       },
       examples: [
-        { args: { query: 'cliamp' }, description: 'Search live streams and processes for cliamp' },
+        { args: { query: 'cliamp' }, description: 'Search live audio streams and processes for cliamp' },
       ],
       invoke: async (args) => {
         const query = normalizeString(args.query);
@@ -1788,7 +1835,7 @@ export default function setup(api: ScriptApi): () => void {
         if (streamMatch) {
           return {
             output: [
-              `[obs-audio-routing] matched live stream: ${streamMatch.applicationName || streamMatch.derivedBinary}`,
+              `[obs-audio-routing] matched live audio stream: ${streamMatch.applicationName || streamMatch.derivedBinary}`,
               `[obs-audio-routing] current sink -> ${streamMatch.sinkName}`,
               '[obs-audio-routing] routing is possible now because the app is producing audio',
             ],

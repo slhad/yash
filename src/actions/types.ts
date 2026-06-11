@@ -73,6 +73,13 @@ export type ScriptConfigModalSpec =
       ) => Promise<{ changedKeys: string[]; errors?: string[] }>;
     };
 
+export type ScriptActionsModalSpec = {
+  scriptId: string;
+  actionPrefix: string;
+  title: string;
+  intro?: string;
+};
+
 export type ActionContext = {
   chatService: ChatService;
   providers: Record<string, PlatformProvider>;
@@ -80,6 +87,7 @@ export type ActionContext = {
   ui?: {
     openObsShutdownConfigModal?: () => void;
     openScriptConfigModal?: (spec: ScriptConfigModalSpec) => void;
+    openScriptActionsModal?: (spec: ScriptActionsModalSpec) => void;
   };
 };
 
@@ -102,6 +110,8 @@ export type YashActionDefinition = {
   deprecated?: boolean;
   voiceHint?: boolean;
   scriptHint?: boolean;
+  scriptId?: string;
+  scriptActionKind?: 'framework' | 'behavior';
   argMode?: ActionArgMode;
   args: Record<string, ActionArgSchema>;
   examples?: Array<{ args: Record<string, unknown>; description?: string }>;

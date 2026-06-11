@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
-import * as path from 'node:path';
 import type { ScriptApi, UserScriptAction } from '../src/scripts/types';
 
 type RegisteredActionMap = Map<string, UserScriptAction>;
@@ -217,8 +216,12 @@ function createMockApi(options?: {
   };
 }
 
+async function loadScriptModule() {
+  return import(`../examples/scripts/obs-source-recaller/index.ts?case=${Date.now()}`);
+}
+
 async function loadScriptApi() {
-  const mod = await import(`../examples/scripts/obs-source-recaller/index.ts?case=${Date.now()}`);
+  const mod = await loadScriptModule();
   return mod.default as (api: ScriptApi) => () => void;
 }
 
@@ -411,228 +414,20 @@ describe('obs-source-recaller example script', () => {
     });
   });
 
-  test('config reads and updates script-local startPaused overrides without touching snapshots', async () => {
-    const setup = await loadScriptApi();
-    const ctx = createMockApi({
-      startPaused: false,
-      initialState: {
-        paused: true,
-        triggers: {
-          'Scene A': [
-            {
-              sourceRef: 'Scene A.Camera',
-              stage: 'inputSettings',
-              priority: 10,
-              data: { zoom: 80 },
-            },
-            {
-              sourceRef: 'Scene A.Camera',
-              stage: 'sceneItemTransform',
-              priority: 20,
-              data: { positionX: 5 },
-            },
-            { sourceRef: 'Scene A.Camera', stage: 'sceneItemEnabled', priority: 30, data: true },
-          ],
-        },
-      },
+  test('scriptDefinition is exported and framework-owned config actions are not script-registered', async () => {
+    const mod = await loadScriptModule();
+    const ctx = createMockApi();
+    cleanup = mod.default(ctx.api);
+
+    expect(mod.scriptDefinition).toEqual({
+      actionPrefix: 'obs.source-recaller',
+      title: 'OBS Source Recaller',
     });
-    cleanup = setup(ctx.api);
-    const expectedConfigPath = path.join(
-      process.env.YASH_DATA_DIR ?? path.join(process.env.HOME ?? '.', '.config', 'yash'),
-      'scripts',
-      'obs-source-recaller',
-      'config.jsonc',
-    );
-
-    const config = getAction(ctx.actions, 'obs.source-recaller.config');
-
-    const summary = await config.invoke({});
-    expect(summary.output).toEqual([
-      `[obs-source-recaller] config path → ${expectedConfigPath}`,
-      '[obs-source-recaller] startPaused → OFF',
-    ]);
-    expect(summary.data).toEqual({
-      configPath: expectedConfigPath,
-      startPaused: false,
-    });
-
-    const update = await config.invoke({ startPaused: true });
-    expect(update.output).toEqual([
-      '[obs-source-recaller] updated overrides: startPaused',
-      `[obs-source-recaller] config path → ${expectedConfigPath}`,
-    ]);
-    expect(update.warnings).toBeUndefined();
-    expect(update.data).toEqual({ startPaused: true });
-    expect(ctx.getStoredState()).toEqual({
-      paused: true,
-      triggers: {
-        'Scene A': [
-          {
-            sourceRef: 'Scene A.Camera',
-            stage: 'inputSettings',
-            priority: 10,
-            data: { zoom: 80 },
-          },
-          {
-            sourceRef: 'Scene A.Camera',
-            stage: 'sceneItemTransform',
-            priority: 20,
-            data: { positionX: 5 },
-          },
-          {
-            sourceRef: 'Scene A.Camera',
-            stage: 'sceneItemEnabled',
-            priority: 30,
-            data: true,
-          },
-        ],
-      },
-    });
-    expect(ctx.api.settings.get('startPaused', false)).toBe(true);
-  });
-
-  test('configTUI opens the generic object-backed script config modal with current config values', async () => {
-    const setup = await loadScriptApi();
-    const ctx = createMockApi({
-      startPaused: true,
-      initialState: {
-        paused: true,
-        triggers: {
-          'Scene A': [
-            {
-              sourceRef: 'Scene A.Camera',
-              stage: 'inputSettings',
-              priority: 10,
-              data: { zoom: 80 },
-            },
-          ],
-        },
-      },
-    });
-    cleanup = setup(ctx.api);
-
-    const openScriptConfigModal = mock((_spec: unknown) => {});
-    const result = await getAction(ctx.actions, 'obs.source-recaller.configTUI').invoke(
-      {},
-      { ui: { openScriptConfigModal } },
-    );
-
-    expect(result.output).toEqual(['[obs-source-recaller] opened config modal']);
-    expect(openScriptConfigModal).toHaveBeenCalledTimes(1);
-    expect(openScriptConfigModal.mock.calls[0]?.[0]).toMatchObject({
-      title: 'OBS Source Recaller Config',
-      prefix: '[obs-source-recaller]',
-      config: {
-        startPaused: true,
-        paused: true,
-        triggers: {
-          'Scene A': [
-            {
-              sourceRef: 'Scene A.Camera',
-              stage: 'inputSettings',
-              priority: 10,
-              data: { zoom: 80 },
-            },
-          ],
-        },
-        $ui: {
-          startPaused: expect.any(Object),
-          paused: expect.any(Object),
-          triggers: expect.any(Object),
-        },
-      },
-    });
-  });
-
-  test('configTUI save persists paused and triggers edits through the generic object modal contract', async () => {
-    const setup = await loadScriptApi();
-    const ctx = createMockApi({
-      startPaused: false,
-      initialState: {
-        paused: false,
-        triggers: {},
-      },
-    });
-    cleanup = setup(ctx.api);
-
-    const openScriptConfigModal = mock((_spec: unknown) => {});
-    await getAction(ctx.actions, 'obs.source-recaller.configTUI').invoke(
-      {},
-      { ui: { openScriptConfigModal } },
-    );
-
-    const spec = openScriptConfigModal.mock.calls[0]?.[0] as {
-      onSaveConfig: (
-        config: Record<string, unknown>,
-      ) => Promise<{ changedKeys: string[]; errors?: string[] }>;
-    };
-    const saveResult = await spec.onSaveConfig({
-      startPaused: true,
-      paused: true,
-      triggers: {
-        'Scene A': [
-          {
-            sourceRef: 'Scene B.Camera',
-            stage: 'inputSettings',
-            priority: 10,
-            checkIfChangedToApply: true,
-            data: { zoom: 222 },
-          },
-          {
-            sourceRef: 'Scene B.Camera',
-            stage: 'sceneItemTransform',
-            priority: 20,
-            checkIfChangedToApply: true,
-            data: { positionX: 42 },
-          },
-          {
-            sourceRef: 'Scene B.Camera',
-            stage: 'sceneItemEnabled',
-            priority: 30,
-            checkIfChangedToApply: true,
-            data: false,
-          },
-        ],
-      },
-      $ui: {
-        startPaused: { widget: 'toggle' },
-        paused: { widget: 'toggle' },
-        triggers: { widget: 'json' },
-      },
-    });
-
-    expect(saveResult.changedKeys).toContain('startPaused');
-    expect(saveResult.changedKeys).toContain('paused');
-    expect(saveResult.changedKeys).toContain('triggers');
-    expect(ctx.api.settings.get('startPaused', false)).toBe(true);
-    expect(ctx.getStoredState()).toEqual({
-      paused: true,
-      triggers: {
-        'Scene A': [
-          {
-            sourceRef: 'Scene B.Camera',
-            stage: 'inputSettings',
-            priority: 10,
-            checkIfChangedToApply: true,
-            data: { zoom: 222 },
-          },
-          {
-            sourceRef: 'Scene B.Camera',
-            stage: 'sceneItemTransform',
-            priority: 20,
-            checkIfChangedToApply: true,
-            data: { positionX: 42 },
-          },
-          {
-            sourceRef: 'Scene B.Camera',
-            stage: 'sceneItemEnabled',
-            priority: 30,
-            checkIfChangedToApply: true,
-            data: false,
-          },
-        ],
-      },
-    });
+    expect([...ctx.actions.keys()]).not.toContain('obs.source-recaller.config');
+    expect([...ctx.actions.keys()]).not.toContain('obs.source-recaller.config.tui');
+    expect([...ctx.actions.keys()]).not.toContain('obs.source-recaller.config.open');
+    expect([...ctx.actions.keys()]).not.toContain('obs.source-recaller.actions');
+    expect([...ctx.actions.keys()]).not.toContain('obs.source-recaller.configTUI');
   });
 
   test('load restores saved snapshot for the active scene in staged order', async () => {

@@ -7,9 +7,6 @@ import { makeRepoTempDir, removeRepoTempDir } from './helpers/testDataDir';
 type HarnessOptions = {
   config?: Record<string, unknown>;
   sceneNames?: string[];
-  ui?: {
-    openScriptConfigModal?: ReturnType<typeof mock>;
-  };
 };
 
 async function writeObsStartupConfig(dataDir: string, config: Record<string, unknown> = {}) {
@@ -66,8 +63,6 @@ async function createActionHarness(overrides: HarnessOptions = {}) {
   const startStream = mock(async () => {});
   const subscribeToStatusChanges = mock(() => () => {});
   const sendMessage = mock(async () => {});
-  const openScriptConfigModal = overrides.ui?.openScriptConfigModal ?? mock(() => {});
-
   const api = {
     registerAction(action) {
       actions.set(action.id, action);
@@ -139,8 +134,9 @@ async function createActionHarness(overrides: HarnessOptions = {}) {
       sendMessage,
       startStream,
       subscribeToStatusChanges,
-      openScriptConfigModal,
     },
+    actionIds: [...actions.keys()],
+    mod,
   };
 }
 
@@ -219,27 +215,15 @@ describe('obs-startup bundled example script', () => {
     expect(harness.spies.getSceneItemId).not.toHaveBeenCalledWith('[Scene]', '[Source].Camera');
   });
 
-  test('config persists overrides to config.jsonc and begin reads them on the next call', async () => {
+  test('begin reads persisted config.jsonc values', async () => {
     const harness = await createActionHarness({
       config: {
-        startStream: false,
-        countdownDelay: 0,
-        prepareScene: '[PS] Default',
+        startStream: true,
+        countdownDelay: 5,
       },
     });
     tempDir = harness.tempDir;
-    const config = harness.getAction('obs.startup.config');
     const begin = harness.getAction('obs.startup.begin');
-
-    const configResult = await config.invoke({ startStream: 'true', countdownDelay: '5' });
-    expect(configResult.output).toContain(
-      '[obs-startup] updated overrides: startStream, countdownDelay',
-    );
-
-    const configJson = JSON.parse(
-      await fs.readFile(path.join(tempDir, 'scripts', 'obs-startup', 'config.jsonc'), 'utf8'),
-    );
-    expect(configJson).toMatchObject({ startStream: true, countdownDelay: 5 });
 
     const beginResult = await begin.invoke({});
     expect(beginResult.output).toContain('[obs-startup] countdown → 5s');
@@ -270,18 +254,29 @@ describe('obs-startup bundled example script', () => {
     expect(harness.spies.sendMessage).toHaveBeenCalledWith("We're live!");
   });
 
-  test('configTUI opens the generic script config modal and stays TUI-only', async () => {
-    const openScriptConfigModal = mock(() => {});
-    const harness = await createActionHarness({
-      ui: { openScriptConfigModal },
-    });
+  test('scriptDefinition is exported and framework-owned config actions are not script-registered', async () => {
+    const harness = await createActionHarness();
     tempDir = harness.tempDir;
-    const action = harness.getAction('obs.startup.configTUI');
-
-    expect(action.ipcEnabled).toBe(false);
-
-    const result = await action.invoke({}, { ui: { openScriptConfigModal } });
-    expect(result.output).toEqual(['[obs-startup] opened config modal']);
-    expect(openScriptConfigModal).toHaveBeenCalledTimes(1);
+    expect(harness.mod.scriptDefinition).toEqual(
+      expect.objectContaining({
+        actionPrefix: 'obs.startup',
+        title: 'OBS Startup',
+        configAliases: expect.objectContaining({
+          'countdown.delay': 'countdownDelay',
+          'stream.start': 'startStream',
+        }),
+      }),
+    );
+    expect(harness.actionIds).toEqual([
+      'obs.startup.begin',
+      'obs.startup.live',
+      'obs.startup.cancel',
+      'obs.startup.status',
+    ]);
+    expect(harness.actionIds).not.toContain('obs.startup.config');
+    expect(harness.actionIds).not.toContain('obs.startup.config.tui');
+    expect(harness.actionIds).not.toContain('obs.startup.config.open');
+    expect(harness.actionIds).not.toContain('obs.startup.actions');
+    expect(harness.actionIds).not.toContain('obs.startup.configTUI');
   });
 });

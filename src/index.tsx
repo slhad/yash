@@ -32,7 +32,7 @@ import {
 } from './services';
 import { ChatterCache } from './services/chatter-cache';
 import { messageLog, type StreamSummary } from './services/message-log';
-import { formatActionHelp, parseActionArgs } from './utils/actionArgs';
+import { formatActionHelp, parseActionArgs, parseLooseActionArgs } from './utils/actionArgs';
 import {
   clearActionAutocompleteCaches,
   invalidateActionAutocompleteForObsEvent,
@@ -118,7 +118,11 @@ import {
 import { parseMarkerArgs, parseMarkersArgs, parseSettingsValue } from './utils/webCommands';
 import './index.ts'; // start Bun.serve web server in the same process
 import { IpcActionError, registry } from './actions/registry';
-import type { ScriptConfigModalField, ScriptConfigModalSpec } from './actions/types';
+import type {
+  ScriptActionsModalSpec,
+  ScriptConfigModalField,
+  ScriptConfigModalSpec,
+} from './actions/types';
 import { startIpcServer } from './ipc/server';
 import { handleScriptsCommand } from './scripts/commands';
 import { loadUserScripts } from './scripts/loader';
@@ -626,6 +630,7 @@ let activeStreamModal: StreamModal | null = null;
 let activeSettingsModal: SettingsModal | null = null;
 let activeObsShutdownConfigModal: SettingsModal | null = null;
 let activeScriptConfigModal: SettingsModal | null = null;
+let activeScriptActionsModal: SettingsModal | null = null;
 let activeChatterInfoModal: {
   box: BoxRenderable;
   refreshForMessage: (msg: ChatMessage) => void;
@@ -644,6 +649,7 @@ function ensureMainInputFocus(): void {
     activeSettingsModal ||
     activeObsShutdownConfigModal ||
     activeScriptConfigModal ||
+    activeScriptActionsModal ||
     activeChatterInfoModal ||
     activeHistoryModal ||
     activeActivityModal
@@ -735,6 +741,13 @@ function updateInputAssist(): void {
   composeTargetText.visible = true;
   uiNodes.inputEl.placeholder = 'type a message…';
   uiNodes.inputEl.fg = 'white';
+}
+
+function prefillMainInput(value: string): void {
+  if (!uiNodes) return;
+  uiNodes.inputEl.value = value;
+  updateInputAssist();
+  uiNodes.inputEl.focus();
 }
 
 // ─── initUI ─────────────────────────────────────────────────────────────────
@@ -1096,6 +1109,7 @@ function openActivityModal(): void {
       activeSettingsModal ||
       activeObsShutdownConfigModal ||
       activeScriptConfigModal ||
+      activeScriptActionsModal ||
       activeChatterInfoModal ||
       activeHistoryModal
     )
@@ -1227,6 +1241,7 @@ function openMemoryStatusModal(): void {
     activeSettingsModal ||
     activeObsShutdownConfigModal ||
     activeScriptConfigModal ||
+    activeScriptActionsModal ||
     activeChatterInfoModal ||
     activeHistoryModal
   )
@@ -3958,7 +3973,11 @@ const commandHandlers: Record<
       return;
     }
 
-    const { args, errors } = parseActionArgs(parts.slice(2), def.args);
+    const parsedArgs =
+      def.argMode === 'kv_pairs' && Object.keys(def.args).length === 0
+        ? { args: parseLooseActionArgs(parts.slice(2)), errors: [] as string[] }
+        : parseActionArgs(parts.slice(2), def.args);
+    const { args, errors } = parsedArgs;
     if (errors.length > 0) {
       for (const err of errors) emit(`[action] ${err}`);
       return;
@@ -4924,6 +4943,7 @@ function openObsShutdownConfigModal(): void {
     activeSettingsModal ||
     activeObsShutdownConfigModal ||
     activeScriptConfigModal ||
+    activeScriptActionsModal ||
     activeChatterInfoModal ||
     activeHistoryModal ||
     activeActivityModal
@@ -5224,6 +5244,7 @@ function openScriptConfigModal(spec: ScriptConfigModalSpec): void {
     activeSettingsModal ||
     activeObsShutdownConfigModal ||
     activeScriptConfigModal ||
+    activeScriptActionsModal ||
     activeChatterInfoModal ||
     activeHistoryModal ||
     activeActivityModal
@@ -5923,6 +5944,195 @@ function openScriptConfigModal(spec: ScriptConfigModalSpec): void {
   renderer.prependInputHandler(modalKeyHandler);
 }
 
+function openScriptActionsModal(spec: ScriptActionsModalSpec): void {
+  if (
+    !uiNodes ||
+    activeMemoryModal ||
+    activeModal ||
+    activeStreamModal ||
+    activeSettingsModal ||
+    activeObsShutdownConfigModal ||
+    activeScriptConfigModal ||
+    activeScriptActionsModal ||
+    activeChatterInfoModal ||
+    activeHistoryModal ||
+    activeActivityModal
+  )
+    return;
+
+  const actions = (
+    registry.listActions({ details: true }) as Array<{
+      id: string;
+      title: string;
+      description: string;
+      args: Record<string, unknown>;
+      visibility: string;
+      safety: string;
+      scriptId?: string;
+    }>
+  )
+    .filter(
+      (action) =>
+        action.scriptId === spec.scriptId &&
+        action.visibility === 'public' &&
+        action.safety !== 'blocked' &&
+        action.id !== `${spec.actionPrefix}.actions`,
+    )
+    .sort((a, b) => a.id.localeCompare(b.id));
+
+  if (actions.length === 0) {
+    lastMessages.push(`[${spec.actionPrefix}] no actions available for ${spec.scriptId}`);
+    return;
+  }
+
+  const { renderer } = uiNodes;
+  const box = new BoxRenderable(renderer, {
+    position: 'absolute',
+    top: '10%',
+    left: '10%',
+    width: '80%',
+    height: '78%',
+    zIndex: 100,
+    border: true,
+    borderStyle: 'rounded',
+    borderColor: 'cyan',
+    backgroundColor: 'black',
+    shouldFill: true,
+    padding: 1,
+    flexDirection: 'column',
+    gap: 1,
+    title: ` ${spec.title} `,
+  });
+
+  const intro = new TextRenderable(renderer, {
+    content:
+      spec.intro ??
+      ' Tab/Shift+Tab choose an action. Enter invokes no-arg actions or prefills `/action <id> ` in the main input when args are available. Esc cancels.',
+    fg: 'gray',
+  });
+  const detail = new TextRenderable(renderer, {
+    content: '',
+    fg: 'gray',
+    wrap: 'word',
+  });
+  const keyCapture = new InputRenderable(renderer, {
+    width: '100%',
+    placeholder: ' Enter runs the selected action. Esc closes.',
+  });
+  const scroll = new ScrollBoxRenderable(renderer, {
+    flexGrow: 1,
+    stickyScroll: false,
+    stickyStart: 'top',
+    scrollX: false,
+    scrollY: true,
+  });
+  const content = new BoxRenderable(renderer, {
+    flexDirection: 'column',
+    gap: 0,
+    width: '100%',
+  });
+  scroll.add(content);
+  box.add(intro);
+  box.add(scroll);
+  box.add(detail);
+  box.add(keyCapture);
+  renderer.root.add(box);
+
+  let selectedIndex = 0;
+  const clearBox = (target: BoxRenderable): void => {
+    for (const child of target.getChildren()) target.remove(child.id);
+  };
+  const renderRows = (): void => {
+    clearBox(content);
+    for (const [index, action] of actions.entries()) {
+      const hasArgs = Object.keys(action.args ?? {}).length > 0;
+      const localId = action.id.startsWith(`${spec.actionPrefix}.`)
+        ? action.id.slice(spec.actionPrefix.length + 1)
+        : action.id;
+      const row = new TextRenderable(renderer, {
+        content: `${index === selectedIndex ? '>' : ' '} ${localId}${hasArgs ? '  [args]' : ''}`,
+        fg: index === selectedIndex ? 'cyan' : 'white',
+        backgroundColor: index === selectedIndex ? '#1f2937' : undefined,
+      });
+      content.add(row);
+    }
+    const selected = actions[selectedIndex];
+    if (selected) {
+      const argNames = Object.keys(selected.args ?? {});
+      detail.content =
+        `${selected.title}\n${selected.description}` +
+        (argNames.length > 0 ? `\nArgs: ${argNames.join(', ')}` : '\nArgs: none');
+    }
+  };
+  const closeModal = (): void => {
+    if (!activeScriptActionsModal) return;
+    renderer.removeInputHandler(modalKeyHandler);
+    renderer.root.remove(box.id);
+    activeScriptActionsModal = null;
+    uiNodes?.inputEl.focus();
+  };
+  const moveSelection = (delta: number): void => {
+    if (!activeScriptActionsModal) return;
+    selectedIndex = (selectedIndex + delta + actions.length) % actions.length;
+    activeScriptActionsModal.focusIndex = selectedIndex;
+    renderRows();
+  };
+  const submitSelection = (): void => {
+    void (async () => {
+      const selected = actions[selectedIndex];
+      if (!selected) return;
+      closeModal();
+      if (Object.keys(selected.args ?? {}).length > 0) {
+        prefillMainInput(`/action ${selected.id} `);
+        return;
+      }
+      try {
+        await invokeActionFromTui(selected.id, {}, (line) => lastMessages.push(line));
+      } catch (err) {
+        const msg = err instanceof IpcActionError ? err.message : String(err);
+        lastMessages.push(`[action] ${msg}`);
+      }
+      updateUI(lastMessages);
+    })();
+  };
+  activeScriptActionsModal = { box, focusIndex: 0 };
+
+  renderRows();
+  keyCapture.on(InputRenderableEvents.INPUT, () => {
+    keyCapture.value = '';
+  });
+  keyCapture.on(InputRenderableEvents.ENTER, submitSelection);
+  keyCapture.onKeyDown = ((key: { name: string }) => {
+    if (key.name === 'escape') closeModal();
+  }) as any;
+  setTimeout(() => {
+    if (activeScriptActionsModal?.box.id === box.id) keyCapture.focus();
+  }, 0);
+
+  const modalKeyHandler = (sequence: string): boolean => {
+    if (!activeScriptActionsModal) return false;
+    if (sequence === '\x1b' || sequence === '\x1b\x1b') {
+      closeModal();
+      return true;
+    }
+    if (sequence === '\t') {
+      moveSelection(1);
+      return true;
+    }
+    if (sequence === '\x1b[Z') {
+      moveSelection(-1);
+      return true;
+    }
+    if (sequence === '\r' || sequence === '\n') {
+      submitSelection();
+      return true;
+    }
+    return false;
+  };
+
+  renderer.prependInputHandler(modalKeyHandler);
+}
+
 async function invokeActionFromTui(
   id: string,
   args: Record<string, unknown>,
@@ -5932,7 +6142,7 @@ async function invokeActionFromTui(
     chatService,
     providers: { youtube, twitch, kick },
     emit,
-    ui: { openObsShutdownConfigModal, openScriptConfigModal },
+    ui: { openObsShutdownConfigModal, openScriptConfigModal, openScriptActionsModal },
   });
   for (const line of result.output ?? []) emit(line);
   for (const warn of result.warnings ?? []) emit(`[warning] ${warn}`);
@@ -5948,6 +6158,7 @@ function openChatterInfoModal(msg: ChatMessage): void {
     activeSettingsModal ||
     activeObsShutdownConfigModal ||
     activeScriptConfigModal ||
+    activeScriptActionsModal ||
     activeChatterInfoModal
   )
     return;
@@ -6609,6 +6820,7 @@ function openHistoryModal(opts?: { query?: string }): void {
     activeSettingsModal ||
     activeObsShutdownConfigModal ||
     activeScriptConfigModal ||
+    activeScriptActionsModal ||
     activeChatterInfoModal ||
     activeHistoryModal
   )
@@ -7841,7 +8053,8 @@ async function main() {
           !activeStreamModal &&
           !activeSettingsModal &&
           !activeObsShutdownConfigModal &&
-          !activeScriptConfigModal
+          !activeScriptConfigModal &&
+          !activeScriptActionsModal
         ) {
           browseModeActive = true;
           browseSelectedIdx = lastMessages.length > 0 ? lastMessages.length - 1 : null;
@@ -7856,7 +8069,8 @@ async function main() {
           !activeStreamModal &&
           !activeSettingsModal &&
           !activeObsShutdownConfigModal &&
-          !activeScriptConfigModal
+          !activeScriptConfigModal &&
+          !activeScriptActionsModal
         ) {
           browseModeActive = false;
           browseSelectedIdx = null;
@@ -7865,6 +8079,7 @@ async function main() {
         }
 
         if (sequence === '\x1b[A') {
+          if (activeScriptActionsModal) return false;
           // Up arrow — in browse mode: navigate up; otherwise: go back in history
           if (browseModeActive) {
             if (browseSelectedIdx !== null) {
@@ -7883,6 +8098,7 @@ async function main() {
         }
 
         if (sequence === '\x1b[B') {
+          if (activeScriptActionsModal) return false;
           // Down arrow — in browse mode: navigate down; otherwise: go forward in history
           if (browseModeActive) {
             if (browseSelectedIdx !== null) {
@@ -7920,7 +8136,8 @@ async function main() {
           !activeStreamModal &&
           !activeSettingsModal &&
           !activeObsShutdownConfigModal &&
-          !activeScriptConfigModal
+          !activeScriptConfigModal &&
+          !activeScriptActionsModal
         ) {
           const ev = boolSetting(settings.get('events.visible', true), true);
           const lg = boolSetting(settings.get('logs.visible', true), true);
@@ -7946,6 +8163,7 @@ async function main() {
           !activeSettingsModal &&
           !activeObsShutdownConfigModal &&
           !activeScriptConfigModal &&
+          !activeScriptActionsModal &&
           !activeHistoryModal &&
           !activeChatterInfoModal &&
           !activeMemoryModal
