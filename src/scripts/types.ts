@@ -74,6 +74,7 @@ export type UserScriptDefinition = {
   actionPrefix?: string;
   title?: string;
   description?: string;
+  configAliases?: Record<string, string>;
 };
 
 export type ScriptApi = {

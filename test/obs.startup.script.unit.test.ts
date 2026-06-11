@@ -257,10 +257,16 @@ describe('obs-startup bundled example script', () => {
   test('scriptDefinition is exported and framework-owned config actions are not script-registered', async () => {
     const harness = await createActionHarness();
     tempDir = harness.tempDir;
-    expect(harness.mod.scriptDefinition).toEqual({
-      actionPrefix: 'obs.startup',
-      title: 'OBS Startup',
-    });
+    expect(harness.mod.scriptDefinition).toEqual(
+      expect.objectContaining({
+        actionPrefix: 'obs.startup',
+        title: 'OBS Startup',
+        configAliases: expect.objectContaining({
+          'countdown.delay': 'countdownDelay',
+          'stream.start': 'startStream',
+        }),
+      }),
+    );
     expect(harness.actionIds).toEqual([
       'obs.startup.begin',
       'obs.startup.live',

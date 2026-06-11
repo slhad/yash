@@ -72,6 +72,7 @@ export type UserScriptDefinition = {
   actionPrefix?: string;
   title?: string;
   description?: string;
+  configAliases?: Record<string, string>;
 };
 
 export type ScriptApi = {
@@ -544,6 +545,7 @@ export type UserScriptDefinition = {
   actionPrefix?: string;
   title?: string;
   description?: string;
+  configAliases?: Record<string, string>;
 };
 
 export type ScriptApi = {
@@ -680,7 +682,10 @@ export async function loadUserScripts(
         cleanupFns.push(teardown);
       }
 
-      registerFrameworkOwnedScriptActions(scriptMeta, { dataDir });
+      registerFrameworkOwnedScriptActions(scriptMeta, {
+        dataDir,
+        configAliases: definition.configAliases,
+      });
 
       defaultLogger.info(`[user-scripts] loaded: ${path.basename(file)}`);
     } catch (err) {

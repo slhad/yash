@@ -29,6 +29,7 @@ type RegisterFrameworkOwnedScriptActionsOptions = {
   dataDir: string;
   domain?: string;
   voiceHint?: boolean;
+  configAliases?: Record<string, string>;
   configArgs?: Record<string, ActionArgSchema>;
   configExamples?: Array<{ args: Record<string, unknown>; description?: string }>;
   configInvoke?: (args: Record<string, unknown>, ctx: ConfigActionContext) => Promise<ActionResult>;
@@ -105,7 +106,11 @@ function parseBooleanString(raw: string): boolean | null {
   return null;
 }
 
-function parseGenericConfigValue(rawValue: string, currentValue: unknown): unknown {
+function parseGenericConfigValue(rawValue: unknown, currentValue: unknown): unknown {
+  if (typeof rawValue !== 'string') {
+    return JSON.parse(JSON.stringify(rawValue));
+  }
+
   const trimmed = rawValue.trim();
   if (Array.isArray(currentValue) || (currentValue !== null && typeof currentValue === 'object')) {
     return JSON.parse(trimmed);
@@ -207,6 +212,7 @@ export function registerFrameworkOwnedScriptActions(
     dataDir,
     domain = 'scripts',
     voiceHint,
+    configAliases = {},
     configArgs = {},
     configExamples,
     configInvoke,
@@ -260,14 +266,15 @@ export function registerFrameworkOwnedScriptActions(
 
       const nextConfig = JSON.parse(JSON.stringify(current)) as Record<string, unknown>;
       const changedKeys: string[] = [];
-      for (const [key, rawValue] of Object.entries(args)) {
+      for (const [rawKey, rawValue] of Object.entries(args)) {
+        const key = configAliases[rawKey] ?? rawKey;
         if (keyPathTouchesUiMetadata(key)) {
           throw new Error(
             '$ui is reserved for TUI metadata and is not available through this config action',
           );
         }
         const currentValue = getValueAtPath(current, key, undefined);
-        const nextValue = parseGenericConfigValue(String(rawValue), currentValue);
+        const nextValue = parseGenericConfigValue(rawValue, currentValue);
         setValueAtPath(nextConfig, key, nextValue);
         changedKeys.push(key);
       }

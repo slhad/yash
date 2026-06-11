@@ -1,5 +1,6 @@
 import type { ScriptApi, UserScriptAction, UserScriptDefinition } from './types';
 import {
+  OBS_STARTUP_KEY_ALIASES,
   loadObsStartupEffectiveConfig,
 } from './config';
 
@@ -49,6 +50,7 @@ let state: StartupState = { active: false };
 export const scriptDefinition = {
   actionPrefix: 'obs.startup',
   title: 'OBS Startup',
+  configAliases: OBS_STARTUP_KEY_ALIASES,
 } satisfies UserScriptDefinition;
 
 // ─── Setup ────────────────────────────────────────────────────────────────────

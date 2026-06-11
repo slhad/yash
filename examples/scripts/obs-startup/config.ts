@@ -105,7 +105,7 @@ export const OBS_STARTUP_ACTION_ARG_SCHEMA = {
   liveMessage: { type: 'string', required: false, maxLength: 500 },
 } as const;
 
-const OBS_STARTUP_KEY_ALIASES: Record<string, ObsStartupConfigKey> = {
+export const OBS_STARTUP_KEY_ALIASES: Record<string, ObsStartupConfigKey> = {
   'prepare.scene': 'prepareScene',
   'prepare.hideSources': 'hideSources',
   'prepare.muteSources': 'muteSources',

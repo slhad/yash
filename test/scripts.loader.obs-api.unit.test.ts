@@ -197,6 +197,10 @@ export default function setup(api) {
 export const scriptDefinition = {
   actionPrefix: '${FRAMEWORK_PREFIX}',
   title: 'Custom OBS Probe',
+  configAliases: {
+    'legacy.enabled': 'enabled',
+    'legacy.count': 'nested.count',
+  },
 };
 
 export default function setup(api) {
@@ -216,7 +220,13 @@ export default function setup(api) {
     await fs.writeFile(
       path.join(scriptDir, 'obs-framework-probe', 'config.jsonc'),
       JSON.stringify(
-        { enabled: false, nested: { count: 0 }, $ui: { enabled: { label: 'Enabled' } } },
+        {
+          enabled: false,
+          nested: { count: 0 },
+          tags: [],
+          metadata: { label: 'initial' },
+          $ui: { enabled: { label: 'Enabled' } },
+        },
         null,
         2,
       ),
@@ -247,13 +257,20 @@ export default function setup(api) {
     expect(configJson).toEqual({
       enabled: false,
       nested: { count: 0 },
+      tags: [],
+      metadata: { label: 'initial' },
       $ui: { enabled: { label: 'Enabled' } },
     });
 
     const readResult = await config!.invoke({}, { chatService: {} as never, providers: {} });
     expect(readResult.data).toEqual({
       configPath,
-      config: { enabled: false, nested: { count: 0 } },
+      config: {
+        enabled: false,
+        nested: { count: 0 },
+        tags: [],
+        metadata: { label: 'initial' },
+      },
     });
 
     const updateResult = await config!.invoke(
@@ -266,6 +283,27 @@ export default function setup(api) {
       config: {
         enabled: true,
         nested: { count: 3 },
+        tags: [],
+        metadata: { label: 'initial' },
+      },
+    });
+
+    const typedUpdateResult = await config!.invoke(
+      {
+        'legacy.enabled': true,
+        'legacy.count': 7,
+        tags: ['Camera'],
+        metadata: { label: 'updated' },
+      },
+      { chatService: {} as never, providers: {} },
+    );
+    expect(typedUpdateResult.data).toMatchObject({
+      changedKeys: ['enabled', 'nested.count', 'tags', 'metadata'],
+      config: {
+        enabled: true,
+        nested: { count: 7 },
+        tags: ['Camera'],
+        metadata: { label: 'updated' },
       },
     });
 
