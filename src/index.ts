@@ -1,5 +1,6 @@
-import * as fs from 'node:fs';
-import * as path from 'node:path';
+import indexHtml from '../index.html';
+import sidebysidesHtml from '../sidebyside.html';
+import unifiedHtml from '../unified.html';
 import commandsJs from './utils/webCommands.bundle.js' with { type: 'text' };
 
 // When launched as TUI companion (YASH_TUI_ONLY=1), skip HTML page routes —
@@ -30,7 +31,7 @@ import {
   getChatHistoryStreamIds,
   mergeChatHistoryMessages,
 } from './utils/chatHistoryLoader';
-import { getDataDir, isDemoMode, resolvePort } from './utils/config';
+import { isDemoMode, resolvePort } from './utils/config';
 import { getFfzEmotePayload, type TwitchEmoteFetchContext } from './utils/ffz-fetch';
 import { getHelpCommands } from './utils/help';
 import { defaultLogger, parseLoggerLevelName, setDefaultLoggerLevel } from './utils/logger';
@@ -101,121 +102,13 @@ function applySettingSideEffects(key: string, value: unknown): void {
   }
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const htmlRoutes: Record<string, any> = isTuiOnly
+  ? {}
+  : { '/': indexHtml, '/unified': unifiedHtml, '/sidebyside': sidebysidesHtml };
+
 const SERVER_PORT = resolvePort();
-const WEBUI_BUILD_DIR = path.join(getDataDir(), 'cache', 'webui-runtime');
-const WEBUI_ENTRYPOINTS = {
-  '/': path.resolve(import.meta.dir, '../index.html'),
-  '/unified': path.resolve(import.meta.dir, '../unified.html'),
-  '/sidebyside': path.resolve(import.meta.dir, '../sidebyside.html'),
-} as const;
-
-type WebUiBuildState = {
-  enabled: boolean;
-  buildDir: string;
-  pagePaths: Record<string, string>;
-};
-
-async function prepareWebUiBuild(): Promise<WebUiBuildState> {
-  if (isTuiOnly) {
-    return {
-      enabled: false,
-      buildDir: WEBUI_BUILD_DIR,
-      pagePaths: {},
-    };
-  }
-
-  await fs.promises.mkdir(WEBUI_BUILD_DIR, { recursive: true });
-
-  const buildResult = await Bun.build({
-    entrypoints: Object.values(WEBUI_ENTRYPOINTS),
-    outdir: WEBUI_BUILD_DIR,
-    target: 'browser',
-    format: 'esm',
-    naming: {
-      entry: '[name]-[hash].[ext]',
-      chunk: '[name]-[hash].[ext]',
-      asset: '[name]-[hash].[ext]',
-    },
-  });
-
-  if (!buildResult.success) {
-    const details = buildResult.logs.map((log) => log.message).join('\n');
-    throw new Error(`Failed to build Web UI assets:\n${details}`);
-  }
-
-  const htmlOutputs = buildResult.outputs
-    .map((output) => output.path)
-    .filter((outputPath) => outputPath.endsWith('.html'));
-
-  return {
-    enabled: true,
-    buildDir: WEBUI_BUILD_DIR,
-    pagePaths: Object.fromEntries(
-      Object.entries(WEBUI_ENTRYPOINTS).map(([routePath, sourcePath]) => {
-        const entryBaseName = path.basename(sourcePath, '.html');
-        const builtHtmlPath = htmlOutputs.find((outputPath) =>
-          path.basename(outputPath).startsWith(`${entryBaseName}-`),
-        );
-        if (!builtHtmlPath) {
-          throw new Error(`Missing built HTML output for route ${routePath}`);
-        }
-        return [routePath, builtHtmlPath];
-      }),
-    ),
-  };
-}
-
-function getStaticAssetContentType(filePath: string): string {
-  if (filePath.endsWith('.html')) return 'text/html; charset=utf-8';
-  if (filePath.endsWith('.js')) return 'application/javascript; charset=utf-8';
-  if (filePath.endsWith('.css')) return 'text/css; charset=utf-8';
-  if (filePath.endsWith('.json')) return 'application/json; charset=utf-8';
-  if (filePath.endsWith('.svg')) return 'image/svg+xml';
-  if (filePath.endsWith('.png')) return 'image/png';
-  if (filePath.endsWith('.jpg') || filePath.endsWith('.jpeg')) return 'image/jpeg';
-  if (filePath.endsWith('.webp')) return 'image/webp';
-  return 'application/octet-stream';
-}
-
-function resolveWebUiAssetPath(urlPath: string, webUiBuild: WebUiBuildState): string | null {
-  if (!webUiBuild.enabled) return null;
-  if (urlPath in webUiBuild.pagePaths) return webUiBuild.pagePaths[urlPath] ?? null;
-
-  const relativePath = urlPath.replace(/^\/+/, '');
-  if (!relativePath || relativePath.includes('\0')) return null;
-
-  const normalizedPath = path.posix.normalize(relativePath);
-  if (
-    normalizedPath.startsWith('../') ||
-    normalizedPath === '..' ||
-    path.isAbsolute(normalizedPath)
-  ) {
-    return null;
-  }
-
-  return path.join(webUiBuild.buildDir, normalizedPath);
-}
-
-async function serveWebUiAsset(
-  req: Request,
-  webUiBuild: WebUiBuildState,
-): Promise<Response | null> {
-  if (!webUiBuild.enabled) return null;
-  if (req.method !== 'GET' && req.method !== 'HEAD') return null;
-
-  const { pathname } = new URL(req.url);
-  const assetPath = resolveWebUiAssetPath(pathname, webUiBuild);
-  if (!assetPath) return null;
-
-  const file = Bun.file(assetPath);
-  if (!(await file.exists())) return null;
-
-  return new Response(file, {
-    headers: { 'Content-Type': getStaticAssetContentType(assetPath) },
-  });
-}
-
-const webUiBuild = await prepareWebUiBuild();
 
 runtimeMonitor.start();
 syncDefaultLoggerLevelSetting();
@@ -393,6 +286,7 @@ runtimeMonitor.registerProbe('services', () => {
 Bun.serve({
   port: SERVER_PORT,
   routes: {
+    ...htmlRoutes,
     '/api/status': {
       GET: () => {
         const status = platforms.reduce(
@@ -1369,11 +1263,6 @@ Bun.serve({
       // and formatting as the JSON handler.
       GET: (req) => prometheusMetricsHandler((name: string) => req.headers.get(name), req.url),
     },
-  },
-  fetch: async (req) => {
-    const webUiResponse = await serveWebUiAsset(req, webUiBuild);
-    if (webUiResponse) return webUiResponse;
-    return new Response('Not Found', { status: 404 });
   },
   development: false,
 });
