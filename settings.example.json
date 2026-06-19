@@ -22,6 +22,10 @@
     "tags": [],
     "chapters": []
   },
+  "streamTemplates": {
+    "activeName": "",
+    "items": {}
+  },
   "platforms": {
     "youtube": {
       "showViewers": true,

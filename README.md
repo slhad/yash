@@ -196,7 +196,7 @@ On startup, YASH performs a one-time migration from the legacy repository-root `
    ```
 3. If you already have a legacy repo-root `config.json`, YASH will migrate it once automatically the first time it starts without an existing runtime config file.
 
-`config.json` holds rarely edited bootstrap data such as OBS, server, and provider credentials/setup fields. `settings.json` holds mutable YASH-owned runtime state such as `stream.*`, `platforms.youtube.setup`, chat/UI preferences, demo mode, and per-platform viewer display settings.
+`config.json` holds rarely edited bootstrap data such as OBS, server, and provider credentials/setup fields. `settings.json` holds mutable YASH-owned runtime state such as `stream.*`, `streamTemplates.activeName`, `streamTemplates.items`, `platforms.youtube.setup`, chat/UI preferences, demo mode, and per-platform viewer display settings.
 
 Ownership boundary:
 
@@ -312,6 +312,8 @@ Notes:
 ## Stream category autocomplete
 
 The `/stream` modal (TUI) and stream form (WebUI) have per-platform category fields. Twitch and Kick fields autocomplete live as you type (300 ms debounce); YouTube uses a static dropdown. All three are sent as separate metadata fields (`twitchGame`, `kickCategory`, `youtubeCategory`).
+
+Inside the TUI `/stream` modal, `Ctrl+→` still cascades the current category/subject field down the platform chain, `Ctrl+F` toggles force-apply mode so all currently visible fields are resent even when persisted values already match, and the template name field lets you manage multiple saved templates: `F5` saves the current draft into `streamTemplates.items[<name>]`, `F8` restores the template currently named in that field, and `F10` deletes the currently named template from the saved set.
 
 ## HTML chat emotes
 

@@ -108,6 +108,8 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
     * Command `/setup-youtube` — opens the YouTube stream setup modal (TUI only); configure chaptering, auto-start marker, sync delay, tags, description, subject, and playlist
     * `/stream` modal: per-platform category autocomplete with ↑/↓ navigation — Twitch field (`twitchGame`) calls `/api/twitch/categories` with 300 ms debounce; Kick field (`kickCategory`) calls `/api/kick/categories` with 300 ms debounce; YouTube field uses a static `<select>` dropdown from `/api/youtube/categories`; YouTube Subject field (`game`) shows playlist suggestions from `youtube.searchPlaylists()` (client-side filter of `listPlaylists()`) with 300 ms debounce and a `(new)` indicator when the typed text doesn't match any existing playlist exactly
     * `/stream` modal cascade (`Ctrl+→`): propagates the current field value down the platform chain — Subject → fills Twitch category + Kick category (triggering their autocomplete searches immediately at 0 ms delay); Twitch category → fills Kick category (triggering its search); only cascades to platforms that are currently selected
+    * `/stream` modal force apply (`Ctrl+F`): toggles between the default "changed fields only" submit path and a force-apply mode that resubmits every currently visible field for the selected platforms even when the persisted `stream.*` values already match
+    * `/stream` modal templates: includes a template-name field plus filtered saved-name suggestions; `F5` saves the current modal draft plus selected platforms into `streamTemplates.items[<name>]` and persists that name as `streamTemplates.activeName`; `F8` restores the template currently named in the field, including provider selection and category/search fields; `F10` deletes the template currently named in the field and keeps the remaining set persisted
     * Message box to send message to [all|youtube|twitch|kick] platform and receive command "/" (without sending to platforms)
         * Input history: Up/Down arrow keys navigate previously-sent messages (like a shell history)
         * The TUI persists previously sent commands and plain messages across restarts in `YASH_DATA_DIR/input-history.json`, so Up/Down recall still works after relaunch
@@ -330,7 +332,7 @@ Bootstrap config is stored in `YASH_DATA_DIR/config.json` (default `~/.config/ya
 }
 ```
 
-Mutable settings live in `settings.json`, including `demo`, `chat.*`, `stream.*`, `platforms.youtube.setup`, `platforms.<provider>.showViewers`, and TUI/WebUI display preferences.
+Mutable settings live in `settings.json`, including `demo`, `chat.*`, `stream.*`, `streamTemplates.activeName`, `streamTemplates.items.*`, `platforms.youtube.setup`, `platforms.<provider>.showViewers`, and TUI/WebUI display preferences.
 
 `config.json` and `settings.json` are reserved for YASH itself. User scripts own `YASH_DATA_DIR/scripts/<scriptId>/config.jsonc` as their primary persisted surface; do not document normal script settings as part of YASH's top-level settings surface.
 

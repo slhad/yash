@@ -173,6 +173,7 @@ class RuntimeMonitor {
     if (!latest || Date.now() - latest.ts > FRESH_SAMPLE_MAX_AGE_MS) {
       return this.captureNow();
     }
+    this.writeProcessMetrics(latest);
     return this.buildSnapshot(latest);
   }
 

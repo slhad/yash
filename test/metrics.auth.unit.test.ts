@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, test } from 'bun:test';
 import { authorizeMetrics } from '../src/utils/metricsAuth';
 
-describe('metricsAuth.authorizeMetrics', () => {
+describe.serial('metricsAuth.authorizeMetrics', () => {
   const old = process.env.YASH_METRICS_TOKEN;
   afterAll(() => {
     if (old === undefined) delete process.env.YASH_METRICS_TOKEN;
