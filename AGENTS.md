@@ -21,11 +21,11 @@
 **Never `git add` any file under `tmp/`**, even with `-f`/`--force`.
 
 `tmp/` is gitignored because it holds ephemeral local artifacts (build outputs,
-seed scripts, VHS tapes, test databases, recordings, …).  These must not enter
+seed scripts, asciinema casts, test databases, recordings, …).  These must not enter
 the repository history — not even on feature branches.
 
 For demos specifically, treat `tmp/` as the only workspace for:
-- VHS tapes and helper shell scripts
+- asciinema casts, agg conversions, and helper shell scripts
 - Playwright recordings and GIF conversions
 - screenshots, GIFs, videos, and any other binary artifacts
 - one-off repro helpers or capture scripts used only for a PR/demo
@@ -86,9 +86,9 @@ When beginning work in this repository:
 Never commit binary files (images, GIFs, fonts, archives, compiled artifacts, etc.) to the repository.
 
 - Store temporary assets in `[tmp]` — it is gitignored and safe.
-- Keep PR/demo source artifacts there too: VHS tapes, recording helper scripts,
-  Playwright videos, converted GIFs, and screenshots all belong under
-  `[tmp]/...`, not in tracked repo folders.
+- Keep PR/demo source artifacts there too: asciinema casts, agg conversions,
+  recording helper scripts, Playwright videos, converted GIFs, and screenshots all
+  belong under `[tmp]/...`, not in tracked repo folders.
 - For demo GIFs or screenshots that need a stable public download URL, upload them to the dedicated **`screenshots` release** — a permanent prerelease used exclusively as an asset store:
   ```bash
   gh release upload screenshots tmp/my-demo.gif --clobber
@@ -139,7 +139,7 @@ The double-form guard (`longModule?.fromNumber ?? longModule?.default`) is inten
 
 Before opening a PR, you **must** complete every step below in order. Do not skip or mark a step done without actually running it.
 
-For steps that are **not applicable** to the current change (e.g. no TUI changes → no VHS recording needed), mark the checklist item `[x]` with a short `N/A — reason` explanation. Never leave an unrelated item unchecked — an unchecked box signals a missing action, not an inapplicable one.
+For steps that are **not applicable** to the current change (e.g. no TUI changes → no asciinema recording needed), mark the checklist item `[x]` with a short `N/A — reason` explanation. Never leave an unrelated item unchecked — an unchecked box signals a missing action, not an inapplicable one.
 
 1. **Unit tests** — run the unit test file(s) relevant to your changes: `bun test test/<relevant>.unit.test.ts` — all must pass
 2. **Repo policy validation** — `bun run validate:repo` — no tracked demo artifacts outside `tmp/`, no tracked binary changes outside `tmp/`
@@ -147,7 +147,7 @@ For steps that are **not applicable** to the current change (e.g. no TUI changes
 4. **Type check** — `bun typecheck` — no errors
 5. **Live TUI check** — verify the feature in the running yash tmux session (window `yash:all`); use the `/test-live` skill
 6. **Live Web UI check** — verify the feature in the web UI
-7. **VHS recording** — create tapes, helper scripts, and generated GIFs under `tmp/` only; generate the TUI demo GIF last, once all checks above pass; host it via the `screenshots` release and link it in the Demo section
+7. **Asciinema/agg recording** — create asciinema casts, helper scripts, and generated GIFs under `tmp/` only; record in a real tmux pane when function keys are needed, convert with `agg`, generate the TUI demo GIF last once all checks above pass, then host it via the `screenshots` release and link it in the Demo section
 8. **Playwright recording** — generate the Web UI demo MP4 last, once all checks above pass:
    ```bash
    RECORD_VIDEO=1 bunx playwright test --project=chromium
