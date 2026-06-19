@@ -14,7 +14,7 @@ Interact with the running yash TUI in the `yash` tmux session to verify behaviou
 | Session | `yash` |
 | TUI window | `yash:all` (window named `all`, always use this target) |
 | Start command | `bun start` — always use this; starts TUI + WebUI on port 3000 |
-| VHS tapes | Use `YASH_PORT=3001` so recordings never conflict with a live test TUI on 3000 |
+| Asciinema recordings | Use `YASH_PORT=3001` so recordings never conflict with a live test TUI on 3000; record in a real tmux pane and convert casts with `agg` |
 
 ## Always target `yash:all` explicitly, never bare `yash`
 
@@ -225,5 +225,5 @@ sleep 0.3
 - **Never verify the app is running by counting box-drawing chars** — the pane has thousands of lines of history from old sessions that will produce false positives. Always grep for `YASH server running` in recent scrollback to confirm a live current run.
 - Modals (stream, YouTube setup, Kick setup) capture Up/Down so they do not bleed into the main message input history. Use the "exclusive input" pattern above to verify this.
 - The message input history cycles on bare Up/Down only when no modal is active.
-- **Clearing the main input:** `Ctrl+A` only moves the cursor to the beginning — it does NOT select all. Use `C-u` (`Ctrl+U`) to kill the line from the cursor back to the start, which reliably empties the field. `Ctrl+A` followed by `BSpace` is a no-op and a common mistake in VHS tapes.
+- **Clearing the main input:** `Ctrl+A` only moves the cursor to the beginning — it does NOT select all. Use `C-u` (`Ctrl+U`) to kill the line from the cursor back to the start, which reliably empties the field. `Ctrl+A` followed by `BSpace` is a no-op and a common mistake in terminal recordings.
 - The TUI captures `console.log` — do not use it for debugging; use the logger file transport instead.

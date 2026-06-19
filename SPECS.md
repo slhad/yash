@@ -190,7 +190,7 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
 
 ## Deliverables
 * Screenshots of webviews made with playwright
-* Gif of TUI made with VHS
+* Gif of TUI made with asciinema and agg
 * All temporary demo assets used to produce those deliverables must live under `[tmp]/...`; only hosted URLs belong in PRs/docs, not repo-committed binaries or ad hoc `demo/` files
 * PR-body inline videos must use GitHub `user-attachments` URLs generated through the shared GitHub PR attachment helper (`bun ~/.agents/skills/github-pr-attachments/scripts/upload_pr_attachment.ts ...`); release asset URLs are acceptable as downloads but are not the authoritative inline-video path
 
@@ -554,8 +554,8 @@ interface PlatformProvider {
 
 ## Integration tests
 - Chats webview with `playwright-cli` skill, record screenshots in [tmp]/web/
-- TUI with `vhs` skill, record demos in [tmp]/tui/
-- Keep demo source artifacts there too: tapes, helper scripts, captured videos, GIF conversions, and screenshots should all be created under `[tmp]/...`, not tracked folders such as `demo/`
+- TUI with the `asciinema-recorder` skill, recording casts in a real tmux pane when function keys are needed and converting GIFs with `agg`; record demos in [tmp]/tui/
+- Keep demo source artifacts there too: asciinema casts, helper scripts, captured videos, GIF conversions, and screenshots should all be created under `[tmp]/...`, not tracked folders such as `demo/`
 - Use `YASH_DATA_DIR/config.json` and `YASH_DATA_DIR/settings.json` (actual working runtime state) to execute integration tests
 - Test websocket communication with obs-studio (ignore if connection refused, aka obs-studio is off)
 
