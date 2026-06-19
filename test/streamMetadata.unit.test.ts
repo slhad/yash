@@ -1,5 +1,10 @@
 import { describe, expect, test } from 'bun:test';
-import { buildTargetedStreamMetadataUpdate } from '../src/utils/streamMetadata';
+import {
+  buildStreamTemplateDraft,
+  buildTargetedStreamMetadataUpdate,
+  sanitizeStreamTemplateCollection,
+  sanitizeStreamTemplateDraft,
+} from '../src/utils/streamMetadata';
 
 describe('buildTargetedStreamMetadataUpdate', () => {
   test('preserves unrelated provider fields during twitch-only updates', () => {
@@ -62,6 +67,114 @@ describe('buildTargetedStreamMetadataUpdate', () => {
       tags: undefined,
       twitchGame: undefined,
       notification: undefined,
+    });
+  });
+
+  test('force mode includes selected fields even when values match persisted settings', () => {
+    const savedStream = {
+      title: 'Same title',
+      tags: ['alpha'],
+      twitchGame: 'Software and Game Development',
+      notification: 'Going live',
+      game: 'Keep me',
+      youtubeCategory: 'Gaming',
+    };
+
+    const { changed, merged } = buildTargetedStreamMetadataUpdate(
+      savedStream,
+      ['twitch'],
+      {
+        title: 'Same title',
+        tags: ['alpha'],
+        twitchGame: 'Software and Game Development',
+        notification: 'Going live',
+        game: undefined,
+        youtubeCategory: undefined,
+        kickCategory: undefined,
+        description: undefined,
+      },
+      { force: true },
+    );
+
+    expect(changed).toEqual({
+      title: 'Same title',
+      tags: ['alpha'],
+      twitchGame: 'Software and Game Development',
+      notification: 'Going live',
+    });
+    expect(merged).toEqual(savedStream);
+  });
+});
+
+describe('stream template draft helpers', () => {
+  test('builds a reusable template snapshot with selected platforms', () => {
+    const template = buildStreamTemplateDraft(
+      {
+        title: 'Template title',
+        tags: ['one', 'two'],
+        game: 'Subject',
+        youtubeCategory: 'Gaming',
+        description: 'Desc',
+        twitchGame: 'Science & Technology',
+        notification: 'We are live',
+        kickCategory: 'Coding',
+      },
+      ['youtube', 'twitch', 'youtube'],
+    );
+
+    expect(template).toEqual({
+      title: 'Template title',
+      tags: ['one', 'two'],
+      game: 'Subject',
+      youtubeCategory: 'Gaming',
+      description: 'Desc',
+      twitchGame: 'Science & Technology',
+      notification: 'We are live',
+      kickCategory: 'Coding',
+      selectedPlatforms: ['youtube', 'twitch'],
+    });
+  });
+
+  test('sanitizes persisted templates and drops invalid values', () => {
+    const template = sanitizeStreamTemplateDraft({
+      title: 'Template title',
+      tags: ['one', 2, ' two '],
+      selectedPlatforms: ['youtube', 'bogus', 'kick', 'kick'],
+      youtubeCategory: 'Gaming',
+      notification: 5,
+    });
+
+    expect(template).toEqual({
+      title: 'Template title',
+      tags: ['one', 'two'],
+      selectedPlatforms: ['youtube', 'kick'],
+      youtubeCategory: 'Gaming',
+    });
+  });
+
+  test('sanitizes template collections and keeps only valid named entries', () => {
+    const collection = sanitizeStreamTemplateCollection({
+      activeName: 'Focus',
+      items: {
+        Focus: {
+          title: 'Focus title',
+          selectedPlatforms: ['youtube', 'twitch'],
+        },
+        '  ': {
+          title: 'Ignored',
+        },
+        Broken: 42,
+      },
+    });
+
+    expect(collection).toEqual({
+      activeName: 'Focus',
+      items: {
+        Focus: {
+          title: 'Focus title',
+          selectedPlatforms: ['youtube', 'twitch'],
+        },
+      },
     });
   });
 });

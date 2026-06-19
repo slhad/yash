@@ -91,7 +91,12 @@ import {
   warmPlatformStatusIcons,
 } from './utils/platformStatusIcons.server';
 import { formatRuntimeStatusLines, runtimeMonitor } from './utils/runtime-monitor';
-import { buildTargetedStreamMetadataUpdate } from './utils/streamMetadata';
+import {
+  buildStreamTemplateDraft,
+  buildTargetedStreamMetadataUpdate,
+  sanitizeStreamTemplateCollection,
+  sanitizeStreamTemplateDraft,
+} from './utils/streamMetadata';
 import { getAutocomplete, initTuiCommands, setActionRegistry } from './utils/tuiCommands';
 import { installTuiErrorCapture } from './utils/tuiErrorCapture';
 import {
@@ -638,6 +643,8 @@ let activeChatterInfoModal: {
 let activeHistoryModal: { box: BoxRenderable } | null = null;
 let activeActivityModal: { box: BoxRenderable; close: () => void } | null = null;
 let activeMemoryModal: { box: BoxRenderable } | null = null;
+
+const STREAM_TEMPLATE_SETTINGS_KEY = 'streamTemplates';
 
 const chatterCache = new ChatterCache();
 
@@ -2879,6 +2886,12 @@ function openStreamModal(preselected: string[]): void {
     defaultSelectedPlatforms.length > 0 ? defaultSelectedPlatforms : [...platforms],
   );
   const savedStream = settings.get('stream', {});
+  const savedTemplates = sanitizeStreamTemplateCollection(
+    settings.get(STREAM_TEMPLATE_SETTINGS_KEY, null),
+  );
+  const templateItems = { ...savedTemplates.items };
+  let templateNames = Object.keys(templateItems).sort((a, b) => a.localeCompare(b));
+  let forceApplyAll = false;
 
   function makeLabel(text: string): TextRenderable {
     return new TextRenderable(renderer, { content: text, fg: 'gray' });
@@ -2988,6 +3001,33 @@ function openStreamModal(preselected: string[]): void {
   const notifInputRow = createIndentedInputRow(renderer, notifInput);
   notifInput.value = savedStream.notification ?? '';
 
+  const templateNameLabel = makeLabel(' Template name:');
+  const templateNameInput = new InputRenderable(renderer, {
+    placeholder: 'focus, chill, launch...',
+    width: '100%',
+  });
+  const templateNameInputRow = createIndentedInputRow(renderer, templateNameInput);
+  templateNameInput.value = savedTemplates.activeName || templateNames[0] || '';
+  const templateHint = new TextRenderable(renderer, { content: '', fg: 'gray' });
+  templateHint.visible = false;
+  let templateSuggestions: string[] = [];
+  let templateSelectedIdx = -1;
+  let isNavigatingTemplate = false;
+
+  const applyModeText = new TextRenderable(renderer, {
+    content: '',
+    fg: 'gray',
+  });
+  const templateText = new TextRenderable(renderer, {
+    content: '',
+    fg: 'gray',
+  });
+  const modalStatus = new TextRenderable(renderer, {
+    content: '',
+    fg: 'gray',
+  });
+  modalStatus.visible = false;
+
   const hint = new TextRenderable(renderer, {
     content: ' [Tab] next field  [Enter] confirm  [Esc] cancel',
     fg: 'gray',
@@ -3031,6 +3071,12 @@ function openStreamModal(preselected: string[]): void {
   box.add(descInputRow);
   box.add(notifLabel);
   box.add(notifInputRow);
+  box.add(templateNameLabel);
+  box.add(templateNameInputRow);
+  box.add(templateHint);
+  box.add(applyModeText);
+  box.add(templateText);
+  box.add(modalStatus);
   box.add(hint);
   renderer.root.add(box);
 
@@ -3076,6 +3122,93 @@ function openStreamModal(preselected: string[]): void {
     updateHint();
   }
 
+  function setModalStatus(content: string, fgColor: string = 'gray'): void {
+    modalStatus.content = content ? ` ${content}` : '';
+    modalStatus.fg = fgColor;
+    modalStatus.visible = content.length > 0;
+  }
+
+  function updateApplyModeText(): void {
+    applyModeText.content = forceApplyAll
+      ? ' Apply mode: force apply all visible fields [Ctrl+F]'
+      : ' Apply mode: changed fields only [Ctrl+F]';
+    applyModeText.fg = forceApplyAll ? 'yellow' : 'gray';
+  }
+
+  function persistTemplateState(): Promise<void> {
+    return settings.set(STREAM_TEMPLATE_SETTINGS_KEY, {
+      activeName: templateNameInput.value.trim(),
+      items: templateItems,
+    });
+  }
+
+  function refreshTemplateSuggestions(): void {
+    const query = templateNameInput.value.trim().toLowerCase();
+    templateSuggestions = templateNames.filter((name) =>
+      query.length === 0 ? true : name.toLowerCase().includes(query),
+    );
+    templateSelectedIdx = -1;
+    templateHint.content =
+      templateSuggestions.length > 0
+        ? `  ${templateSuggestions.join('  ·  ')}  [↑/↓ to select]`
+        : templateNames.length > 0
+          ? '  No matching template names.'
+          : '  No saved templates yet.';
+    templateHint.visible = true;
+  }
+
+  function updateTemplateText(): void {
+    const activeLabel = templateNameInput.value.trim() || '(unnamed)';
+    templateText.content = ` Templates: ${templateNames.length} saved  active: ${activeLabel}  [F5] save current  [F8] restore current name  [F10] delete current name`;
+    templateText.fg = templateNames.length > 0 ? 'green' : 'gray';
+  }
+
+  function readModalDraft(): ReturnType<typeof buildStreamTemplateDraft> {
+    const rawTags = tagsInput.value
+      .split(',')
+      .map((tag) => tag.trim().replace(/\s+/g, ''))
+      .filter(Boolean);
+    return buildStreamTemplateDraft(
+      {
+        title: titleInput.value.trim() || undefined,
+        game: subjectInput.value.trim() || undefined,
+        youtubeCategory: YT_CATS[ytCatIdx],
+        twitchGame: twitchGameInput.value.trim() || undefined,
+        kickCategory: kickCatInput.value.trim() || undefined,
+        tags: rawTags.length > 0 ? rawTags : undefined,
+        description: descInput.value.trim() || undefined,
+        notification: notifInput.value.trim() || undefined,
+      },
+      selectedPlatforms,
+    );
+  }
+
+  function applyTemplateDraft(
+    template: NonNullable<ReturnType<typeof sanitizeStreamTemplateDraft>>,
+  ): void {
+    titleInput.value = template.title ?? '';
+    subjectInput.value = template.game ?? '';
+    ytCatIdx = Math.max(0, YT_CATS.indexOf(template.youtubeCategory ?? 'Gaming'));
+    twitchGameInput.value = template.twitchGame ?? '';
+    kickCatInput.value = template.kickCategory ?? '';
+    tagsInput.value = Array.isArray(template.tags) ? template.tags.join(', ') : '';
+    descInput.value = template.description ?? '';
+    notifInput.value = template.notification ?? '';
+
+    if (Array.isArray(template.selectedPlatforms)) {
+      selectedPlatforms.clear();
+      for (const platform of template.selectedPlatforms) {
+        selectedPlatforms.add(platform);
+      }
+    }
+
+    scheduleSubjectSearch(subjectInput.value.trim(), 0);
+    scheduleTwitchSearch(twitchGameInput.value.trim(), 0);
+    scheduleKickSearch(kickCatInput.value.trim(), 0);
+    updateConditionalVisibility();
+    refreshTemplateSuggestions();
+  }
+
   function updateHint(): void {
     const item = visibleItems[focusIdx];
     const parts = ['[Tab] next field'];
@@ -3089,6 +3222,8 @@ function openStreamModal(preselected: string[]): void {
     }
     if (item?.kind === 'input' && item.node === twitchGameInput && selectedPlatforms.has('kick'))
       parts.push('[Ctrl+→] cascade to Kick');
+    parts.push(`[Ctrl+F] ${forceApplyAll ? 'force apply: on' : 'force apply: off'}`);
+    parts.push('[F5] save template', '[F8] restore template', '[F10] delete template');
     parts.push('[Enter] confirm', '[Esc] cancel');
     hint.content = ` ${parts.join('  ')}`;
   }
@@ -3113,6 +3248,9 @@ function openStreamModal(preselected: string[]): void {
     descInputRow.visible = hasYT;
     notifLabel.visible = hasTwitch;
     notifInputRow.visible = hasTwitch;
+    templateNameLabel.visible = true;
+    templateNameInputRow.visible = true;
+    templateHint.visible = true;
 
     const items: StreamFocusItem[] = [{ kind: 'platforms' }, { kind: 'input', node: titleInput }];
     if (hasYT) items.push({ kind: 'yt-category' });
@@ -3122,6 +3260,7 @@ function openStreamModal(preselected: string[]): void {
     items.push({ kind: 'input', node: tagsInput });
     if (hasYT) items.push({ kind: 'input', node: descInput });
     if (hasTwitch) items.push({ kind: 'input', node: notifInput });
+    items.push({ kind: 'input', node: templateNameInput });
     visibleItems = items;
     if (focusIdx >= visibleItems.length) focusIdx = 0;
     modal.focusIndex = focusIdx;
@@ -3138,6 +3277,9 @@ function openStreamModal(preselected: string[]): void {
     focusCurrent();
   }
 
+  updateApplyModeText();
+  updateTemplateText();
+  refreshTemplateSuggestions();
   updateConditionalVisibility();
   focusCurrent();
 
@@ -3171,34 +3313,24 @@ function openStreamModal(preselected: string[]): void {
       return;
     }
 
-    const rawTags = tagsInput.value
-      .split(',')
-      .map((t) => t.trim().replace(/\s+/g, ''))
-      .filter(Boolean);
+    const draft = readModalDraft();
 
     const newMeta: Record<string, any> = {
-      title: titleInput.value.trim() || undefined,
-      game: selectedPlatforms.has('youtube') ? subjectInput.value.trim() || undefined : undefined,
-      youtubeCategory: selectedPlatforms.has('youtube') ? YT_CATS[ytCatIdx] : undefined,
-      twitchGame: selectedPlatforms.has('twitch')
-        ? twitchGameInput.value.trim() || undefined
-        : undefined,
-      kickCategory: selectedPlatforms.has('kick')
-        ? kickCatInput.value.trim() || undefined
-        : undefined,
-      tags: rawTags.length > 0 ? rawTags : undefined,
-      description: selectedPlatforms.has('youtube')
-        ? descInput.value.trim() || undefined
-        : undefined,
-      notification: selectedPlatforms.has('twitch')
-        ? notifInput.value.trim() || undefined
-        : undefined,
+      title: draft.title,
+      game: selectedPlatforms.has('youtube') ? draft.game : undefined,
+      youtubeCategory: selectedPlatforms.has('youtube') ? draft.youtubeCategory : undefined,
+      twitchGame: selectedPlatforms.has('twitch') ? draft.twitchGame : undefined,
+      kickCategory: selectedPlatforms.has('kick') ? draft.kickCategory : undefined,
+      tags: draft.tags,
+      description: selectedPlatforms.has('youtube') ? draft.description : undefined,
+      notification: selectedPlatforms.has('twitch') ? draft.notification : undefined,
     };
 
     const { changed, merged } = buildTargetedStreamMetadataUpdate(
       savedStream,
       selectedPlatforms,
       newMeta,
+      { force: forceApplyAll },
     );
 
     if (Object.keys(changed).length === 0) {
@@ -3207,7 +3339,9 @@ function openStreamModal(preselected: string[]): void {
       return;
     }
 
-    lastMessages.push(`[stream] Updating on: ${targetPlatforms.join(', ')}…`);
+    lastMessages.push(
+      `[stream] ${forceApplyAll ? 'Force applying' : 'Updating'} on: ${targetPlatforms.join(', ')}…`,
+    );
     updateUI(lastMessages);
     try {
       await settings.set('stream', merged);
@@ -3328,6 +3462,73 @@ function openStreamModal(preselected: string[]): void {
       return true;
     }
 
+    if (sequence === '\x06') {
+      forceApplyAll = !forceApplyAll;
+      updateApplyModeText();
+      updateHint();
+      setModalStatus(
+        forceApplyAll ? 'Force apply all enabled.' : 'Force apply all disabled.',
+        forceApplyAll ? 'yellow' : 'gray',
+      );
+      return true;
+    }
+
+    if (sequence === '\x1b[15~') {
+      const nextName = templateNameInput.value.trim();
+      if (!nextName) {
+        setModalStatus('Template name required before saving.', 'yellow');
+        return true;
+      }
+      templateNameInput.value = nextName;
+      templateItems[nextName] = readModalDraft();
+      templateNames = Object.keys(templateItems).sort((a, b) => a.localeCompare(b));
+      void persistTemplateState();
+      updateTemplateText();
+      refreshTemplateSuggestions();
+      setModalStatus(`Saved template "${nextName}".`, 'green');
+      return true;
+    }
+
+    if (sequence === '\x1b[19~') {
+      const nextName = templateNameInput.value.trim();
+      if (!nextName) {
+        setModalStatus('Template name required before restoring.', 'yellow');
+        return true;
+      }
+      templateNameInput.value = nextName;
+      const savedTemplate = sanitizeStreamTemplateDraft(templateItems[nextName]);
+      if (!savedTemplate) {
+        setModalStatus(`No saved template named "${nextName}".`, 'yellow');
+        return true;
+      }
+      blurCurrent();
+      applyTemplateDraft(savedTemplate);
+      focusCurrent();
+      void persistTemplateState();
+      setModalStatus(`Restored template "${nextName}".`, 'green');
+      return true;
+    }
+
+    if (sequence === '\x1b[21~') {
+      const nextName = templateNameInput.value.trim();
+      if (!nextName) {
+        setModalStatus('Template name required before deleting.', 'yellow');
+        return true;
+      }
+      if (!(nextName in templateItems)) {
+        setModalStatus(`No saved template named "${nextName}".`, 'yellow');
+        return true;
+      }
+      delete templateItems[nextName];
+      templateNames = Object.keys(templateItems).sort((a, b) => a.localeCompare(b));
+      templateNameInput.value = templateNames[0] ?? '';
+      void persistTemplateState();
+      updateTemplateText();
+      refreshTemplateSuggestions();
+      setModalStatus(`Deleted template "${nextName}".`, 'yellow');
+      return true;
+    }
+
     if (sequence === '\r' || sequence === '\n') {
       closeModal(true);
       return true;
@@ -3337,6 +3538,19 @@ function openStreamModal(preselected: string[]): void {
       return true;
     }
     if (sequence === '\x1b[A' || sequence === '\x1b[B') {
+      if (
+        current?.kind === 'input' &&
+        current.node === templateNameInput &&
+        templateSuggestions.length > 0
+      ) {
+        templateSelectedIdx =
+          sequence === '\x1b[B'
+            ? (templateSelectedIdx + 1) % templateSuggestions.length
+            : (templateSelectedIdx - 1 + templateSuggestions.length) % templateSuggestions.length;
+        isNavigatingTemplate = true;
+        templateNameInput.value = templateSuggestions[templateSelectedIdx] ?? '';
+        return true;
+      }
       if (
         current?.kind === 'input' &&
         current.node === subjectInput &&
@@ -3415,6 +3629,7 @@ function openStreamModal(preselected: string[]): void {
     tagsInput,
     descInput,
     notifInput,
+    templateNameInput,
   ]) {
     input.onKeyDown = escapeViaKeyDown as any;
   }
@@ -3507,6 +3722,16 @@ function openStreamModal(preselected: string[]): void {
       return;
     }
     scheduleKickSearch(kickCatInput.value.trim());
+  });
+
+  templateNameInput.on(InputRenderableEvents.INPUT, () => {
+    if (isNavigatingTemplate) {
+      isNavigatingTemplate = false;
+      updateTemplateText();
+      return;
+    }
+    updateTemplateText();
+    refreshTemplateSuggestions();
   });
 }
 

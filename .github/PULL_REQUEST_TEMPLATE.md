@@ -41,7 +41,7 @@ If done by AI agents:
 - [ ] Live Web UI check (playwright): ...
 - [ ] Proofs of work for related changes <!-- check if N/A -->
   - [ ] Screenshots inlined with link if any (web app proof) <!-- USER : printscreen | AI AGENT use playwright/browser (tools+skills) -->
-  - [ ] Videos in mp4 format inlined with link if any (command lines and TUI proof) <!-- USER : record screen | AI AGENT use vhs (skill)-->
+  - [ ] Videos/GIFs for command-line and TUI proof inlined with link if any <!-- USER: record screen | AI AGENT: use asciinema-recorder skill (`asciinema rec` in the real tmux pane, then `agg <cast> <gif>`) -->
 - [ ] AGENTS.md updated in affected packages (if new pattern introduced)
 - [ ] `SPECS.md` updated to reflect any new/changed commands, settings, routes, or behavior
 - [ ] `README.md` updated if setup, IPC, or architecture changed
