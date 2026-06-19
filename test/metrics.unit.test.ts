@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { metrics, toPrometheusText } from '../src/utils/metrics';
 
-describe.serial('metrics.toPrometheusText', () => {
+describe('metrics.toPrometheusText', () => {
   test('renders counters, gauges, and timestamps correctly', () => {
     // reset state
     metrics.reset();

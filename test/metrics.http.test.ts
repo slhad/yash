@@ -2,7 +2,7 @@ import { afterAll, describe, expect, test } from 'bun:test';
 import { metrics } from '../src/utils/metrics';
 import { apiMetricsHandler, prometheusMetricsHandler } from '../src/utils/metricsHandlers';
 
-describe.serial('metrics HTTP handlers', () => {
+describe('metrics HTTP handlers', () => {
   const OLD = process.env.YASH_METRICS_TOKEN;
   afterAll(() => {
     if (OLD === undefined) delete process.env.YASH_METRICS_TOKEN;
