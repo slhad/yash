@@ -554,7 +554,7 @@ interface PlatformProvider {
 
 ## Integration tests
 - Chats webview with `playwright-cli` skill, record screenshots in [tmp]/web/
-- TUI with the `asciinema-recorder` skill, recording casts in a real tmux pane when function keys are needed and converting GIFs with `agg`; record demos in [tmp]/tui/
+- TUI with `/test-live` guidance, recording asciinema casts in a real tmux pane when function keys are needed and converting GIFs with `agg`; record demos in [tmp]/tui/
 - Keep demo source artifacts there too: asciinema casts, helper scripts, captured videos, GIF conversions, and screenshots should all be created under `[tmp]/...`, not tracked folders such as `demo/`
 - Use `YASH_DATA_DIR/config.json` and `YASH_DATA_DIR/settings.json` (actual working runtime state) to execute integration tests
 - Test websocket communication with obs-studio (ignore if connection refused, aka obs-studio is off)
