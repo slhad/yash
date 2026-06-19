@@ -3189,6 +3189,7 @@ function openStreamModal(preselected: string[]): void {
     titleInput.value = template.title ?? '';
     subjectInput.value = template.game ?? '';
     ytCatIdx = Math.max(0, YT_CATS.indexOf(template.youtubeCategory ?? 'Gaming'));
+    ytCatText.content = ytCatContent(visibleItems[focusIdx]?.kind === 'yt-category');
     twitchGameInput.value = template.twitchGame ?? '';
     kickCatInput.value = template.kickCategory ?? '';
     tagsInput.value = Array.isArray(template.tags) ? template.tags.join(', ') : '';
