@@ -5509,7 +5509,16 @@ function openScriptConfigModal(spec: ScriptConfigModalSpec): void {
     width: '100%',
   });
 
-  box.add(new TextRenderable(renderer, { content: spec.intro, fg: 'gray' }));
+  const introNode = new TextRenderable(renderer, { content: spec.intro, fg: 'gray' });
+  const configSummaryNode = new TextRenderable(renderer, { content: '', fg: 'gray' });
+  const hierarchyLegendNode = new TextRenderable(renderer, {
+    content:
+      ' Structure: sectionName {} object, sectionName [] array, • array item. Indentation shows nesting; focus an array item to show move/delete controls.',
+    fg: 'gray',
+  });
+  box.add(introNode);
+  box.add(configSummaryNode);
+  box.add(hierarchyLegendNode);
   box.add(new TextRenderable(renderer, { content: '', fg: 'gray' }));
   contentScroll.add(contentBox);
   box.add(contentScroll);
@@ -5769,6 +5778,18 @@ function openScriptConfigModal(spec: ScriptConfigModalSpec): void {
         order: meta.order ?? Number.MAX_SAFE_INTEGER,
       });
     };
+    const sortConfigEntries = (
+      entries: Array<[string, unknown]>,
+      parentSegments: PathSegment[],
+    ): Array<[string, unknown]> =>
+      entries.sort(([leftKey], [rightKey]) => {
+        const leftMeta = resolveMeta([...parentSegments, leftKey]);
+        const rightMeta = resolveMeta([...parentSegments, rightKey]);
+        const leftOrder = leftMeta.order ?? Number.MAX_SAFE_INTEGER;
+        const rightOrder = rightMeta.order ?? Number.MAX_SAFE_INTEGER;
+        return leftOrder === rightOrder ? leftKey.localeCompare(rightKey) : leftOrder - rightOrder;
+      });
+
     const walkConfig = (value: unknown, segments: PathSegment[], depth: number): void => {
       const meta = resolveMeta(segments);
       if (segments.length > 0 && !meta.hidden && (Array.isArray(value) || isRecord(value))) {
@@ -5788,7 +5809,7 @@ function openScriptConfigModal(spec: ScriptConfigModalSpec): void {
           pathSegments: segments,
           label: renderedTitle ?? renderedLabel,
           description: renderedTitle ? undefined : renderedDescription,
-          depth: Math.max(depth - 1, 0),
+          depth,
           nodeType: Array.isArray(value) ? 'array' : 'object',
           editableArrayItem:
             typeof segments[segments.length - 1] === 'number' &&
@@ -5801,22 +5822,27 @@ function openScriptConfigModal(spec: ScriptConfigModalSpec): void {
         return;
       }
       if (isRecord(value)) {
-        for (const [key, child] of Object.entries(value)) {
-          if (segments.length === 0 && key === UI_SCHEMA_KEY) continue;
+        const entries = sortConfigEntries(
+          Object.entries(value).filter(
+            ([key]) => !(segments.length === 0 && key === UI_SCHEMA_KEY),
+          ),
+          segments,
+        );
+        for (const [key, child] of entries) {
           walkConfig(child, [...segments, key], depth + 1);
         }
         return;
       }
-      pushScalarField(segments, value, Math.max(depth - 1, 0), meta);
+      pushScalarField(segments, value, depth, meta);
     };
-    for (const [key, value] of Object.entries(config)) {
-      if (key === UI_SCHEMA_KEY) continue;
+    for (const [key, value] of sortConfigEntries(
+      Object.entries(config).filter(([key]) => key !== UI_SCHEMA_KEY),
+      [],
+    )) {
       walkConfig(value, [key], 0);
     }
 
-    return resolvedFields
-      .sort((a, b) => (a.order === b.order ? a.key.localeCompare(b.key) : a.order - b.order))
-      .map(({ order: _order, ...field }) => field);
+    return resolvedFields.map(({ order: _order, ...field }) => field);
   };
 
   type ScriptConfigFocusItem =
@@ -5826,6 +5852,7 @@ function openScriptConfigModal(spec: ScriptConfigModalSpec): void {
         node: InputRenderable;
         container: BoxRenderable;
         prefixNode: TextRenderable;
+        markerNode: TextRenderable;
       }
     | {
         field: Extract<ResolvedConfigField, { kind: 'toggle' }>;
@@ -5843,7 +5870,11 @@ function openScriptConfigModal(spec: ScriptConfigModalSpec): void {
   let resolvedFields = buildResolvedFields(draftConfig ?? {});
   let items: ScriptConfigFocusItem[] = [];
   const rawValues: Record<string, unknown> = {};
-  const compactIndent = (depth: number): string => ' '.repeat(Math.min(depth, 6) * 2);
+  const maxVisualDepth = 6;
+  const treeIndent = (depth: number): string => '  '.repeat(Math.min(depth, maxVisualDepth));
+  const scalarBranch = (_depth: number): string => '';
+  const sectionMarker = (nodeType: 'array' | 'object'): string =>
+    nodeType === 'array' ? '[]' : '{}';
   renderer.root.add(box);
   let focusIdx = 0;
   activeScriptConfigModal = { box, focusIndex: 0 };
@@ -5892,12 +5923,48 @@ function openScriptConfigModal(spec: ScriptConfigModalSpec): void {
     return { errors };
   }
 
+  function updateConfigSummary(): void {
+    if (!isObjectConfigSpec || !draftConfig) {
+      configSummaryNode.content = '';
+      configSummaryNode.fg = 'gray';
+      return;
+    }
+    const rootEnabled =
+      typeof rawValues.enabled === 'boolean'
+        ? rawValues.enabled
+        : getValueAtSegments(draftConfig, ['enabled']);
+    if (rootEnabled === false) {
+      configSummaryNode.content =
+        ' Status: ROOT enabled = OFF — nested ON values are saved, but OBS audio routing will not run until this is enabled.';
+      configSummaryNode.fg = 'yellow';
+      return;
+    }
+    if (rootEnabled === true) {
+      configSummaryNode.content =
+        ' Status: ROOT enabled = ON — nested discovery, feedback, routing, and OBS-streaming rules are active according to their own toggles.';
+      configSummaryNode.fg = 'green';
+      return;
+    }
+    configSummaryNode.content =
+      ' Status: edit nested sections below; Enter saves all changes, Esc cancels.';
+    configSummaryNode.fg = 'gray';
+  }
+
   function renderSection(
     item: Extract<ScriptConfigFocusItem, { kind: 'section' }>,
     focused: boolean,
   ): void {
-    const actionsHint = item.field.editableArrayItem ? '  - [ up, ] down, x delete' : '';
-    item.node.content = `${focused ? '>' : ' '} ${compactIndent(item.field.depth)}${item.field.label}${item.field.description ? `  - ${item.field.description}` : ''}${actionsHint}`;
+    const actionsHint =
+      item.field.editableArrayItem && focused
+        ? '  controls: [ move up | ] move down | x delete'
+        : '';
+    const marker = sectionMarker(item.field.nodeType);
+    const branch = item.field.editableArrayItem ? '•' : '▾';
+    const description =
+      item.field.description && item.field.description !== item.field.nodeType
+        ? `  - ${item.field.description}`
+        : '';
+    item.node.content = `${focused ? '>' : ' '} ${treeIndent(item.field.depth)}${branch} ${item.field.label} ${marker}${description}${actionsHint}`;
     item.node.fg = focused ? 'cyan' : sectionColor(item.field.nodeType);
     item.node.attributes = focused || item.field.depth === 0 ? TextAttributes.BOLD : undefined;
   }
@@ -5907,8 +5974,15 @@ function openScriptConfigModal(spec: ScriptConfigModalSpec): void {
     focused: boolean,
   ): void {
     const value = Boolean(rawValues[item.field.key]);
-    item.node.content = `${focused ? '>' : ' '} ${`${compactIndent(item.field.depth)}${item.field.label}: ${item.field.valueType} = `.padEnd(scalarPrefixWidth)}${value ? 'ON' : 'OFF'}${item.field.helpText ? `  - ${item.field.helpText}` : ''}`;
+    const state = value ? 'ON ' : 'OFF';
+    item.node.content = `${focused ? '>' : ' '} ${`${treeIndent(item.field.depth)}${scalarBranch(item.field.depth)}${item.field.label}: ${item.field.valueType} = `.padEnd(scalarPrefixWidth)}${state}${item.field.helpText ? `  - ${item.field.helpText}` : ''}`;
     item.node.fg = focused ? 'cyan' : scalarColor(item.field.valueType);
+    if (item.field.depth === 0 && item.field.label === 'enabled') {
+      item.node.attributes = TextAttributes.BOLD;
+    } else {
+      item.node.attributes = focused ? TextAttributes.BOLD : undefined;
+    }
+    updateConfigSummary();
   }
 
   let scalarPrefixWidth = 0;
@@ -5927,13 +6001,16 @@ function openScriptConfigModal(spec: ScriptConfigModalSpec): void {
           field.kind === 'text' || field.kind === 'toggle',
       )
       .reduce((maxWidth, field) => {
-        const prefix = `${compactIndent(field.depth)}${field.label}: ${field.valueType} = `;
+        const prefix = `${treeIndent(field.depth)}${scalarBranch(field.depth)}${field.label}: ${field.valueType} = `;
         return Math.max(maxWidth, prefix.length);
       }, 0);
 
     for (const field of resolvedFields) {
       if (field.kind === 'section') {
         const row = new TextRenderable(renderer, { content: '', fg: sectionColor(field.nodeType) });
+        if (field.depth === 0 && contentBox.getChildren().length > 0) {
+          contentBox.add(new TextRenderable(renderer, { content: '', fg: 'gray' }));
+        }
         contentBox.add(row);
         if (field.editableArrayItem) {
           items.push({ field, kind: 'section', node: row, container: row });
@@ -5954,9 +6031,20 @@ function openScriptConfigModal(spec: ScriptConfigModalSpec): void {
         flexDirection: 'row',
         gap: 0,
       });
+      const markerNode = new TextRenderable(renderer, {
+        content: '  ',
+        fg: scalarColor(field.valueType),
+      });
+      fieldRow.add(markerNode);
+      const indent = treeIndent(field.depth);
+      if (indent.length > 0) {
+        fieldRow.add(
+          new TextRenderable(renderer, { content: indent, fg: scalarColor(field.valueType) }),
+        );
+      }
       const prefixNode = new TextRenderable(renderer, {
-        content: `${compactIndent(field.depth)}${field.label}: ${field.valueType} = `.padEnd(
-          scalarPrefixWidth,
+        content: `${scalarBranch(field.depth)}${field.label}: ${field.valueType} = `.padEnd(
+          Math.max(1, scalarPrefixWidth - indent.length),
         ),
         fg: scalarColor(field.valueType),
       });
@@ -5974,7 +6062,14 @@ function openScriptConfigModal(spec: ScriptConfigModalSpec): void {
       inputBox.add(input);
       fieldRow.add(inputBox);
       contentBox.add(fieldRow);
-      items.push({ field, kind: 'input', node: input, container: fieldRow, prefixNode });
+      items.push({
+        field,
+        kind: 'input',
+        node: input,
+        container: fieldRow,
+        prefixNode,
+        markerNode,
+      });
     }
 
     if (items.length === 0) {
@@ -6001,6 +6096,8 @@ function openScriptConfigModal(spec: ScriptConfigModalSpec): void {
     if (!current) return;
     if (current.kind === 'input') {
       current.node.blur();
+      current.markerNode.content = '  ';
+      current.markerNode.fg = scalarColor(current.field.valueType);
       current.prefixNode.fg = scalarColor(current.field.valueType);
     } else if (current.kind === 'toggle') renderToggle(current, false);
     else renderSection(current, false);
@@ -6017,6 +6114,8 @@ function openScriptConfigModal(spec: ScriptConfigModalSpec): void {
     if (!current) return;
     if (current.kind === 'input') {
       current.node.focus();
+      current.markerNode.content = '> ';
+      current.markerNode.fg = 'cyan';
       current.prefixNode.fg = 'cyan';
     } else if (current.kind === 'toggle') {
       renderToggle(current, true);
@@ -6137,6 +6236,7 @@ function openScriptConfigModal(spec: ScriptConfigModalSpec): void {
     ) {
       rawValues[current.field.key] = !rawValues[current.field.key];
       renderToggle(current, true);
+      updateConfigSummary();
       return true;
     }
 
