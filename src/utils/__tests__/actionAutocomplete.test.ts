@@ -9,6 +9,17 @@ import {
   setActionAutocompleteRuntime,
 } from '../actionAutocomplete';
 
+const ACTIVITY_TYPES_SCHEMA: ActionArgSchema = {
+  type: 'string',
+  required: true,
+  maxLength: 200,
+  autocomplete: {
+    type: 'provider',
+    providerId: 'activity.types',
+    params: { valueMode: 'csv', platformArg: 'platform' },
+  },
+};
+
 const SOURCE_SCHEMA: ActionArgSchema = {
   type: 'string',
   required: true,
@@ -90,6 +101,43 @@ describe('actionAutocomplete cache behavior', () => {
     expect(invalidateActionAutocompleteForObsEvent({ eventType: 'StreamStateChanged' })).toBe(
       false,
     );
+  });
+
+  test('activity type provider suggests platform-specific CSV values', async () => {
+    const first = getDynamicActionArgAutocomplete(
+      buildOptions({
+        actionId: 'obs.alerts.add',
+        actionIdToken: 'obs.alerts.add',
+        argName: 'types',
+        schema: ACTIVITY_TYPES_SCHEMA,
+        rawInput: '/action obs.alerts.add platform=twitch types=follow,ra',
+        tokens: ['platform=twitch', 'types=follow,ra'],
+        currentArgs: { platform: 'twitch' },
+        valuePartial: 'follow,ra',
+      }),
+    );
+    expect(first?.loading).toBe(true);
+    await Bun.sleep(0);
+
+    const resolved = getDynamicActionArgAutocomplete(
+      buildOptions({
+        actionId: 'obs.alerts.add',
+        actionIdToken: 'obs.alerts.add',
+        argName: 'types',
+        schema: ACTIVITY_TYPES_SCHEMA,
+        rawInput: '/action obs.alerts.add platform=twitch types=follow,ra',
+        tokens: ['platform=twitch', 'types=follow,ra'],
+        currentArgs: { platform: 'twitch' },
+        valuePartial: 'follow,ra',
+      }),
+    );
+
+    expect(resolved?.loading).toBe(false);
+    expect(resolved?.hints).toContain('raid');
+    expect(resolved?.completions).toContain(
+      '/action obs.alerts.add platform=twitch types=follow,raid',
+    );
+    expect(resolved?.hints).not.toContain('superchat');
   });
 
   test('cache stays bounded when many explicit scenes are queried', async () => {

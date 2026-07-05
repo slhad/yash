@@ -8,7 +8,7 @@ import {
   type ScriptConfigModalSpec,
   type YashActionDefinition,
 } from '../actions/types';
-import { chatService, obsService } from '../services';
+import { chatService, kick, obsService, twitch, youtube } from '../services';
 import { defaultLogger } from '../utils/logger';
 import { getValueAtPath, loadScriptConfig, writeScriptConfig } from '../utils/scriptConfig';
 import {
@@ -60,6 +60,16 @@ export type UserScriptAction = {
   ) => Promise<UserScriptResult>;
 };
 
+export type ScriptActivityPlatform = 'twitch' | 'kick' | 'youtube';
+
+export type ScriptActivityEvent = {
+  platform: ScriptActivityPlatform;
+  type: string;
+  message: string;
+  userId?: string;
+  username?: string;
+};
+
 export type UserScriptActionContext = {
   emit?: (line: string) => void;
   ui?: {
@@ -77,6 +87,9 @@ export type UserScriptDefinition = {
 
 export type ScriptApi = {
   registerAction: (action: UserScriptAction) => void;
+  activity: {
+    subscribe: (cb: (event: ScriptActivityEvent) => void) => () => void;
+  };
   obs: {
     isConnected: () => boolean;
     getSceneList: () => Promise<{
@@ -248,6 +261,24 @@ function createScriptApi(
       } else {
         registry.registerAction(def);
       }
+    },
+
+    activity: {
+      subscribe: (cb) => {
+        const unsubs = [
+          twitch.onActivityEvent((event) => cb({ platform: 'twitch', ...event })),
+          kick.onActivityEvent((event) => cb({ platform: 'kick', ...event })),
+          youtube.onActivityEvent((event) => cb({ platform: 'youtube', ...event })),
+        ];
+        let active = true;
+        const unsub = () => {
+          if (!active) return;
+          active = false;
+          for (const off of unsubs) off();
+        };
+        cleanupFns.push(unsub);
+        return unsub;
+      },
     },
 
     obs: {
@@ -519,6 +550,16 @@ export type UserScriptAction = {
   invoke: (args: Record<string, unknown>, ctx?: UserScriptActionContext) => Promise<UserScriptResult>;
 };
 
+export type ScriptActivityPlatform = 'twitch' | 'kick' | 'youtube';
+
+export type ScriptActivityEvent = {
+  platform: ScriptActivityPlatform;
+  type: string;
+  message: string;
+  userId?: string;
+  username?: string;
+};
+
 export type UserScriptActionContext = {
   emit?: (line: string) => void;
   ui?: {
@@ -550,6 +591,9 @@ export type UserScriptDefinition = {
 
 export type ScriptApi = {
   registerAction: (action: UserScriptAction) => void;
+  activity: {
+    subscribe: (cb: (event: ScriptActivityEvent) => void) => () => void;
+  };
   obs: {
     isConnected: () => boolean;
     getSceneList: () => Promise<{ scenes: Array<{ sceneName: string }>; currentProgramSceneName?: string }>;

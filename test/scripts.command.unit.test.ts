@@ -27,7 +27,7 @@ describe('bundled example script helpers', () => {
     tempDir = await makeRepoTempDir('yash-scripts-list');
 
     const scripts = listBundledExampleScripts(tempDir);
-    expect(scripts).toHaveLength(4);
+    expect(scripts).toHaveLength(5);
     expect(scripts.find((script) => script.id === 'obs-scene-change')).toMatchObject({
       id: 'obs-scene-change',
       status: 'not-installed',
@@ -42,6 +42,10 @@ describe('bundled example script helpers', () => {
     });
     expect(scripts.find((script) => script.id === 'obs-audio-routing')).toMatchObject({
       id: 'obs-audio-routing',
+      status: 'not-installed',
+    });
+    expect(scripts.find((script) => script.id === 'obs-alerts')).toMatchObject({
+      id: 'obs-alerts',
       status: 'not-installed',
     });
   });
@@ -126,6 +130,9 @@ describe('/scripts command helper', () => {
     );
     expect(lines).toContain(
       '[scripts]   obs-audio-routing  — Linux-first Hyprland + PipeWire audio router with persisted rules and runtime discovery. [not installed]',
+    );
+    expect(lines).toContain(
+      '[scripts]   obs-alerts  — Activity-event OBS text/source alerts for Twitch, Kick, and YouTube. [not installed]',
     );
     expect(lines).toContain(
       '[scripts] Usage: /scripts | /scripts list | /scripts install <example-id> [repair|force] [copy|link]',

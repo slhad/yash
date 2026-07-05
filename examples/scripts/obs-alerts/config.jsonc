@@ -1,0 +1,21 @@
+{
+  "enabled": true,
+  "rules": [],
+  "$ui": {
+    "enabled": {
+      "widget": "toggle",
+      "label": "Enabled",
+      "description": "React to platform activity events and show OBS alert sources.",
+      "order": 10
+    },
+    "rules": {
+      "widget": "json",
+      "label": "Rules",
+      "description": "Activity-to-OBS alert rules. Prefer obs.alerts.add for normal edits.",
+      "order": 20
+    },
+    "rules/*": {
+      "titleTemplate": "${id} - ${platform}:${types} → text=${textSource} show=${showSource}"
+    }
+  }
+}
