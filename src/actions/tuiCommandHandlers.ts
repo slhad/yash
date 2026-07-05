@@ -26,7 +26,7 @@ export function createTuiCommandHandlers(ctx: TuiCommandHandlersContext): TuiCom
     settings,
     logCollector,
     obsService,
-    cliRenderer,
+    getCliRenderer,
     lastMessages,
     lastRawMessages,
     classifyChatLine,
@@ -354,7 +354,7 @@ export function createTuiCommandHandlers(ctx: TuiCommandHandlersContext): TuiCom
       setRunning(false);
       authService.stopAutoRefresh();
       await obsService.disconnect();
-      cliRenderer?.destroy();
+      getCliRenderer?.()?.destroy();
       process.exit(0);
     },
 
