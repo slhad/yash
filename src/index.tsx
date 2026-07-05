@@ -480,20 +480,24 @@ const STREAM_TEMPLATE_SETTINGS_KEY = 'streamTemplates';
 
 const chatterCache = new ChatterCache();
 
+function hasActiveModal(): boolean {
+  return Boolean(
+    activeModal ||
+      activeStreamModal ||
+      activeSettingsModal ||
+      activeObsShutdownConfigModal ||
+      activeScriptConfigModal ||
+      activeScriptActionsModal ||
+      activeChatterInfoModal ||
+      activeHistoryModal ||
+      activeActivityModal ||
+      activeMemoryModal,
+  );
+}
+
 function ensureMainInputFocus(): void {
   if (!uiNodes) return;
-  if (
-    activeModal ||
-    activeStreamModal ||
-    activeSettingsModal ||
-    activeObsShutdownConfigModal ||
-    activeScriptConfigModal ||
-    activeScriptActionsModal ||
-    activeChatterInfoModal ||
-    activeHistoryModal ||
-    activeActivityModal
-  )
-    return;
+  if (hasActiveModal()) return;
   if (!uiNodes.inputEl.focused) {
     uiNodes.inputEl.focus();
   }
@@ -541,6 +545,7 @@ function updateInputAssist(): void {
     ) {
       hint.content = `  ${autocycleHints.map((h, i) => (i === autocycleIndex ? `[${h}]` : h)).join('  ')}`;
       hint.visible = true;
+      uiNodes.renderer.requestRender();
       return;
     }
     const { hints } = getAutocomplete(val);
@@ -550,6 +555,7 @@ function updateInputAssist(): void {
     } else {
       hint.visible = false;
     }
+    uiNodes.renderer.requestRender();
     return;
   }
 
@@ -559,6 +565,7 @@ function updateInputAssist(): void {
   composeTargetText.visible = true;
   uiNodes.inputEl.placeholder = 'type a message…';
   uiNodes.inputEl.fg = 'white';
+  uiNodes.renderer.requestRender();
 }
 
 function prefillMainInput(value: string): void {
@@ -1479,7 +1486,7 @@ const commandHandlers = createTuiCommandHandlers({
   settings,
   logCollector,
   obsService,
-  cliRenderer,
+  getCliRenderer: () => cliRenderer,
   lastMessages,
   lastRawMessages,
   classifyChatLine,
@@ -1527,6 +1534,49 @@ obsService.subscribeToStatusChanges(() => {
   clearActionAutocompleteCaches();
 });
 
+let mainInputSubmitInFlight = false;
+
+async function submitMainInput(): Promise<void> {
+  if (!uiNodes || mainInputSubmitInFlight) return;
+  mainInputSubmitInFlight = true;
+  try {
+    // Browse mode: Enter opens chatter info for the selected message.
+    if (browseModeActive && browseSelectedIdx !== null) {
+      const selectedLine = lastMessages[browseSelectedIdx];
+      const rawMsg =
+        typeof selectedLine === 'string'
+          ? undefined
+          : 'rawMsg' in selectedLine
+            ? selectedLine.rawMsg
+            : undefined;
+      if (rawMsg !== undefined) {
+        openChatterInfoModal(rawMsg);
+      }
+      return;
+    }
+
+    const rawValue = uiNodes.inputEl.value;
+    let trimmed = rawValue.trim();
+    if (trimmed.startsWith('/')) {
+      const { completion, hints } = getAutocomplete(trimmed);
+      if (hints.length === 1 && completion) trimmed = completion;
+    }
+    uiNodes.inputEl.value = '';
+    uiNodes.autocompleteHint.visible = false;
+    if (!trimmed) return;
+    inputHistory.push(trimmed);
+    trimInputHistory(inputHistory);
+    saveInputHistory(getDataDir(), inputHistory);
+    historyIndex = -1;
+    await handleCommand(trimmed);
+    selectedMessageTarget = 'all';
+    updateInputAssist();
+    updateUI(lastMessages);
+  } finally {
+    mainInputSubmitInFlight = false;
+  }
+}
+
 async function main() {
   const renderer = await createCliRenderer({
     screenMode:
@@ -1545,6 +1595,14 @@ async function main() {
         // Raw mode swallows Ctrl+C — re-raise as SIGINT so one C-c exits cleanly
         if (sequence === '\x03') {
           process.kill(process.pid, 'SIGINT');
+          return true;
+        }
+
+        // Some terminals/tmux paths deliver Enter only to the raw prepend handler.
+        // Submit main input here so slash commands still execute even when the
+        // InputRenderable ENTER event is not emitted.
+        if ((sequence === '\r' || sequence === '\n') && !hasActiveModal()) {
+          void submitMainInput();
           return true;
         }
 
@@ -1718,6 +1776,9 @@ async function main() {
           return true;
         }
 
+        if (!hasActiveModal()) {
+          queueMicrotask(() => updateInputAssist());
+        }
         return false;
       },
     ],
@@ -1883,38 +1944,7 @@ async function main() {
   });
 
   uiNodes.inputEl.on(InputRenderableEvents.ENTER, async () => {
-    // Browse mode: Enter opens chatter info for the selected message
-    if (browseModeActive && browseSelectedIdx !== null) {
-      const selectedLine = lastMessages[browseSelectedIdx];
-      const rawMsg =
-        typeof selectedLine === 'string'
-          ? undefined
-          : 'rawMsg' in selectedLine
-            ? selectedLine.rawMsg
-            : undefined;
-      if (rawMsg !== undefined) {
-        openChatterInfoModal(rawMsg);
-      }
-      return;
-    }
-
-    const rawValue = uiNodes!.inputEl.value;
-    let trimmed = rawValue.trim();
-    if (trimmed.startsWith('/')) {
-      const { completion, hints } = getAutocomplete(trimmed);
-      if (hints.length === 1 && completion) trimmed = completion;
-    }
-    uiNodes!.inputEl.value = '';
-    uiNodes!.autocompleteHint.visible = false;
-    if (!trimmed) return;
-    inputHistory.push(trimmed);
-    trimInputHistory(inputHistory);
-    saveInputHistory(getDataDir(), inputHistory);
-    historyIndex = -1;
-    await handleCommand(trimmed);
-    selectedMessageTarget = 'all';
-    updateInputAssist();
-    updateUI(lastMessages);
+    await submitMainInput();
   });
 
   updateInputAssist();
