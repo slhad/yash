@@ -14,6 +14,7 @@
     "validate:repo": "bun run scripts/validate-repo-artifacts.ts",
     "pretest": "bun run validate:repo && bun lint && bun typecheck",
     "test": "bun test",
+    "test:coverage": "bun run scripts/check-coverage-threshold.ts",
     "test:e2e": "bun run src/index.ts &",
     "test:e2e:run": "playwright test",
     "build": "bun build --target=bun src/index.ts --outdir dist && mv dist/index.js dist/main.js",

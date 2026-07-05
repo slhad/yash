@@ -1,0 +1,6 @@
+[test]
+coverage = true
+coveragePathIgnorePatterns = [
+  "src/ui/**",
+  "tmp/**"
+]

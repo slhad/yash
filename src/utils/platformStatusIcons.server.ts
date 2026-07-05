@@ -109,7 +109,7 @@ async function runRasterizer(cmd: string[]): Promise<boolean> {
 async function rasterizePlatformStatusIconSvg(svgPath: string, pngPath: string): Promise<void> {
   const tempPath = `${pngPath}.tmp-${process.pid}`;
   const rsvgOk = await runRasterizer([
-    'rsvg-convert',
+    process.env.YASH_RSVG_CONVERT_COMMAND || 'rsvg-convert',
     svgPath,
     '--width',
     String(PLATFORM_STATUS_ICON_RASTER_SIZE_PX),
@@ -122,7 +122,7 @@ async function rasterizePlatformStatusIconSvg(svgPath: string, pngPath: string):
   ]);
   if (!rsvgOk) {
     const magickOk = await runRasterizer([
-      'magick',
+      process.env.YASH_MAGICK_COMMAND || 'magick',
       svgPath,
       '-resize',
       `${PLATFORM_STATUS_ICON_RASTER_SIZE_PX}x${PLATFORM_STATUS_ICON_RASTER_SIZE_PX}`,

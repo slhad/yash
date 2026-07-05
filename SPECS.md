@@ -213,6 +213,7 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
 
 ### Runtime and Testing
 - Must use [Bun](https://bun.sh) as the runtime and test runner (`bun run`, `bun test`)
+- Unit coverage must stay at or above 80% functions and 80% lines under the configured coverage report; verify with `bun run test:coverage`
 - Playwright-based repo helpers that interact with GitHub must use a persistent browser profile so the user can sign in once and reuse the saved session for later PR attachment uploads
 
 ### Linting and Formatting
