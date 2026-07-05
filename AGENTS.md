@@ -56,6 +56,13 @@ When beginning work in this repository:
     - If you are directly starting implementation, copy the selected item into `[tmp]/ONGOING.md` and work from there even if no GitHub issue exists yet
 11. **Once work is active, keep it in `[tmp]/ONGOING.md`** even if a matching GitHub issue also exists
 
+## Keep Files Focused
+
+- Do not add unrelated responsibilities to large entrypoints or catch-all modules. `src/index.tsx` may wire the TUI/runtime, but new command parsing, modal state, provider logic, web route logic, script config handling, or pure transformations should live in a focused module under `src/actions/`, `src/ui/`, `src/utils/`, `src/services/`, `src/platforms/`, or `src/scripts/` and be imported from the entrypoint.
+- When changing an already-large file, keep the patch localized. If a feature needs more than a small adapter in that file, extract named helpers with tests instead of growing the file.
+- Prefer seams that match existing boundaries: providers in `src/platforms`, stateful integrations in `src/services`, reusable command/action parsing in `src/actions` or `src/utils`, React/OpenTUI components in `src/ui`, and script-related behavior in `src/scripts`.
+- Do not split just to satisfy a line count; keep tiny, single-use glue near its caller unless it creates a second responsibility or prevents focused testing.
+
 ## Memory / Retention Guardrails
 
 - Treat long-lived arrays, maps, caches, timers, intervals, websocket clients, and event/listener subscriptions as leak-prone by default; any new process-lifetime structure must have an explicit bounded-retention or teardown story
@@ -195,6 +202,7 @@ Default to using Bun instead of Node.js.
 
 Prefer `bun run test` for the normal repo test flow so `pretest` checks run first. Use `bun test` only for intentionally targeted raw test-runner invocations when skipping lifecycle hooks is acceptable.
 
+- Coverage requirement: run `bun run test:coverage` before treating coverage-sensitive work as complete; configured unit coverage must stay at or above 80% functions and 80% lines.
 - Any test that can read, write, clear, or mutate persisted runtime state must isolate itself under repository-local `tmp/tests/...`.
 - Tests must never read from or write to the real user data directory such as `~/.config/yash`, even indirectly through default provider/service paths.
 - When a test exercises code that uses persisted auth, tokens, webhook cache, logs, IPC socket (`yash.sock`), or other filesystem-backed state, it must override `YASH_DATA_DIR` to a dedicated temp directory under `[tmp]` and clean it up after the test or suite finishes.
@@ -350,24 +358,24 @@ The following commands are rejected when called via IPC:
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **yash** (4658 symbols, 11469 relationships, 290 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **yash** (3278 symbols, 10343 relationships, 266 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
-> If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
+> Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
 
 ## Always Do
 
-- **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `gitnexus_impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
-- **MUST run `gitnexus_detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows.
+- **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
+- **MUST run `detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows. For regression review, compare against the default branch: `detect_changes({scope: "compare", base_ref: "master"})`.
 - **MUST warn the user** if impact analysis returns HIGH or CRITICAL risk before proceeding with edits.
-- When exploring unfamiliar code, use `gitnexus_query({query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
-- When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `gitnexus_context({name: "symbolName"})`.
+- When exploring unfamiliar code, use `query({query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
+- When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `context({name: "symbolName"})`.
 
 ## Never Do
 
-- NEVER edit a function, class, or method without first running `gitnexus_impact` on it.
+- NEVER edit a function, class, or method without first running `impact` on it.
 - NEVER ignore HIGH or CRITICAL risk warnings from impact analysis.
-- NEVER rename symbols with find-and-replace — use `gitnexus_rename` which understands the call graph.
-- NEVER commit changes without running `gitnexus_detect_changes()` to check affected scope.
+- NEVER rename symbols with find-and-replace — use `rename` which understands the call graph.
+- NEVER commit changes without running `detect_changes()` to check affected scope.
 
 ## Resources
 
