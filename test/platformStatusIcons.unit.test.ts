@@ -31,12 +31,19 @@ afterEach(async () => {
 
 async function installFakeRasterizer(binDir: string): Promise<void> {
   await fs.mkdir(binDir, { recursive: true });
-  const scriptPath = path.join(binDir, 'rsvg-convert');
+  const rsvgPath = path.join(binDir, 'rsvg-convert');
   await fs.writeFile(
-    scriptPath,
+    rsvgPath,
     `#!/usr/bin/env sh\nout=""\nwhile [ "$#" -gt 0 ]; do\n  if [ "$1" = "--output" ]; then\n    shift\n    out="$1"\n  fi\n  shift\ndone\nprintf 'png' > "$out"\n`,
-    { mode: 0o755 },
   );
+  await fs.chmod(rsvgPath, 0o755);
+
+  const magickPath = path.join(binDir, 'magick');
+  await fs.writeFile(
+    magickPath,
+    `#!/usr/bin/env sh\nlast=""\nfor arg in "$@"; do\n  last="$arg"\ndone\nprintf 'png' > "$last"\n`,
+  );
+  await fs.chmod(magickPath, 0o755);
   process.env.PATH = `${binDir}:${originalPath ?? ''}`;
 }
 
