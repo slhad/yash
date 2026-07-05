@@ -18,12 +18,18 @@ import { makeRepoTempDir, removeRepoTempDir } from './helpers/testDataDir';
 const originalDataDir = process.env.YASH_DATA_DIR;
 const originalPath = process.env.PATH;
 const originalFetch = globalThis.fetch;
+const originalRsvgCommand = process.env.YASH_RSVG_CONVERT_COMMAND;
+const originalMagickCommand = process.env.YASH_MAGICK_COMMAND;
 let tempDir: string | undefined;
 
 afterEach(async () => {
   if (originalDataDir === undefined) delete process.env.YASH_DATA_DIR;
   else process.env.YASH_DATA_DIR = originalDataDir;
   process.env.PATH = originalPath;
+  if (originalRsvgCommand === undefined) delete process.env.YASH_RSVG_CONVERT_COMMAND;
+  else process.env.YASH_RSVG_CONVERT_COMMAND = originalRsvgCommand;
+  if (originalMagickCommand === undefined) delete process.env.YASH_MAGICK_COMMAND;
+  else process.env.YASH_MAGICK_COMMAND = originalMagickCommand;
   globalThis.fetch = originalFetch;
   await removeRepoTempDir(tempDir);
   tempDir = undefined;
@@ -45,6 +51,8 @@ async function installFakeRasterizer(binDir: string): Promise<void> {
   );
   await fs.chmod(magickPath, 0o755);
   process.env.PATH = `${binDir}:${originalPath ?? ''}`;
+  process.env.YASH_RSVG_CONVERT_COMMAND = rsvgPath;
+  process.env.YASH_MAGICK_COMMAND = magickPath;
 }
 
 describe('platform status icon settings', () => {
