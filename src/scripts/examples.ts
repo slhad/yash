@@ -51,6 +51,13 @@ const BUNDLED_EXAMPLE_SCRIPTS: readonly BundledExampleScriptDefinition[] = [
     relativeDir: 'obs-audio-routing',
     files: ['README.md', 'config.jsonc', 'index.ts', 'types.d.ts'],
   },
+  {
+    id: 'obs-alerts',
+    name: 'OBS alerts',
+    description: 'Activity-event OBS text/source alerts for Twitch, Kick, and YouTube.',
+    relativeDir: 'obs-alerts',
+    files: ['README.md', 'config.jsonc', 'index.ts', 'types.d.ts'],
+  },
 ] as const;
 
 export const BUNDLED_EXAMPLE_SCRIPT_IDS = BUNDLED_EXAMPLE_SCRIPTS.map((script) => script.id);

@@ -56,6 +56,25 @@ const refreshListeners = new Set<ActionAutocompleteRefreshListener>();
 
 const ACTION_AUTOCOMPLETE_CACHE_MAX_ENTRIES = 100;
 const ACTION_AUTOCOMPLETE_CACHE_TTL_MS = 10_000;
+const ACTIVITY_TYPE_SUGGESTIONS: Record<string, string[]> = {
+  twitch: ['follow', 'sub', 'subscription', 'cheer', 'raid'],
+  kick: ['follow', 'sub', 'subscription', 'gift'],
+  youtube: ['member', 'subscriber', 'sponsor', 'gift', 'superchat', 'like'],
+  all: [
+    'follow',
+    'sub',
+    'subscription',
+    'cheer',
+    'raid',
+    'gift',
+    'member',
+    'subscriber',
+    'sponsor',
+    'superchat',
+    'like',
+  ],
+};
+
 const OBS_AUTOCOMPLETE_INVALIDATION_EVENTS = new Set([
   'CurrentProgramSceneChanged',
   'SceneCreated',
@@ -182,6 +201,18 @@ function buildCacheKey(options: ActionAutocompleteOptions): string | null {
     });
   }
 
+  if (spec.providerId === 'activity.types') {
+    const platformArg =
+      typeof spec.params?.platformArg === 'string' && spec.params.platformArg.length > 0
+        ? spec.params.platformArg
+        : 'platform';
+    return JSON.stringify({
+      provider: spec.providerId,
+      arg: options.argName,
+      platform: options.currentArgs[platformArg]?.trim().toLowerCase() || null,
+    });
+  }
+
   if (spec.providerId === 'obs.sceneSources') {
     const sceneArg =
       typeof spec.params?.sceneArg === 'string' && spec.params.sceneArg.length > 0
@@ -268,6 +299,16 @@ function requestSuggestions(cacheKey: string, options: ActionAutocompleteOptions
 
   inflight.set(cacheKey, request);
 }
+
+providers.set('activity.types', async (ctx, spec) => {
+  if (spec.type !== 'provider' || spec.providerId !== 'activity.types') return [];
+  const platformArg =
+    typeof spec.params?.platformArg === 'string' && spec.params.platformArg.length > 0
+      ? spec.params.platformArg
+      : 'platform';
+  const platform = ctx.currentArgs[platformArg]?.trim().toLowerCase() || 'all';
+  return ACTIVITY_TYPE_SUGGESTIONS[platform] ?? ACTIVITY_TYPE_SUGGESTIONS.all ?? [];
+});
 
 providers.set('obs.scenes', async () => {
   if (!runtime?.getObsConnectionState()) return [];

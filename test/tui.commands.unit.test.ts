@@ -342,6 +342,7 @@ describe('getAutocomplete', () => {
       'obs-startup',
       'obs-source-recaller',
       'obs-audio-routing',
+      'obs-alerts',
     ]);
   });
 
@@ -349,6 +350,7 @@ describe('getAutocomplete', () => {
     const result = getAutocomplete('/scripts install obs');
     expect(result.completion).toBeNull();
     expect(result.hints).toEqual([
+      'obs-alerts',
       'obs-startup',
       'obs-scene-change',
       'obs-audio-routing',

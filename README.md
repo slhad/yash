@@ -96,6 +96,7 @@ bun run cmd /scripts install obs-scene-change
 bun run cmd /scripts install obs-startup
 bun run cmd /scripts install obs-source-recaller
 bun run cmd /scripts install obs-audio-routing
+bun run cmd /scripts install obs-alerts
 bun run cmd /scripts install obs-source-recaller repair
 bun run cmd /scripts install obs-source-recaller copy
 ```
@@ -110,6 +111,7 @@ bun run cmd /scripts install obs-source-recaller copy
 - Restart YASH after install so the script is loaded at startup
 - `obs-scene-change` is the simplest voice-bridge-oriented example: configure a default scene or pass `scene=` and call `obs.scene-change.activate`
 - `obs-audio-routing` is a Linux-first Hyprland + PipeWire example that keeps persisted `Stream` / `Music` routing rules in `scripts/obs-audio-routing/config.jsonc`, exposes `config`, `config.tui`, `config.open`, runtime `status` / `wiring` / `candidates` / `search` actions, can restore or repair shipped default exclusions, restores tracked streams to their previous sink when disabled, supports optional OBS stream start/stop and OBS connect/disconnect auto-enable flags, supports `routing.linkWhenSourceSinkMatches` for intercepting/processing sinks like `easyeffects_sink` so matched apps are linked to `Music` / `Stream` instead of being moved off those sinks, and ships with one enabled `cliamp -> Music` example rule
+- `obs-alerts` reacts to live Twitch/Kick/YouTube activity events, stores rules in `scripts/obs-alerts/config.jsonc`, and exposes `obs.alerts.add/list/remove/enable/test/status/pause/resume`; `obs.alerts.add` autocompletes `platform=`, comma-separated `types=`, `scene=` from `obs.scenes`, and `source=` / `textSource=` / `showSource=` from `obs.sceneSources`, then matching events set OBS text to `{user}` and show the configured source without auto-hiding
 
 ### `/action` command
 

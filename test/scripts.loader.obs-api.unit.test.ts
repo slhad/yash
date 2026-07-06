@@ -3,7 +3,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { registry } from '../src/actions/registry';
 import { loadUserScripts } from '../src/scripts/loader';
-import { obsService } from '../src/services';
+import { kick, obsService, twitch, youtube } from '../src/services';
 import { makeRepoTempDir, removeRepoTempDir } from './helpers/testDataDir';
 
 const ACTION_ID = 'test.obs-source-recaller-surface';
@@ -65,6 +65,7 @@ export default function setup(api) {
   const offScene = api.obs.subscribeToSceneChanges(() => {});
   const offStatus = api.obs.subscribeToStatusChanges(() => {});
   const offStream = api.obs.subscribeToStreamStateChanges(() => {});
+  const offActivity = api.activity.subscribe(() => {});
   api.feedback.chat('[probe] hello chat');
   api.feedback.event('probe', 'hello event');
 
@@ -91,6 +92,7 @@ export default function setup(api) {
     offScene();
     offStatus();
     offStream();
+    offActivity();
   };
 }
 `,
@@ -100,9 +102,19 @@ export default function setup(api) {
     const unsubScene = vi.fn();
     const unsubStatus = vi.fn();
     const unsubStream = vi.fn();
+    const unsubTwitchActivity = vi.fn();
+    const unsubKickActivity = vi.fn();
+    const unsubYoutubeActivity = vi.fn();
     const feedbackChat = vi.fn();
     const feedbackEvent = vi.fn();
     vi.spyOn(obsService, 'isConnected').mockReturnValue(true);
+    const twitchActivitySpy = vi
+      .spyOn(twitch, 'onActivityEvent')
+      .mockReturnValue(unsubTwitchActivity);
+    const kickActivitySpy = vi.spyOn(kick, 'onActivityEvent').mockReturnValue(unsubKickActivity);
+    const youtubeActivitySpy = vi
+      .spyOn(youtube, 'onActivityEvent')
+      .mockReturnValue(unsubYoutubeActivity);
     const subscribeSceneSpy = vi
       .spyOn(obsService, 'subscribeToCurrentSceneChanges')
       .mockReturnValue(unsubScene);
@@ -148,6 +160,9 @@ export default function setup(api) {
     expect(subscribeSceneSpy).toHaveBeenCalledTimes(1);
     expect(subscribeStatusSpy).toHaveBeenCalledTimes(1);
     expect(subscribeStreamSpy).toHaveBeenCalledTimes(1);
+    expect(twitchActivitySpy).toHaveBeenCalledTimes(1);
+    expect(kickActivitySpy).toHaveBeenCalledTimes(1);
+    expect(youtubeActivitySpy).toHaveBeenCalledTimes(1);
     expect(feedbackChat).toHaveBeenCalledWith('[probe] hello chat');
     expect(feedbackEvent).toHaveBeenCalledWith('obs-api-probe', 'probe', 'hello event');
 
@@ -182,6 +197,8 @@ export default function setup(api) {
     expect(typesDts).toContain('setSceneItemTransform');
     expect(typesDts).toContain('subscribeToSceneChanges');
     expect(typesDts).toContain('subscribeToStreamStateChanges');
+    expect(typesDts).toContain('activity');
+    expect(typesDts).toContain('ScriptActivityEvent');
     expect(typesDts).toContain('feedback');
   });
 

@@ -9,6 +9,7 @@ import type {
   ScriptConfigModalSpec,
   YashActionDefinition,
 } from '../actions/types';
+import type { ActivityEventPayload } from '../platforms/base';
 
 // ─── Bundled script convention ────────────────────────────────────────────────
 
@@ -77,9 +78,19 @@ export type UserScriptDefinition = {
   configAliases?: Record<string, string>;
 };
 
+export type ScriptActivityPlatform = 'twitch' | 'kick' | 'youtube';
+
+export type ScriptActivityEvent = ActivityEventPayload & {
+  platform: ScriptActivityPlatform;
+};
+
 export type ScriptApi = {
   /** Register an IPC-accessible action. Overrides a bundled action with the same id (warns). */
   registerAction: (action: UserScriptAction) => void;
+  activity: {
+    /** Subscribe to live platform activity events emitted after this script loads. */
+    subscribe: (cb: (event: ScriptActivityEvent) => void) => () => void;
+  };
   obs: {
     isConnected: () => boolean;
     getSceneList: () => Promise<{

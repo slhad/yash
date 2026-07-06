@@ -100,6 +100,9 @@ function createMockApi(options?: {
     registerAction: (action) => {
       actions.set(action.id, action);
     },
+    activity: {
+      subscribe: () => () => {},
+    },
     obs: {
       isConnected: () => true,
       getSceneList: async () => ({
