@@ -23,7 +23,7 @@ export interface ActivityEvent {
 }
 
 export type ActivityModalState = { box: BoxRenderable; close: () => void };
-export type MemoryModalState = { box: BoxRenderable };
+export type MemoryModalState = { box: BoxRenderable; close: () => void };
 
 export const ACTIVITY_MAX_VISIBLE = 5;
 
@@ -266,27 +266,32 @@ export function openMemoryStatusModal(ctx: {
 
   box.add(scroll);
   renderer.root.add(box);
-  ctx.setActiveMemoryModal({ box });
 
   const keyHandler = (sequence: string): boolean => {
     if (!ctx.getActiveMemoryModal()) return false;
     if (sequence === '\x1b' || sequence === '\x1b\x1b') {
-      renderer.removeInputHandler(keyHandler);
-      renderer.root.remove(box.id);
-      ctx.setActiveMemoryModal(null);
-      ctx.focusMainInput();
+      ctx.getActiveMemoryModal()?.close();
       return true;
     }
-    if (sequence === '\x1b[A') {
+    if (sequence === '\x1b[A' || sequence === '\x1bOA') {
       scroll.scrollBy(-1);
       return true;
     }
-    if (sequence === '\x1b[B') {
+    if (sequence === '\x1b[B' || sequence === '\x1bOB') {
       scroll.scrollBy(1);
       return true;
     }
     return false;
   };
 
+  const close = (): void => {
+    if (!ctx.getActiveMemoryModal()) return;
+    renderer.removeInputHandler(keyHandler);
+    renderer.root.remove(box.id);
+    ctx.setActiveMemoryModal(null);
+    ctx.focusMainInput();
+  };
+
+  ctx.setActiveMemoryModal({ box, close });
   renderer.prependInputHandler(keyHandler);
 }

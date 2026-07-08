@@ -320,6 +320,69 @@ describe('obs-audio-routing bundled example script', () => {
     });
   });
 
+  test('addStreamTarget exposes autocomplete metadata and writes a stream target', async () => {
+    const harness = await createHarness();
+    tempDir = harness.tempDir;
+    teardown = harness.teardown;
+    const action = harness.getAction('obs-audio-routing.addStreamTarget');
+
+    expect(action.args.sourceSinkName.autocomplete).toMatchObject({
+      type: 'static',
+      values: ['easyeffects_sink', 'Stream', 'Music'],
+    });
+
+    const result = await action.invoke({
+      processBinary: 'google-chrome',
+      sourceSinkName: 'easyeffects_sink',
+      notes: 'Chrome via EasyEffects',
+    });
+
+    expect(result.output[0]).toBe(
+      '[obs-audio-routing] added stream target stream-googlechrome -> Stream',
+    );
+    const configJson = JSON.parse(
+      await fs.readFile(path.join(tempDir, 'scripts', 'obs-audio-routing', 'config.jsonc'), 'utf8'),
+    );
+    expect(configJson.streamTargets).toEqual([
+      {
+        id: 'stream-googlechrome',
+        enabled: true,
+        match: {
+          windowClass: '',
+          windowTitleRegex: '',
+          processBinary: 'google-chrome',
+          childProcessBinary: '',
+          applicationName: '',
+          mediaName: '',
+          sourceSinkName: 'easyeffects_sink',
+        },
+        notes: 'Chrome via EasyEffects',
+      },
+    ]);
+  });
+
+  test('addMusicTarget can replace an existing generated target', async () => {
+    const harness = await createHarness();
+    tempDir = harness.tempDir;
+    teardown = harness.teardown;
+    const action = harness.getAction('obs-audio-routing.addMusicTarget');
+
+    await action.invoke({ processBinary: 'spotify' });
+    await expect(action.invoke({ processBinary: 'spotify' })).rejects.toThrow(
+      'Target "music-spotify" already exists; pass replace=true to update it',
+    );
+    const result = await action.invoke({ processBinary: 'spotify', enabled: false, replace: true });
+
+    expect(result.output[0]).toBe(
+      '[obs-audio-routing] updated music target music-spotify -> Music',
+    );
+    const configJson = JSON.parse(
+      await fs.readFile(path.join(tempDir, 'scripts', 'obs-audio-routing', 'config.jsonc'), 'utf8'),
+    );
+    expect(configJson.musicTargets).toHaveLength(1);
+    expect(configJson.musicTargets[0].enabled).toBe(false);
+  });
+
   test('search prefers a live audio stream match', async () => {
     const runner = async (cmd: string[]) => {
       const joined = cmd.join(' ');
@@ -968,6 +1031,249 @@ describe('obs-audio-routing bundled example script', () => {
     expect(harness.feedbackEvent).toHaveBeenCalledWith(
       'route',
       'linked PipeWire ALSA [cliamp] -> Music (cliamp-music)',
+    );
+  });
+
+  test('intercepting sink matching tolerates separator changes in process names', async () => {
+    const linkCalls: string[][] = [];
+    const runner = async (cmd: string[]) => {
+      const joined = cmd.join(' ');
+      if (joined === 'hyprctl -j activewindow') {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            class: 'com.google.Chrome',
+            title: 'Google Chrome',
+            pid: 100,
+            floating: false,
+            monitor: 0,
+            fullscreen: 0,
+            size: [1920, 1080],
+          }),
+          stderr: '',
+        };
+      }
+      if (joined === 'hyprctl -j monitors') {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify([{ id: 0, width: 1920, height: 1080, focused: true }]),
+          stderr: '',
+        };
+      }
+      if (joined === 'pactl --format=json list sink-inputs') {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify([
+            {
+              index: 10,
+              sink: 75,
+              properties: {
+                'application.name': 'Google Chrome',
+                'node.name': 'Google Chrome',
+                'media.name': 'Playback',
+              },
+            },
+          ]),
+          stderr: '',
+        };
+      }
+      if (joined === 'pactl --format=json list sinks short') {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify([
+            { index: 45, name: 'Music' },
+            { index: 75, name: 'easyeffects_sink' },
+          ]),
+          stderr: '',
+        };
+      }
+      if (joined === 'ps -eo pid=,ppid=,comm=,args=') {
+        return {
+          exitCode: 0,
+          stdout: '100 1 chrome chrome\n',
+          stderr: '',
+        };
+      }
+      if (joined === 'pw-link -o') {
+        return {
+          exitCode: 0,
+          stdout: 'Google Chrome:output_FL\nGoogle Chrome:output_FR\n',
+          stderr: '',
+        };
+      }
+      if (joined === 'pw-link -i') {
+        return {
+          exitCode: 0,
+          stdout: 'Music:playback_FL\nMusic:playback_FR\n',
+          stderr: '',
+        };
+      }
+      if (joined === 'pw-link -l') {
+        return {
+          exitCode: 0,
+          stdout:
+            'easyeffects_sink:playback_FL\n  |<- Google Chrome:output_FL\neasyeffects_sink:playback_FR\n  |<- Google Chrome:output_FR\n',
+          stderr: '',
+        };
+      }
+      if (joined === 'pw-link -w Google Chrome:output_FL Music:playback_FL') {
+        linkCalls.push(cmd);
+        return { exitCode: 0, stdout: '', stderr: '' };
+      }
+      if (joined === 'pw-link -w Google Chrome:output_FR Music:playback_FR') {
+        linkCalls.push(cmd);
+        return { exitCode: 0, stdout: '', stderr: '' };
+      }
+      if (joined === 'hyprctl -j clients') {
+        return { exitCode: 0, stdout: JSON.stringify([]), stderr: '' };
+      }
+      return { exitCode: 0, stdout: '[]', stderr: '' };
+    };
+
+    const harness = await createHarness({
+      config: {
+        enabled: true,
+        musicTargets: [
+          {
+            id: 'chrome-music',
+            enabled: true,
+            match: {
+              processBinary: 'google-chrome',
+            },
+          },
+        ],
+        routing: {
+          pollIntervalMs: 25,
+          cooldownMs: 0,
+          linkWhenSourceSinkMatches: ['EasyEffects Sink'],
+        },
+      },
+      runner,
+    });
+    tempDir = harness.tempDir;
+    teardown = harness.teardown;
+
+    await new Promise((resolve) => setTimeout(resolve, 120));
+
+    expect(linkCalls).toEqual([
+      ['pw-link', '-w', 'Google Chrome:output_FL', 'Music:playback_FL'],
+      ['pw-link', '-w', 'Google Chrome:output_FR', 'Music:playback_FR'],
+    ]);
+    expect(harness.feedbackChat).toHaveBeenCalledWith(
+      '[obs-audio-routing] linked Google Chrome -> Music (chrome-music)',
+    );
+  });
+
+  test('preexisting intercepting links do not spam already-linked feedback', async () => {
+    const runner = async (cmd: string[]) => {
+      const joined = cmd.join(' ');
+      if (joined === 'hyprctl -j activewindow') {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            class: 'com.mitchellh.ghostty',
+            title: 'cliamp',
+            pid: 100,
+            floating: false,
+            monitor: 0,
+            fullscreen: 0,
+            size: [1920, 1080],
+          }),
+          stderr: '',
+        };
+      }
+      if (joined === 'hyprctl -j monitors') {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify([{ id: 0, width: 1920, height: 1080, focused: true }]),
+          stderr: '',
+        };
+      }
+      if (joined === 'pactl --format=json list sink-inputs') {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify([
+            {
+              index: 10,
+              sink: 75,
+              properties: {
+                'application.name': 'PipeWire ALSA [cliamp]',
+                'node.name': 'alsa_playback.cliamp',
+                'media.name': 'ALSA Playback',
+              },
+            },
+          ]),
+          stderr: '',
+        };
+      }
+      if (joined === 'pactl --format=json list sinks short') {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify([
+            { index: 45, name: 'Music' },
+            { index: 75, name: 'easyeffects_sink' },
+          ]),
+          stderr: '',
+        };
+      }
+      if (joined === 'ps -eo pid=,ppid=,comm=,args=') {
+        return {
+          exitCode: 0,
+          stdout: '100 1 ghostty ghostty\n101 100 cliamp cliamp\n',
+          stderr: '',
+        };
+      }
+      if (joined === 'pw-link -o') {
+        return {
+          exitCode: 0,
+          stdout: 'alsa_playback.cliamp:output_FL\nalsa_playback.cliamp:output_FR\n',
+          stderr: '',
+        };
+      }
+      if (joined === 'pw-link -i') {
+        return { exitCode: 0, stdout: 'Music:playback_FL\nMusic:playback_FR\n', stderr: '' };
+      }
+      if (joined === 'pw-link -l') {
+        return {
+          exitCode: 0,
+          stdout:
+            'Music:playback_FL\n  |<- alsa_playback.cliamp:output_FL\nMusic:playback_FR\n  |<- alsa_playback.cliamp:output_FR\neasyeffects_sink:playback_FL\n  |<- alsa_playback.cliamp:output_FL\neasyeffects_sink:playback_FR\n  |<- alsa_playback.cliamp:output_FR\n',
+          stderr: '',
+        };
+      }
+      if (joined === 'hyprctl -j clients') {
+        return { exitCode: 0, stdout: JSON.stringify([]), stderr: '' };
+      }
+      return { exitCode: 0, stdout: '[]', stderr: '' };
+    };
+
+    const harness = await createHarness({
+      config: {
+        enabled: true,
+        musicTargets: [
+          {
+            id: 'cliamp-music',
+            enabled: true,
+            match: { processBinary: 'cliamp' },
+          },
+        ],
+        routing: {
+          pollIntervalMs: 25,
+          cooldownMs: 0,
+          linkWhenSourceSinkMatches: ['easyeffects_sink'],
+        },
+      },
+      runner,
+    });
+    tempDir = harness.tempDir;
+    teardown = harness.teardown;
+
+    await new Promise((resolve) => setTimeout(resolve, 120));
+
+    expect(harness.feedbackChat).not.toHaveBeenCalled();
+    expect(harness.feedbackEvent).not.toHaveBeenCalledWith(
+      'route',
+      expect.stringContaining('already linked'),
     );
   });
 

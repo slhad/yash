@@ -309,6 +309,69 @@ const DURATION_ARG = {
   maxLength: 32,
 } as const satisfies UserScriptArgSchema;
 
+const OPTIONAL_MATCH_ARG = {
+  type: 'string',
+  required: false,
+  minLength: 1,
+  maxLength: 200,
+} as const satisfies UserScriptArgSchema;
+
+const REQUIRED_PROCESS_BINARY_ARG = {
+  type: 'string',
+  required: true,
+  minLength: 1,
+  maxLength: 200,
+} as const satisfies UserScriptArgSchema;
+
+const SOURCE_SINK_MATCH_ARG = {
+  type: 'string',
+  required: false,
+  minLength: 1,
+  maxLength: 200,
+  autocomplete: {
+    type: 'static',
+    values: ['easyeffects_sink', 'Stream', 'Music'],
+  },
+} as const satisfies UserScriptArgSchema;
+
+const TARGET_ID_ARG = {
+  type: 'string',
+  required: false,
+  minLength: 1,
+  maxLength: 80,
+} as const satisfies UserScriptArgSchema;
+
+const TARGET_ENABLED_ARG = {
+  type: 'boolean',
+  required: false,
+} as const satisfies UserScriptArgSchema;
+
+const TARGET_REPLACE_ARG = {
+  type: 'boolean',
+  required: false,
+} as const satisfies UserScriptArgSchema;
+
+const TARGET_NOTES_ARG = {
+  type: 'string',
+  required: false,
+  minLength: 1,
+  maxLength: 300,
+} as const satisfies UserScriptArgSchema;
+
+const TARGET_MATCH_ARGS = {
+  id: TARGET_ID_ARG,
+  processBinary: REQUIRED_PROCESS_BINARY_ARG,
+  childProcessBinary: OPTIONAL_MATCH_ARG,
+  applicationName: OPTIONAL_MATCH_ARG,
+  mediaName: OPTIONAL_MATCH_ARG,
+  sourceSinkName: SOURCE_SINK_MATCH_ARG,
+  windowClass: OPTIONAL_MATCH_ARG,
+  windowTitleRegex: OPTIONAL_MATCH_ARG,
+  enabled: TARGET_ENABLED_ARG,
+  replace: TARGET_REPLACE_ARG,
+  notes: TARGET_NOTES_ARG,
+} as const satisfies Record<string, UserScriptArgSchema>;
+
 export const scriptDefinition = {
   actionPrefix: 'obs-audio-routing',
   title: 'OBS Audio Routing',
@@ -610,6 +673,17 @@ function stringMatches(value: string, expected: string): boolean {
   return value.toLowerCase() === expected.toLowerCase();
 }
 
+function canonicalRouteToken(value: string): string {
+  return normalizeString(value).toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function routeTokenMatches(value: string, expected: string): boolean {
+  if (stringMatches(value, expected)) return true;
+  const canonicalValue = canonicalRouteToken(value);
+  const canonicalExpected = canonicalRouteToken(expected);
+  return Boolean(canonicalValue && canonicalExpected && canonicalValue === canonicalExpected);
+}
+
 function regexMatches(value: string, pattern: string): boolean {
   if (!pattern) return true;
   if (!value) return false;
@@ -638,13 +712,13 @@ function matchRuleAgainstContext(
       stream.derivedBinary,
       deriveBinaryFromNodeName(stream.applicationName),
     ].filter(Boolean);
-    if (!streamBinaryCandidates.some((candidate) => stringMatches(candidate, match.processBinary ?? ''))) {
+    if (!streamBinaryCandidates.some((candidate) => routeTokenMatches(candidate, match.processBinary ?? ''))) {
       return false;
     }
   }
   if (match.childProcessBinary) {
     const expected = match.childProcessBinary.toLowerCase();
-    if (![...descendantBinarySet].some((binary) => binary.toLowerCase() === expected)) {
+    if (![...descendantBinarySet].some((binary) => routeTokenMatches(binary, expected))) {
       return false;
     }
   }
@@ -654,7 +728,7 @@ function matchRuleAgainstContext(
   if (match.mediaName && !stringMatches(stream.mediaName, match.mediaName)) {
     return false;
   }
-  if (match.sourceSinkName && !stringMatches(stream.sinkName, match.sourceSinkName)) {
+  if (match.sourceSinkName && !routeTokenMatches(stream.sinkName, match.sourceSinkName)) {
     return false;
   }
   return true;
@@ -1192,7 +1266,7 @@ function shouldLinkMatchedStream(
   stream: LiveStream,
 ): boolean {
   return config.routing.linkWhenSourceSinkMatches.some((sinkName) =>
-    stringMatches(stream.sinkName, sinkName),
+    routeTokenMatches(stream.sinkName, sinkName),
   );
 }
 
@@ -1241,6 +1315,56 @@ function restoreMissingDefaultExclusions(current: ObsAudioRoutingConfig): {
     }),
     added,
   };
+}
+
+function buildTargetRuleFromArgs(
+  args: Record<string, unknown>,
+  prefix: string,
+): RouteRule {
+  const match = normalizeMatch(args);
+  const hasMatch = Object.values(match).some((value) => Boolean(value));
+  if (!hasMatch) {
+    throw new Error(
+      'At least one match field is required: processBinary=, childProcessBinary=, applicationName=, mediaName=, sourceSinkName=, windowClass=, or windowTitleRegex=',
+    );
+  }
+  const firstMatch =
+    match.processBinary ||
+    match.childProcessBinary ||
+    match.applicationName ||
+    match.mediaName ||
+    match.sourceSinkName ||
+    match.windowClass ||
+    'target';
+  const generatedId = `${prefix}-${canonicalRouteToken(firstMatch) || 'target'}`;
+  return normalizeRule(
+    {
+      id: normalizeString(args.id) || generatedId,
+      enabled: normalizeBoolean(args.enabled, true),
+      match,
+      notes: normalizeString(args.notes) || undefined,
+    },
+    0,
+    prefix,
+  );
+}
+
+function upsertTargetRule(
+  rules: RouteRule[],
+  rule: RouteRule,
+  replace: boolean,
+): { rules: RouteRule[]; updated: boolean } {
+  const existingIndex = rules.findIndex((candidate) => candidate.id === rule.id);
+  if (existingIndex >= 0 && !replace) {
+    throw new Error(`Target "${rule.id}" already exists; pass replace=true to update it`);
+  }
+  const nextRules = [...rules];
+  if (existingIndex >= 0) {
+    nextRules[existingIndex] = rule;
+    return { rules: nextRules, updated: true };
+  }
+  nextRules.push(rule);
+  return { rules: nextRules, updated: false };
 }
 
 function repairDefaultExclusions(current: ObsAudioRoutingConfig): {
@@ -1558,13 +1682,10 @@ export default function setup(api: ScriptApi): () => void {
               links: createdLinks,
               label,
             });
+            const line = `[obs-audio-routing] linked ${label} -> ${targetSinkName} (${matchedRule.id})`;
+            pushOutcome(runtime, 'moved', line);
+            sendFeedback(api, runtime, config, 'route', line, `link:${stream.id}:${targetSinkName}`);
           }
-          const line =
-            createdLinks.length > 0
-              ? `[obs-audio-routing] linked ${label} -> ${targetSinkName} (${matchedRule.id})`
-              : `[obs-audio-routing] already linked ${label} -> ${targetSinkName} (${matchedRule.id})`;
-          pushOutcome(runtime, 'moved', line);
-          sendFeedback(api, runtime, config, 'route', line, `link:${stream.id}:${targetSinkName}`);
           continue;
         }
 
@@ -1658,6 +1779,80 @@ export default function setup(api: ScriptApi): () => void {
             repaired,
             exclusions: nextConfig.exclusions,
           },
+        };
+      },
+    },
+    {
+      id: 'obs-audio-routing.addStreamTarget',
+      title: 'Add an OBS audio Stream target',
+      description:
+        'Adds or updates a streamTargets rule without editing config JSON. Use Tab autocomplete for arg names and sourceSinkName values.',
+      domain: 'obs',
+      readOnly: false,
+      args: TARGET_MATCH_ARGS,
+      examples: [
+        {
+          args: {
+            processBinary: 'google-chrome',
+            sourceSinkName: 'easyeffects_sink',
+          },
+          description: 'Route Google Chrome to Stream, linking instead of moving when it is on EasyEffects',
+        },
+        {
+          args: { id: 'game-stream', windowClass: 'steam_app_12345' },
+          description: 'Route a game window class to Stream',
+        },
+      ],
+      invoke: async (args) => {
+        const rule = buildTargetRuleFromArgs(args, 'stream');
+        const replace = normalizeBoolean(args.replace, false);
+        const current = readConfig(api);
+        const { rules, updated } = upsertTargetRule(current.streamTargets, rule, replace);
+        const nextConfig = normalizeConfig({ ...current, streamTargets: rules });
+        await writeConfig(api, nextConfig);
+        return {
+          output: [
+            `[obs-audio-routing] ${updated ? 'updated' : 'added'} stream target ${rule.id} -> Stream`,
+            `[obs-audio-routing] match -> ${formatRule(rule)}`,
+          ],
+          data: { rule, streamTargets: nextConfig.streamTargets },
+        };
+      },
+    },
+    {
+      id: 'obs-audio-routing.addMusicTarget',
+      title: 'Add an OBS audio Music target',
+      description:
+        'Adds or updates a musicTargets rule without editing config JSON. Use Tab autocomplete for arg names and sourceSinkName values.',
+      domain: 'obs',
+      readOnly: false,
+      args: TARGET_MATCH_ARGS,
+      examples: [
+        {
+          args: { processBinary: 'spotify' },
+          description: 'Route Spotify to Music',
+        },
+        {
+          args: {
+            processBinary: 'google-chrome',
+            sourceSinkName: 'easyeffects_sink',
+          },
+          description: 'Route Google Chrome to Music, linking instead of moving when it is on EasyEffects',
+        },
+      ],
+      invoke: async (args) => {
+        const rule = buildTargetRuleFromArgs(args, 'music');
+        const replace = normalizeBoolean(args.replace, false);
+        const current = readConfig(api);
+        const { rules, updated } = upsertTargetRule(current.musicTargets, rule, replace);
+        const nextConfig = normalizeConfig({ ...current, musicTargets: rules });
+        await writeConfig(api, nextConfig);
+        return {
+          output: [
+            `[obs-audio-routing] ${updated ? 'updated' : 'added'} music target ${rule.id} -> Music`,
+            `[obs-audio-routing] match -> ${formatRule(rule)}`,
+          ],
+          data: { rule, musicTargets: nextConfig.musicTargets },
         };
       },
     },

@@ -1,5 +1,9 @@
 import { describe, expect, test } from 'bun:test';
-import { getDefaultStreamModalPlatforms } from '../src/ui/streamModal';
+import {
+  getDefaultStreamModalPlatforms,
+  isYouTubeCategoryNextKey,
+  isYouTubeCategoryPreviousKey,
+} from '../src/ui/streamModal';
 
 const providers = (auth: Record<string, boolean>) => ({
   youtube: {
@@ -14,6 +18,18 @@ const providers = (auth: Record<string, boolean>) => ({
     isAuthenticated: () => auth.kick ?? false,
     searchCategories: async () => [],
   },
+});
+
+describe('YouTube category key helpers', () => {
+  test('accepts CSI and SS3 left/right arrow sequences', () => {
+    expect(isYouTubeCategoryPreviousKey('\x1b[D')).toBe(true);
+    expect(isYouTubeCategoryPreviousKey('\x1bOD')).toBe(true);
+    expect(isYouTubeCategoryPreviousKey('\x1b[C')).toBe(false);
+
+    expect(isYouTubeCategoryNextKey('\x1b[C')).toBe(true);
+    expect(isYouTubeCategoryNextKey('\x1bOC')).toBe(true);
+    expect(isYouTubeCategoryNextKey('\x1b[D')).toBe(false);
+  });
 });
 
 describe('getDefaultStreamModalPlatforms', () => {

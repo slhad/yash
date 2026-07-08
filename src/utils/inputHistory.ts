@@ -27,6 +27,25 @@ export function trimInputHistory(history: string[], limit = INPUT_HISTORY_LIMIT)
   }
 }
 
+export type InputHistoryDirection = 'previous' | 'next';
+
+export function navigateInputHistory(
+  history: string[],
+  historyIndex: number,
+  direction: InputHistoryDirection,
+): { historyIndex: number; value?: string } {
+  if (direction === 'previous') {
+    if (history.length === 0) return { historyIndex };
+    const nextIndex = historyIndex === -1 ? history.length - 1 : Math.max(0, historyIndex - 1);
+    return { historyIndex: nextIndex, value: history[nextIndex] ?? '' };
+  }
+
+  if (historyIndex === -1) return { historyIndex };
+  const nextIndex = historyIndex + 1;
+  if (nextIndex >= history.length) return { historyIndex: -1, value: '' };
+  return { historyIndex: nextIndex, value: history[nextIndex] ?? '' };
+}
+
 export function saveInputHistory(
   dataDir: string,
   history: string[],

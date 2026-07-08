@@ -17,8 +17,13 @@ import { formatBadgeLabels } from './tuiChatLines';
 
 export type ChatterInfoModalState = {
   box: BoxRenderable;
+  close: () => void;
   refreshForMessage: (msg: ChatMessage) => void;
 };
+
+export function isChatterInfoCloseKey(sequence: string): boolean {
+  return sequence === '\x1b' || sequence === '\x1b\x1b' || sequence === 'q' || sequence === 'Q';
+}
 
 type ChatterInfoProvider = {
   fetchChatterInfo?: (userId: string, username: string) => Promise<ChatterInfo | null>;
@@ -318,13 +323,14 @@ export function openChatterInfoModal(ctx: ChatterInfoModalContext, msg: ChatMess
   box.add(
     new TextRenderable(renderer, {
       content:
-        '  [S] session  [A] all-time  [C] context  [click tabs/username]  [↑] scroll / load older  [↓] scroll  [Esc] close',
+        '  [S] session  [A] all-time  [C] context  [click tabs/username]  [↑] scroll / load older  [↓] scroll  [Esc/q] close',
       fg: '#888888',
     }),
   );
   renderer.root.add(box);
   ctx.setActiveChatterInfoModal({
     box,
+    close: () => closeModal(),
     refreshForMessage: (incomingMsg) => {
       if (!currentInfo || !ctx.getActiveChatterInfoModal()) return;
       const sessionAffected = sessionHelpers.doesIncomingMessageAffectChatterSession(
@@ -666,13 +672,18 @@ export function openChatterInfoModal(ctx: ChatterInfoModalContext, msg: ChatMess
     fillMessageScroll(tab, msg.platform, msg.userId);
   }
 
+  function closeModal(): void {
+    if (!ctx.getActiveChatterInfoModal()) return;
+    renderer.removeInputHandler(modalKeyHandler);
+    renderer.root.remove(box.id);
+    ctx.setActiveChatterInfoModal(null);
+    ctx.focusMainInput();
+  }
+
   const modalKeyHandler = (sequence: string): boolean => {
     if (!ctx.getActiveChatterInfoModal()) return false;
-    if (sequence === '\x1b' || sequence === '\x1b\x1b') {
-      renderer.removeInputHandler(modalKeyHandler);
-      renderer.root.remove(box.id);
-      ctx.setActiveChatterInfoModal(null);
-      ctx.focusMainInput();
+    if (isChatterInfoCloseKey(sequence)) {
+      closeModal();
       return true;
     }
     if (sequence === 's' || sequence === 'S') {

@@ -12,6 +12,8 @@ Actions:
 - `obs-audio-routing.wiring [wait=<duration>]`
 - `obs-audio-routing.candidates`
 - `obs-audio-routing.search`
+- `obs-audio-routing.addStreamTarget`
+- `obs-audio-routing.addMusicTarget`
 - `obs-audio-routing.restoreDefaultExclusions`
 - `obs-audio-routing.repairDefaultExclusions`
 
@@ -22,4 +24,7 @@ Notes:
 - `status` and `candidates` expose runtime-only state
 - Unmatched apps stay on their current sink
 - Candidates are runtime-only and disappear on restart
-- The shipped example includes one enabled rule for `cliamp -> Stream`
+- Add persistent rules without editing JSON, for example:
+  - `/action obs-audio-routing.addStreamTarget processBinary=google-chrome sourceSinkName=easyeffects_sink`
+  - `/action obs-audio-routing.addMusicTarget processBinary=spotify`
+- The shipped example includes one enabled rule for `cliamp -> Music`
