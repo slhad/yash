@@ -87,6 +87,7 @@ export interface RuntimeStatusSnapshot {
   autoHeapSnapshots?: {
     enabled: boolean;
     count: number;
+    attemptCount: number;
     maxPerRun: number;
     lastPath: string | null;
     lastError: string | null;
@@ -137,6 +138,7 @@ export class RuntimeMonitor {
     maxRetained: 6,
   };
   private autoHeapSnapshotCount = 0;
+  private autoHeapSnapshotAttemptCount = 0;
   private lastAutoHeapSnapshotAt: number | null = null;
   private lastAutoHeapSnapshotPath: string | null = null;
   private lastAutoHeapSnapshotError: string | null = null;
@@ -288,6 +290,7 @@ export class RuntimeMonitor {
       autoHeapSnapshots: {
         enabled: this.autoHeapSnapshotSettings.enabled,
         count: this.autoHeapSnapshotCount,
+        attemptCount: this.autoHeapSnapshotAttemptCount,
         maxPerRun: this.autoHeapSnapshotSettings.maxPerRun,
         lastPath: this.lastAutoHeapSnapshotPath,
         lastError: this.lastAutoHeapSnapshotError,
@@ -297,7 +300,7 @@ export class RuntimeMonitor {
 
   private maybeWriteAutoHeapSnapshot(latest: MemorySample): void {
     const settings = this.autoHeapSnapshotSettings;
-    if (!settings.enabled || this.autoHeapSnapshotCount >= settings.maxPerRun) return;
+    if (!settings.enabled || this.autoHeapSnapshotAttemptCount >= settings.maxPerRun) return;
     if (
       this.lastAutoHeapSnapshotAt !== null &&
       latest.ts - this.lastAutoHeapSnapshotAt < settings.cooldownMinutes * 60_000
@@ -317,9 +320,10 @@ export class RuntimeMonitor {
     )
       return;
 
+    this.lastAutoHeapSnapshotAt = latest.ts;
+    this.autoHeapSnapshotAttemptCount += 1;
     try {
       this.lastAutoHeapSnapshotPath = this.writeAutomaticHeapSnapshot(settings.maxRetained);
-      this.lastAutoHeapSnapshotAt = latest.ts;
       this.lastAutoHeapSnapshotError = null;
       this.autoHeapSnapshotCount += 1;
     } catch (error) {

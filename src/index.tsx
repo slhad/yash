@@ -1631,6 +1631,8 @@ async function main() {
     }
   };
   process.stdin.on('data', earlyStdinCtrlCHandler);
+  syncRuntimeMonitorTelemetrySettings();
+  runtimeMonitor.start();
   const renderer = await createCliRenderer({
     screenMode:
       (process.env.YASH_SCREEN_MODE as 'main-screen' | 'alternate-screen') ?? 'main-screen',
@@ -1657,8 +1659,10 @@ async function main() {
 
         if (hasActiveModal()) {
           if (sequence === '\x1b' || sequence === '\x1b\x1b') {
+            const closedFallbackModal = Boolean(activeMemoryModal || activeChatterInfoModal);
             activeMemoryModal?.close();
             activeChatterInfoModal?.close();
+            if (closedFallbackModal) return true;
           }
           return false;
         }
@@ -1809,6 +1813,7 @@ async function main() {
       },
     ],
   });
+  process.stdin.off('data', earlyStdinCtrlCHandler);
   cliRenderer = renderer;
 
   // opentui overrides console.* to route output through its capture buffer, which
@@ -2074,6 +2079,7 @@ async function main() {
     forceExit.unref?.();
     isRunning = false;
     if (updateLoop) clearInterval(updateLoop);
+    runtimeMonitor.stop();
     authService.stopAutoRefresh();
     try {
       renderer.destroy();

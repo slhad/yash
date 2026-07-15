@@ -65,6 +65,38 @@ describe('RuntimeMonitor automatic heap snapshots', () => {
     });
   });
 
+  test('throttles failed snapshot attempts with cooldown and the per-run cap', () => {
+    let writes = 0;
+    const monitor = new RuntimeMonitor(() => {
+      writes += 1;
+      throw new Error('snapshot unavailable');
+    });
+    const state = internals(monitor);
+    monitor.configureAutoHeapSnapshots({ ...settings, cooldownMinutes: 30, maxPerRun: 2 });
+
+    addSample(state, 0, 100, 20);
+    addSample(state, 30, 650, 340);
+    state.maybeWriteAutoHeapSnapshot(state.sampleHistory.at(-1));
+    expect(writes).toBe(1);
+    expect(monitor.getStatus().autoHeapSnapshots).toMatchObject({
+      count: 0,
+      attemptCount: 1,
+      lastError: 'Error: snapshot unavailable',
+    });
+
+    addSample(state, 45, 1000, 600);
+    state.maybeWriteAutoHeapSnapshot(state.sampleHistory.at(-1));
+    expect(writes).toBe(1);
+
+    addSample(state, 60, 1300, 800);
+    state.maybeWriteAutoHeapSnapshot(state.sampleHistory.at(-1));
+    expect(writes).toBe(2);
+
+    addSample(state, 90, 1700, 1100);
+    state.maybeWriteAutoHeapSnapshot(state.sampleHistory.at(-1));
+    expect(writes).toBe(2);
+  });
+
   test('does not capture when the heap share is too small or during cooldown', () => {
     let writes = 0;
     const monitor = new RuntimeMonitor(() => {
