@@ -326,10 +326,19 @@ describe('obs-audio-routing bundled example script', () => {
     teardown = harness.teardown;
     const action = harness.getAction('obs-audio-routing.addStreamTarget');
 
+    expect(action.args.processBinary.required).toBe(false);
     expect(action.args.sourceSinkName.autocomplete).toMatchObject({
       type: 'static',
       values: ['easyeffects_sink', 'Stream', 'Music'],
     });
+
+    const windowRuleResult = await action.invoke({
+      id: 'game-stream',
+      windowClass: 'steam_app_12345',
+    });
+    expect(windowRuleResult.output[0]).toBe(
+      '[obs-audio-routing] added stream target game-stream -> Stream',
+    );
 
     const result = await action.invoke({
       processBinary: 'google-chrome',
@@ -344,6 +353,20 @@ describe('obs-audio-routing bundled example script', () => {
       await fs.readFile(path.join(tempDir, 'scripts', 'obs-audio-routing', 'config.jsonc'), 'utf8'),
     );
     expect(configJson.streamTargets).toEqual([
+      {
+        id: 'game-stream',
+        enabled: true,
+        match: {
+          windowClass: 'steam_app_12345',
+          windowTitleRegex: '',
+          processBinary: '',
+          childProcessBinary: '',
+          applicationName: '',
+          mediaName: '',
+          sourceSinkName: '',
+        },
+        notes: '',
+      },
       {
         id: 'stream-googlechrome',
         enabled: true,

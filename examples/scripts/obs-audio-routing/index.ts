@@ -360,7 +360,7 @@ const TARGET_NOTES_ARG = {
 
 const TARGET_MATCH_ARGS = {
   id: TARGET_ID_ARG,
-  processBinary: REQUIRED_PROCESS_BINARY_ARG,
+  processBinary: OPTIONAL_MATCH_ARG,
   childProcessBinary: OPTIONAL_MATCH_ARG,
   applicationName: OPTIONAL_MATCH_ARG,
   mediaName: OPTIONAL_MATCH_ARG,
