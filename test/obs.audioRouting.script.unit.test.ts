@@ -365,7 +365,6 @@ describe('obs-audio-routing bundled example script', () => {
           mediaName: '',
           sourceSinkName: '',
         },
-        notes: '',
       },
       {
         id: 'stream-googlechrome',
