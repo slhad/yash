@@ -6,7 +6,7 @@
   "private": true,
   "scripts": {
     "prestart": "bun run build:web",
-    "start": "bun run src/index.tsx",
+    "start": "exec bun src/index.tsx",
     "prestart:tui": "bun run build:web",
     "start:tui": "YASH_TUI_ONLY=1 bun run src/index.tsx",
     "prestart:webui": "bun run build:web",

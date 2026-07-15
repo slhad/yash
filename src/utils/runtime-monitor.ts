@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import { metrics } from './metrics';
 import { getDataDir } from './settings';
+import { writeAutomaticHeapSnapshotFile } from './tuiFormatting';
 
 const DEFAULT_SAMPLE_INTERVAL_MS = 15_000;
 const DEFAULT_MAX_SAMPLES = 240;
@@ -30,6 +31,16 @@ interface GrowthStat {
   bytes: number;
   samplesApart: number;
   windowMs: number;
+}
+
+export interface AutoHeapSnapshotSettings {
+  enabled: boolean;
+  minRssGrowthMb: number;
+  minHeapGrowthMb: number;
+  minHeapSharePercent: number;
+  cooldownMinutes: number;
+  maxPerRun: number;
+  maxRetained: number;
 }
 
 export interface RuntimeStatusSnapshot {
@@ -73,6 +84,14 @@ export interface RuntimeStatusSnapshot {
   };
   probes: Record<string, { metrics: Record<string, number>; warnings: string[] }>;
   warnings: string[];
+  autoHeapSnapshots?: {
+    enabled: boolean;
+    count: number;
+    attemptCount: number;
+    maxPerRun: number;
+    lastPath: string | null;
+    lastError: string | null;
+  };
 }
 
 function normalizeMetricValue(value: ProbeMetricValue): number | null {
@@ -100,7 +119,7 @@ function formatSignedBytes(bytes: number | null): string {
   return `${bytes > 0 ? '+' : '-'}${abs}`;
 }
 
-class RuntimeMonitor {
+export class RuntimeMonitor {
   private readonly probes = new Map<string, RuntimeProbe>();
   private readonly sampleHistory: MemorySample[] = [];
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -109,6 +128,26 @@ class RuntimeMonitor {
   private maxSamples = DEFAULT_MAX_SAMPLES;
   private telemetryLoggingEnabled = false;
   private telemetryIntervalMs = DEFAULT_TELEMETRY_INTERVAL_MINUTES * 60_000;
+  private autoHeapSnapshotSettings: AutoHeapSnapshotSettings = {
+    enabled: false,
+    minRssGrowthMb: 256,
+    minHeapGrowthMb: 128,
+    minHeapSharePercent: 25,
+    cooldownMinutes: 30,
+    maxPerRun: 3,
+    maxRetained: 6,
+  };
+  private autoHeapSnapshotCount = 0;
+  private autoHeapSnapshotAttemptCount = 0;
+  private lastAutoHeapSnapshotAt: number | null = null;
+  private lastAutoHeapSnapshotPath: string | null = null;
+  private lastAutoHeapSnapshotError: string | null = null;
+
+  constructor(
+    private readonly writeAutomaticHeapSnapshot: (
+      maxRetained: number,
+    ) => string = writeAutomaticHeapSnapshotFile,
+  ) {}
 
   registerProbe(name: string, probe: RuntimeProbe): () => void {
     this.probes.set(name, probe);
@@ -148,6 +187,10 @@ class RuntimeMonitor {
     this.scheduleNextTelemetryLog();
   }
 
+  configureAutoHeapSnapshots(settings: AutoHeapSnapshotSettings): void {
+    this.autoHeapSnapshotSettings = { ...settings };
+  }
+
   captureNow(): RuntimeStatusSnapshot {
     const usage = process.memoryUsage();
     const sample: MemorySample = {
@@ -165,6 +208,7 @@ class RuntimeMonitor {
     }
 
     this.writeProcessMetrics(sample);
+    this.maybeWriteAutoHeapSnapshot(sample);
     return this.buildSnapshot(sample);
   }
 
@@ -243,7 +287,48 @@ class RuntimeMonitor {
       rssTelemetry: this.buildRssTelemetry(latest),
       probes,
       warnings,
+      autoHeapSnapshots: {
+        enabled: this.autoHeapSnapshotSettings.enabled,
+        count: this.autoHeapSnapshotCount,
+        attemptCount: this.autoHeapSnapshotAttemptCount,
+        maxPerRun: this.autoHeapSnapshotSettings.maxPerRun,
+        lastPath: this.lastAutoHeapSnapshotPath,
+        lastError: this.lastAutoHeapSnapshotError,
+      },
     };
+  }
+
+  private maybeWriteAutoHeapSnapshot(latest: MemorySample): void {
+    const settings = this.autoHeapSnapshotSettings;
+    if (!settings.enabled || this.autoHeapSnapshotAttemptCount >= settings.maxPerRun) return;
+    if (
+      this.lastAutoHeapSnapshotAt !== null &&
+      latest.ts - this.lastAutoHeapSnapshotAt < settings.cooldownMinutes * 60_000
+    )
+      return;
+
+    const rssGrowth = this.computeGrowth('rssBytes', 30 * 60_000);
+    const heapGrowth = this.computeGrowth('heapUsedBytes', 30 * 60_000);
+    if (!rssGrowth || !heapGrowth || rssGrowth.bytes <= 0) return;
+    const minRssBytes = settings.minRssGrowthMb * 1024 * 1024;
+    const minHeapBytes = settings.minHeapGrowthMb * 1024 * 1024;
+    const heapSharePercent = (heapGrowth.bytes / rssGrowth.bytes) * 100;
+    if (
+      rssGrowth.bytes < minRssBytes ||
+      heapGrowth.bytes < minHeapBytes ||
+      heapSharePercent < settings.minHeapSharePercent
+    )
+      return;
+
+    this.lastAutoHeapSnapshotAt = latest.ts;
+    this.autoHeapSnapshotAttemptCount += 1;
+    try {
+      this.lastAutoHeapSnapshotPath = this.writeAutomaticHeapSnapshot(settings.maxRetained);
+      this.lastAutoHeapSnapshotError = null;
+      this.autoHeapSnapshotCount += 1;
+    } catch (error) {
+      this.lastAutoHeapSnapshotError = String(error);
+    }
   }
 
   private computeGrowth(key: keyof MemorySample, windowMs: number): GrowthStat | null {
@@ -437,6 +522,11 @@ export function formatRuntimeStatusLines(snapshot: RuntimeStatusSnapshot): strin
   lines.push(
     `[memory] growth heap: 1m ${formatSignedBytes(snapshot.growth.heapUsed['1m']?.bytes ?? null)} | 5m ${formatSignedBytes(snapshot.growth.heapUsed['5m']?.bytes ?? null)} | 15m ${formatSignedBytes(snapshot.growth.heapUsed['15m']?.bytes ?? null)}`,
   );
+  if (snapshot.autoHeapSnapshots?.enabled) {
+    lines.push(
+      `[memory] auto snapshots: ${snapshot.autoHeapSnapshots.count}/${snapshot.autoHeapSnapshots.maxPerRun}${snapshot.autoHeapSnapshots.lastPath ? ` last=${snapshot.autoHeapSnapshots.lastPath}` : ''}${snapshot.autoHeapSnapshots.lastError ? ` error=${snapshot.autoHeapSnapshots.lastError}` : ''}`,
+    );
+  }
 
   for (const [probeName, probe] of Object.entries(snapshot.probes)) {
     const metricPairs = Object.entries(probe.metrics)

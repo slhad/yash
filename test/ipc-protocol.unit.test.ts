@@ -261,26 +261,20 @@ describe('invoke_action', () => {
 });
 
 describe('command compat — type:command', () => {
-  test('routes to handleCommandForCli and wraps output', async () => {
+  test('routes to handleCommandForCli and returns CLI-compatible output', async () => {
     const res = await handleRequest(
       { type: 'command', command: '/marker test' },
       mockHandleCommand,
       ctx,
     );
-    expect(res.ok).toBe(true);
-    const result = res.result as { action: string; output: string };
-    expect(result.action).toBe('command');
-    expect(result.output).toBe('output:/marker test');
+    expect(res).toEqual({ ok: true, output: 'output:/marker test' });
   });
 });
 
 describe('legacy compat — no type field', () => {
   test('routes command field to handleCommandForCli when type is absent', async () => {
     const res = await handleRequest({ command: '/help' }, mockHandleCommand, ctx);
-    expect(res.ok).toBe(true);
-    const result = res.result as { action: string; output: string };
-    expect(result.action).toBe('command');
-    expect(result.output).toBe('output:/help');
+    expect(res).toEqual({ ok: true, output: 'output:/help' });
   });
 });
 

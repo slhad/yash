@@ -16,6 +16,14 @@ import type { ChatLine } from './tuiChatLines';
 
 const STREAM_TEMPLATE_SETTINGS_KEY = 'streamTemplates';
 
+export function isYouTubeCategoryPreviousKey(sequence: string): boolean {
+  return sequence === '\x1b[D' || sequence === '\x1bOD';
+}
+
+export function isYouTubeCategoryNextKey(sequence: string): boolean {
+  return sequence === '\x1b[C' || sequence === '\x1bOC';
+}
+
 export type StreamModalState = {
   box: BoxRenderable;
   focusIndex: number;
@@ -657,12 +665,12 @@ export function openStreamModal(ctx: StreamModalContext, preselected: string[]):
 
     // YouTube category left/right navigation
     if (current?.kind === 'yt-category') {
-      if (sequence === '\x1b[D') {
+      if (isYouTubeCategoryPreviousKey(sequence)) {
         ytCatIdx = (ytCatIdx - 1 + YT_CATS.length) % YT_CATS.length;
         ytCatText.content = ytCatContent(true);
         return true;
       }
-      if (sequence === '\x1b[C') {
+      if (isYouTubeCategoryNextKey(sequence)) {
         ytCatIdx = (ytCatIdx + 1) % YT_CATS.length;
         ytCatText.content = ytCatContent(true);
         return true;

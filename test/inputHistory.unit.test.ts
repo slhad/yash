@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import {
   getInputHistoryPath,
   loadInputHistory,
+  navigateInputHistory,
   saveInputHistory,
   trimInputHistory,
 } from '../src/utils/inputHistory';
@@ -48,5 +49,21 @@ describe('input history persistence', () => {
     trimInputHistory(history, 2);
 
     expect(history).toEqual(['b', 'c']);
+  });
+
+  test('navigateInputHistory walks backward and forward through entries', () => {
+    const history = ['/help', '/marker', 'hello'];
+
+    const newest = navigateInputHistory(history, -1, 'previous');
+    expect(newest).toEqual({ historyIndex: 2, value: 'hello' });
+
+    const older = navigateInputHistory(history, newest.historyIndex, 'previous');
+    expect(older).toEqual({ historyIndex: 1, value: '/marker' });
+
+    const newer = navigateInputHistory(history, older.historyIndex, 'next');
+    expect(newer).toEqual({ historyIndex: 2, value: 'hello' });
+
+    const cleared = navigateInputHistory(history, newer.historyIndex, 'next');
+    expect(cleared).toEqual({ historyIndex: -1, value: '' });
   });
 });

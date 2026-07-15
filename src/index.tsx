@@ -48,6 +48,7 @@ import { getDataDir, isDemoMode, saveConfig } from './utils/config';
 import {
   INPUT_HISTORY_LIMIT,
   loadInputHistory,
+  navigateInputHistory,
   saveInputHistory,
   trimInputHistory,
 } from './utils/inputHistory';
@@ -56,6 +57,7 @@ import logCollector from './utils/logCollector';
 import { defaultLogger, parseLoggerLevelName, setDefaultLoggerLevel } from './utils/logger';
 import {
   formatMemoryStatusDisplay,
+  readMemoryAutoSnapshotSettings,
   readMemoryStatusSettings,
   readMemoryTelemetrySettings,
 } from './utils/memoryStatus';
@@ -313,8 +315,10 @@ function getSettingValue(key: string): unknown {
 }
 
 function syncRuntimeMonitorTelemetrySettings(): void {
-  const telemetry = readMemoryTelemetrySettings((key, fallback) => settings.get(key, fallback));
+  const getter = (key: string, fallback: unknown) => settings.get(key, fallback);
+  const telemetry = readMemoryTelemetrySettings(getter);
   runtimeMonitor.configureTelemetryLogging(telemetry.enabled, telemetry.intervalMinutes);
+  runtimeMonitor.configureAutoHeapSnapshots(readMemoryAutoSnapshotSettings(getter));
 }
 
 function syncDefaultLoggerLevelSetting(): void {
@@ -336,7 +340,7 @@ function applySettingSideEffects(key: string, value: unknown): void {
       trimUiChatMemory();
     }
   }
-  if (key === 'memory.telemetry.enabled' || key === 'memory.telemetry.intervalMinutes') {
+  if (key.startsWith('memory.telemetry.') || key.startsWith('memory.autoSnapshot.')) {
     syncRuntimeMonitorTelemetrySettings();
   }
   if (key === 'logs.level') {
@@ -474,7 +478,7 @@ let activeScriptActionsModal: ScriptActionsModalState | null = null;
 let activeChatterInfoModal: ChatterInfoModalState | null = null;
 let activeHistoryModal: HistoryModalState | null = null;
 let activeActivityModal: { box: BoxRenderable; close: () => void } | null = null;
-let activeMemoryModal: { box: BoxRenderable } | null = null;
+let activeMemoryModal: { box: BoxRenderable; close: () => void } | null = null;
 
 const STREAM_TEMPLATE_SETTINGS_KEY = 'streamTemplates';
 
@@ -1536,6 +1540,45 @@ obsService.subscribeToStatusChanges(() => {
 
 let mainInputSubmitInFlight = false;
 
+function recallInputHistory(direction: 'previous' | 'next'): boolean {
+  if (!uiNodes || hasActiveModal() || browseModeActive) return false;
+  const next = navigateInputHistory(inputHistory, historyIndex, direction);
+  historyIndex = next.historyIndex;
+  if (next.value !== undefined) {
+    uiNodes.inputEl.value = next.value;
+    updateInputAssist();
+  }
+  return true;
+}
+
+function enterBrowseMode(): void {
+  browseModeActive = true;
+  browseSelectedIdx = lastMessages.length > 0 ? lastMessages.length - 1 : null;
+  updateUI(lastMessages);
+}
+
+function exitBrowseMode(): void {
+  browseModeActive = false;
+  browseSelectedIdx = null;
+  updateUI(lastMessages);
+}
+
+function handleMainInputEscape(): boolean {
+  if (!uiNodes || hasActiveModal()) return false;
+  if (browseModeActive) {
+    exitBrowseMode();
+    return true;
+  }
+  if (uiNodes.inputEl.value.length > 0) {
+    uiNodes.inputEl.value = '';
+    historyIndex = -1;
+    updateInputAssist();
+    return true;
+  }
+  enterBrowseMode();
+  return true;
+}
+
 async function submitMainInput(): Promise<void> {
   if (!uiNodes || mainInputSubmitInFlight) return;
   mainInputSubmitInFlight = true;
@@ -1578,6 +1621,18 @@ async function submitMainInput(): Promise<void> {
 }
 
 async function main() {
+  let shutdownStarted = false;
+  let shutdown: () => Promise<void>;
+  const earlyStdinCtrlCHandler = (chunk: Buffer | string) => {
+    const text = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+    if (text.includes('\x03')) {
+      if (shutdown) void shutdown();
+      else process.exit(0);
+    }
+  };
+  process.stdin.on('data', earlyStdinCtrlCHandler);
+  syncRuntimeMonitorTelemetrySettings();
+  runtimeMonitor.start();
   const renderer = await createCliRenderer({
     screenMode:
       (process.env.YASH_SCREEN_MODE as 'main-screen' | 'alternate-screen') ?? 'main-screen',
@@ -1585,18 +1640,34 @@ async function main() {
     openConsoleOnError: false,
     useKittyKeyboard: null,
     useMouse: true,
+    exitOnCtrlC: true,
+    exitSignals: [],
+    onDestroy: () => {
+      if (!shutdownStarted) void shutdown();
+    },
     // Intercept Tab/Up/Down at raw sequence level.
     // Tab → autocomplete; Up/Down → history navigation.
     prependInputHandlers: [
       (sequence: string): boolean => {
         if (!uiNodes) return false;
-        ensureMainInputFocus();
 
-        // Raw mode swallows Ctrl+C — re-raise as SIGINT so one C-c exits cleanly
+        // Raw mode swallows Ctrl+C — shut down directly so one C-c exits cleanly.
         if (sequence === '\x03') {
-          process.kill(process.pid, 'SIGINT');
+          void shutdown();
           return true;
         }
+
+        if (hasActiveModal()) {
+          if (sequence === '\x1b' || sequence === '\x1b\x1b') {
+            const closedFallbackModal = Boolean(activeMemoryModal || activeChatterInfoModal);
+            activeMemoryModal?.close();
+            activeChatterInfoModal?.close();
+            if (closedFallbackModal) return true;
+          }
+          return false;
+        }
+
+        ensureMainInputFocus();
 
         // Some terminals/tmux paths deliver Enter only to the raw prepend handler.
         // Submit main input here so slash commands still execute even when the
@@ -1651,39 +1722,18 @@ async function main() {
         }
 
         // Shift+Up (\x1b[1;2A) — enter browse mode
-        if (
-          sequence === '\x1b[1;2A' &&
-          !activeModal &&
-          !activeStreamModal &&
-          !activeSettingsModal &&
-          !activeObsShutdownConfigModal &&
-          !activeScriptConfigModal &&
-          !activeScriptActionsModal
-        ) {
-          browseModeActive = true;
-          browseSelectedIdx = lastMessages.length > 0 ? lastMessages.length - 1 : null;
-          updateUI(lastMessages);
+        if (sequence === '\x1b[1;2A') {
+          enterBrowseMode();
           return true;
         }
 
         // Shift+Down (\x1b[1;2B) — exit browse mode
-        if (
-          sequence === '\x1b[1;2B' &&
-          !activeModal &&
-          !activeStreamModal &&
-          !activeSettingsModal &&
-          !activeObsShutdownConfigModal &&
-          !activeScriptConfigModal &&
-          !activeScriptActionsModal
-        ) {
-          browseModeActive = false;
-          browseSelectedIdx = null;
-          updateUI(lastMessages);
+        if (sequence === '\x1b[1;2B') {
+          exitBrowseMode();
           return true;
         }
 
-        if (sequence === '\x1b[A') {
-          if (activeScriptActionsModal) return false;
+        if (sequence === '\x1b[A' || sequence === '\x1bOA') {
           // Up arrow — in browse mode: navigate up; otherwise: go back in history
           if (browseModeActive) {
             if (browseSelectedIdx !== null) {
@@ -1692,17 +1742,10 @@ async function main() {
             updateUI(lastMessages);
             return true;
           }
-          if (inputHistory.length === 0) return true;
-          if (historyIndex === -1) historyIndex = inputHistory.length - 1;
-          else if (historyIndex > 0) historyIndex--;
-          const entry = inputHistory[historyIndex] ?? '';
-          uiNodes.inputEl.value = entry;
-          updateInputAssist();
-          return true;
+          return recallInputHistory('previous');
         }
 
-        if (sequence === '\x1b[B') {
-          if (activeScriptActionsModal) return false;
+        if (sequence === '\x1b[B' || sequence === '\x1bOB') {
           // Down arrow — in browse mode: navigate down; otherwise: go forward in history
           if (browseModeActive) {
             if (browseSelectedIdx !== null) {
@@ -1711,25 +1754,12 @@ async function main() {
             updateUI(lastMessages);
             return true;
           }
-          if (historyIndex === -1) return true;
-          historyIndex++;
-          if (historyIndex >= inputHistory.length) {
-            historyIndex = -1;
-            uiNodes.inputEl.value = '';
-          } else {
-            const entry = inputHistory[historyIndex] ?? '';
-            uiNodes.inputEl.value = entry;
-          }
-          updateInputAssist();
-          return true;
+          return recallInputHistory('next');
         }
 
-        // Escape — exit browse mode if active
-        if ((sequence === '\x1b' || sequence === '\x1b\x1b') && browseModeActive) {
-          browseModeActive = false;
-          browseSelectedIdx = null;
-          updateUI(lastMessages);
-          return true;
+        // Escape — clear input first, then enter message browse mode; Escape again exits browse mode.
+        if (sequence === '\x1b' || sequence === '\x1b\x1b') {
+          return handleMainInputEscape();
         }
 
         // Ctrl+L / Ctrl+Shift+L — cycle sidebar visibility
@@ -1783,6 +1813,7 @@ async function main() {
       },
     ],
   });
+  process.stdin.off('data', earlyStdinCtrlCHandler);
   cliRenderer = renderer;
 
   // opentui overrides console.* to route output through its capture buffer, which
@@ -1943,6 +1974,36 @@ async function main() {
     updateInputAssist();
   });
 
+  uiNodes.inputEl.onKeyDown = ((key: {
+    name?: string;
+    ctrl?: boolean;
+    sequence?: string;
+    raw?: string;
+    preventDefault?: () => void;
+    stopPropagation?: () => void;
+  }) => {
+    if ((key.ctrl && key.name === 'c') || key.sequence === '\x03' || key.raw === '\x03') {
+      key.preventDefault?.();
+      key.stopPropagation?.();
+      void shutdown();
+      return;
+    }
+    if (key.name === 'escape') {
+      key.preventDefault?.();
+      handleMainInputEscape();
+      return;
+    }
+    if (key.name === 'up') {
+      key.preventDefault?.();
+      recallInputHistory('previous');
+      return;
+    }
+    if (key.name === 'down') {
+      key.preventDefault?.();
+      recallInputHistory('next');
+    }
+  }) as any;
+
   uiNodes.inputEl.on(InputRenderableEvents.ENTER, async () => {
     await submitMainInput();
   });
@@ -2009,17 +2070,49 @@ async function main() {
 
   const updateLoop = TUI_UPDATE_LOOP_DISABLED ? null : setInterval(runUpdateLoopPass, 2000);
 
-  const shutdown = async () => {
+  shutdown = async () => {
+    if (shutdownStarted) {
+      process.exit(0);
+    }
+    shutdownStarted = true;
+    const forceExit = setTimeout(() => process.exit(0), 750);
+    forceExit.unref?.();
     isRunning = false;
     if (updateLoop) clearInterval(updateLoop);
+    runtimeMonitor.stop();
     authService.stopAutoRefresh();
-    await obsService.disconnect();
-    renderer.destroy();
+    try {
+      renderer.destroy();
+    } catch {
+      // best-effort shutdown
+    }
+    try {
+      await obsService.disconnect();
+    } catch {
+      // best-effort shutdown
+    }
+    clearTimeout(forceExit);
     process.exit(0);
   };
 
-  process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
+  (renderer as any)._keyHandler?.on?.(
+    'keypress',
+    (key: { name?: string; ctrl?: boolean; sequence?: string; raw?: string }) => {
+      if ((key.ctrl && key.name === 'c') || key.sequence === '\x03' || key.raw === '\x03') {
+        void shutdown();
+      }
+    },
+  );
+  (renderer as any).keyHandler?.on?.(
+    'keypress',
+    (key: { name?: string; ctrl?: boolean; sequence?: string; raw?: string }) => {
+      if ((key.ctrl && key.name === 'c') || key.sequence === '\x03' || key.raw === '\x03') {
+        void shutdown();
+      }
+    },
+  );
+  process.on('SIGINT', () => void shutdown());
+  process.on('SIGTERM', () => void shutdown());
 }
 
 main().catch((err) => defaultLogger.error('TUI main failed', err));
