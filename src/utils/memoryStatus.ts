@@ -6,6 +6,13 @@ export const DEFAULT_MEMORY_STATUS_ORANGE_MIN_MB = 2048;
 export const DEFAULT_MEMORY_STATUS_RED_MIN_MB = 5120;
 export const DEFAULT_MEMORY_TELEMETRY_ENABLED = false;
 export const DEFAULT_MEMORY_TELEMETRY_INTERVAL_MINUTES = 15;
+export const DEFAULT_MEMORY_AUTO_SNAPSHOT_ENABLED = false;
+export const DEFAULT_MEMORY_AUTO_SNAPSHOT_MIN_RSS_GROWTH_MB = 256;
+export const DEFAULT_MEMORY_AUTO_SNAPSHOT_MIN_HEAP_GROWTH_MB = 128;
+export const DEFAULT_MEMORY_AUTO_SNAPSHOT_MIN_HEAP_SHARE_PERCENT = 25;
+export const DEFAULT_MEMORY_AUTO_SNAPSHOT_COOLDOWN_MINUTES = 30;
+export const DEFAULT_MEMORY_AUTO_SNAPSHOT_MAX_PER_RUN = 3;
+export const DEFAULT_MEMORY_AUTO_SNAPSHOT_MAX_RETAINED = 6;
 
 export interface MemoryStatusSettings {
   visible: boolean;
@@ -17,6 +24,16 @@ export interface MemoryStatusSettings {
 export interface MemoryTelemetrySettings {
   enabled: boolean;
   intervalMinutes: number;
+}
+
+export interface MemoryAutoSnapshotSettings {
+  enabled: boolean;
+  minRssGrowthMb: number;
+  minHeapGrowthMb: number;
+  minHeapSharePercent: number;
+  cooldownMinutes: number;
+  maxPerRun: number;
+  maxRetained: number;
 }
 
 export interface MemoryStatusDisplay {
@@ -40,6 +57,10 @@ function normalizePositiveInt(raw: unknown, fallback: number): number {
   const parsed = typeof raw === 'number' ? raw : Number.parseInt(String(raw ?? '').trim(), 10);
   if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
   return Math.floor(parsed);
+}
+
+function normalizeBoundedInt(raw: unknown, fallback: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, normalizePositiveInt(raw, fallback)));
 }
 
 export function readMemoryStatusSettings(
@@ -75,6 +96,48 @@ export function readMemoryTelemetrySettings(
     intervalMinutes: normalizePositiveInt(
       getter('memory.telemetry.intervalMinutes', DEFAULT_MEMORY_TELEMETRY_INTERVAL_MINUTES),
       DEFAULT_MEMORY_TELEMETRY_INTERVAL_MINUTES,
+    ),
+  };
+}
+
+export function readMemoryAutoSnapshotSettings(
+  getter: (key: string, defaultValue: unknown) => unknown,
+): MemoryAutoSnapshotSettings {
+  return {
+    enabled:
+      String(getter('memory.autoSnapshot.enabled', DEFAULT_MEMORY_AUTO_SNAPSHOT_ENABLED)) ===
+      'true',
+    minRssGrowthMb: normalizePositiveInt(
+      getter('memory.autoSnapshot.minRssGrowthMb', DEFAULT_MEMORY_AUTO_SNAPSHOT_MIN_RSS_GROWTH_MB),
+      DEFAULT_MEMORY_AUTO_SNAPSHOT_MIN_RSS_GROWTH_MB,
+    ),
+    minHeapGrowthMb: normalizePositiveInt(
+      getter(
+        'memory.autoSnapshot.minHeapGrowthMb',
+        DEFAULT_MEMORY_AUTO_SNAPSHOT_MIN_HEAP_GROWTH_MB,
+      ),
+      DEFAULT_MEMORY_AUTO_SNAPSHOT_MIN_HEAP_GROWTH_MB,
+    ),
+    minHeapSharePercent: normalizeBoundedInt(
+      getter(
+        'memory.autoSnapshot.minHeapSharePercent',
+        DEFAULT_MEMORY_AUTO_SNAPSHOT_MIN_HEAP_SHARE_PERCENT,
+      ),
+      DEFAULT_MEMORY_AUTO_SNAPSHOT_MIN_HEAP_SHARE_PERCENT,
+      1,
+      100,
+    ),
+    cooldownMinutes: normalizePositiveInt(
+      getter('memory.autoSnapshot.cooldownMinutes', DEFAULT_MEMORY_AUTO_SNAPSHOT_COOLDOWN_MINUTES),
+      DEFAULT_MEMORY_AUTO_SNAPSHOT_COOLDOWN_MINUTES,
+    ),
+    maxPerRun: normalizePositiveInt(
+      getter('memory.autoSnapshot.maxPerRun', DEFAULT_MEMORY_AUTO_SNAPSHOT_MAX_PER_RUN),
+      DEFAULT_MEMORY_AUTO_SNAPSHOT_MAX_PER_RUN,
+    ),
+    maxRetained: normalizePositiveInt(
+      getter('memory.autoSnapshot.maxRetained', DEFAULT_MEMORY_AUTO_SNAPSHOT_MAX_RETAINED),
+      DEFAULT_MEMORY_AUTO_SNAPSHOT_MAX_RETAINED,
     ),
   };
 }

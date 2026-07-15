@@ -153,10 +153,7 @@ export async function handleRequest(
       };
     }
     const output = await handleCommandForCli(command);
-    return {
-      ok: true,
-      result: { action: 'command', output },
-    };
+    return { ok: true, output };
   }
 
   return {

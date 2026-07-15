@@ -35,7 +35,7 @@ import { isDemoMode, resolvePort } from './utils/config';
 import { getFfzEmotePayload, type TwitchEmoteFetchContext } from './utils/ffz-fetch';
 import { getHelpCommands } from './utils/help';
 import { defaultLogger, parseLoggerLevelName, setDefaultLoggerLevel } from './utils/logger';
-import { readMemoryTelemetrySettings } from './utils/memoryStatus';
+import { readMemoryAutoSnapshotSettings, readMemoryTelemetrySettings } from './utils/memoryStatus';
 import { apiMetricsHandler, prometheusMetricsHandler } from './utils/metricsHandlers';
 import {
   isPlatformStatusIconPlatform,
@@ -74,10 +74,10 @@ function getSettingValue(key: string): unknown {
 }
 
 function syncRuntimeMonitorTelemetrySettings(): void {
-  const telemetry = readMemoryTelemetrySettings((key, fallback) =>
-    settingsStore.get(key, fallback),
-  );
+  const getter = (key: string, fallback: unknown) => settingsStore.get(key, fallback);
+  const telemetry = readMemoryTelemetrySettings(getter);
   runtimeMonitor.configureTelemetryLogging(telemetry.enabled, telemetry.intervalMinutes);
+  runtimeMonitor.configureAutoHeapSnapshots(readMemoryAutoSnapshotSettings(getter));
 }
 
 function syncDefaultLoggerLevelSetting(): void {
@@ -91,7 +91,7 @@ function applySettingSideEffects(key: string, value: unknown): void {
       chatService.setMaxHistorySize(parsed);
     }
   }
-  if (key === 'memory.telemetry.enabled' || key === 'memory.telemetry.intervalMinutes') {
+  if (key.startsWith('memory.telemetry.') || key.startsWith('memory.autoSnapshot.')) {
     syncRuntimeMonitorTelemetrySettings();
   }
   if (key === 'logs.level') {

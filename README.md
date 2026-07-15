@@ -63,6 +63,8 @@ The memory modal and `/api/runtime/status` also expose RSS-focused telemetry for
 
 If `memory.telemetry.enabled` is turned on, YASH appends periodic JSONL memory snapshots under `YASH_DATA_DIR/logs/memory-telemetry-YYYY-MM-DD.jsonl`. The cadence is controlled by `memory.telemetry.intervalMinutes` (default `15`), and the file is daily/appended rather than one file per startup.
 
+For heap-retention incidents, opt in with `memory.autoSnapshot.enabled=true`. YASH captures only after sustained 30-minute growth meets the configured RSS and JS-heap thresholds (`minRssGrowthMb=256`, `minHeapGrowthMb=128`, heap share `>=25%`), then limits captures with a 30-minute cooldown, `maxPerRun=3`, and `maxRetained=6`. Automatic snapshots are written under `YASH_DATA_DIR/logs/heap-snapshots/`; this remains disabled by default because snapshots pause the process and can temporarily raise memory use.
+
 Inside the live TUI, `/memory modal` opens the same memory status overlay as clicking the `MEM:` status-bar segment. That subcommand is TUI-only and is rejected over IPC and the WebUI command box.
 
 **Exit behaviour:**

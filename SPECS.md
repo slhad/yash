@@ -30,6 +30,7 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
             * Includes TUI refresh-loop counters (`updateUiLoopRefreshCount`, `updateUiNonLoopRefreshCount`, `updateLoopEnabled`, `updateLoopSkippedRefreshCount`) to support live TUI leak A/B soaks
             * Runtime memory snapshots and `/api/runtime/status` expose extra RSS telemetry such as native-gap estimate, since-start growth, sample-to-sample delta, 15m min/max window stats, and 30m/60m growth windows to help diagnose idle RSS drift
             * Optional periodic memory telemetry logging appends JSONL records under `YASH_DATA_DIR/logs/memory-telemetry-YYYY-MM-DD.jsonl`, controlled by `memory.telemetry.enabled` and `memory.telemetry.intervalMinutes`
+* Opt-in automatic heap snapshots detect sustained 30-minute growth only when both RSS and JS heap pass configured thresholds and the heap share is high enough; `memory.autoSnapshot.*` enforces a 30-minute cooldown, per-run capture cap, and retained automatic-snapshot cap under `YASH_DATA_DIR/logs/heap-snapshots/`
         * The periodic TUI refresh loop should be dirty-driven: when no visible provider/OBS/title/viewer/demo state changed since the last render pass, the 2s loop should skip `updateUI()` instead of rebuilding the chat/sidebar trees
     * Command /logs [clear|tail <n>|visible <true|false>] - manage log display (TUI only)
         * Logger verbosity should also be configurable through `/settings` / the settings modal via `logs.level` with values `debug|info|warn|error|none`
@@ -105,6 +106,7 @@ Yet Another Streamer Helper (YASH) is a unified platform manager for YouTube, Tw
         * Includes `status.platformIcons.visible`, `status.platformIcons.youtube.sizePx`, `status.platformIcons.twitch.sizePx`, and `status.platformIcons.kick.sizePx` for runtime-downloaded provider logos in the status bar
         * Includes `memory.status.visible`, `memory.status.greenMaxMb`, `memory.status.orangeMinMb`, and `memory.status.redMinMb` for the status-bar RSS indicator
         * Includes `memory.telemetry.enabled` and `memory.telemetry.intervalMinutes` for periodic RSS telemetry file logging
+* Includes `memory.autoSnapshot.enabled`, `memory.autoSnapshot.minRssGrowthMb`, `memory.autoSnapshot.minHeapGrowthMb`, `memory.autoSnapshot.minHeapSharePercent`, `memory.autoSnapshot.cooldownMinutes`, `memory.autoSnapshot.maxPerRun`, and `memory.autoSnapshot.maxRetained` for bounded automatic heap snapshots
     * Command `/activity` — opens the activity bar modal showing the full event history (follow, sub, cheer, raid) with platform labels and timestamps (TUI only)
         * `Ctrl+G` opens the same activity modal from the keyboard when no other exclusive modal is active
         * When an activity entry carries chatter identity, clicking the chatter name in the modal opens the chatter info modal for that user

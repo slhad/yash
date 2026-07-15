@@ -1,4 +1,4 @@
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, readdirSync, statSync, unlinkSync } from 'node:fs';
 import * as v8 from 'node:v8';
 import { getDataDir } from './config';
 
@@ -28,4 +28,17 @@ export function writeHeapSnapshotFile(label?: string): string {
   const suffix = label ? `-${sanitizeSnapshotLabel(label)}` : '';
   const path = `${dir}/heap-${stamp}-pid${process.pid}${suffix}.heapsnapshot`;
   return v8.writeHeapSnapshot(path);
+}
+
+export function writeAutomaticHeapSnapshotFile(maxRetained: number): string {
+  const path = writeHeapSnapshotFile('auto-growth');
+  const dir = `${getDataDir()}/logs/heap-snapshots`;
+  const snapshots = readdirSync(dir)
+    .filter((name) => name.startsWith('heap-') && name.endsWith('-auto-growth.heapsnapshot'))
+    .map((name) => ({ name, mtimeMs: statSync(`${dir}/${name}`).mtimeMs }))
+    .sort((a, b) => b.mtimeMs - a.mtimeMs);
+  for (const stale of snapshots.slice(Math.max(1, maxRetained))) {
+    unlinkSync(`${dir}/${stale.name}`);
+  }
+  return path;
 }

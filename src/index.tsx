@@ -57,6 +57,7 @@ import logCollector from './utils/logCollector';
 import { defaultLogger, parseLoggerLevelName, setDefaultLoggerLevel } from './utils/logger';
 import {
   formatMemoryStatusDisplay,
+  readMemoryAutoSnapshotSettings,
   readMemoryStatusSettings,
   readMemoryTelemetrySettings,
 } from './utils/memoryStatus';
@@ -314,8 +315,10 @@ function getSettingValue(key: string): unknown {
 }
 
 function syncRuntimeMonitorTelemetrySettings(): void {
-  const telemetry = readMemoryTelemetrySettings((key, fallback) => settings.get(key, fallback));
+  const getter = (key: string, fallback: unknown) => settings.get(key, fallback);
+  const telemetry = readMemoryTelemetrySettings(getter);
   runtimeMonitor.configureTelemetryLogging(telemetry.enabled, telemetry.intervalMinutes);
+  runtimeMonitor.configureAutoHeapSnapshots(readMemoryAutoSnapshotSettings(getter));
 }
 
 function syncDefaultLoggerLevelSetting(): void {
@@ -337,7 +340,7 @@ function applySettingSideEffects(key: string, value: unknown): void {
       trimUiChatMemory();
     }
   }
-  if (key === 'memory.telemetry.enabled' || key === 'memory.telemetry.intervalMinutes') {
+  if (key.startsWith('memory.telemetry.') || key.startsWith('memory.autoSnapshot.')) {
     syncRuntimeMonitorTelemetrySettings();
   }
   if (key === 'logs.level') {

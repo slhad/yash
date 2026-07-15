@@ -1,6 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 import {
   buildMemoryInsightSummary,
+  DEFAULT_MEMORY_AUTO_SNAPSHOT_COOLDOWN_MINUTES,
+  DEFAULT_MEMORY_AUTO_SNAPSHOT_ENABLED,
+  DEFAULT_MEMORY_AUTO_SNAPSHOT_MAX_PER_RUN,
+  DEFAULT_MEMORY_AUTO_SNAPSHOT_MAX_RETAINED,
+  DEFAULT_MEMORY_AUTO_SNAPSHOT_MIN_HEAP_GROWTH_MB,
+  DEFAULT_MEMORY_AUTO_SNAPSHOT_MIN_HEAP_SHARE_PERCENT,
+  DEFAULT_MEMORY_AUTO_SNAPSHOT_MIN_RSS_GROWTH_MB,
   DEFAULT_MEMORY_STATUS_GREEN_MAX_MB,
   DEFAULT_MEMORY_STATUS_ORANGE_MIN_MB,
   DEFAULT_MEMORY_STATUS_RED_MIN_MB,
@@ -8,6 +15,7 @@ import {
   DEFAULT_MEMORY_TELEMETRY_ENABLED,
   DEFAULT_MEMORY_TELEMETRY_INTERVAL_MINUTES,
   formatMemoryStatusDisplay,
+  readMemoryAutoSnapshotSettings,
   readMemoryStatusSettings,
   readMemoryTelemetrySettings,
 } from '../src/utils/memoryStatus';
@@ -71,6 +79,44 @@ describe('readMemoryTelemetrySettings', () => {
     expect(settings).toEqual({
       enabled: true,
       intervalMinutes: 30,
+    });
+  });
+});
+
+describe('readMemoryAutoSnapshotSettings', () => {
+  test('uses safe defaults when automatic snapshots are absent', () => {
+    const settings = readMemoryAutoSnapshotSettings((_key, fallback) => fallback);
+
+    expect(settings).toEqual({
+      enabled: DEFAULT_MEMORY_AUTO_SNAPSHOT_ENABLED,
+      minRssGrowthMb: DEFAULT_MEMORY_AUTO_SNAPSHOT_MIN_RSS_GROWTH_MB,
+      minHeapGrowthMb: DEFAULT_MEMORY_AUTO_SNAPSHOT_MIN_HEAP_GROWTH_MB,
+      minHeapSharePercent: DEFAULT_MEMORY_AUTO_SNAPSHOT_MIN_HEAP_SHARE_PERCENT,
+      cooldownMinutes: DEFAULT_MEMORY_AUTO_SNAPSHOT_COOLDOWN_MINUTES,
+      maxPerRun: DEFAULT_MEMORY_AUTO_SNAPSHOT_MAX_PER_RUN,
+      maxRetained: DEFAULT_MEMORY_AUTO_SNAPSHOT_MAX_RETAINED,
+    });
+  });
+
+  test('reads configured automatic snapshot settings', () => {
+    const values = new Map<string, unknown>([
+      ['memory.autoSnapshot.enabled', true],
+      ['memory.autoSnapshot.minRssGrowthMb', 300],
+      ['memory.autoSnapshot.minHeapGrowthMb', 150],
+      ['memory.autoSnapshot.minHeapSharePercent', 40],
+      ['memory.autoSnapshot.cooldownMinutes', 45],
+      ['memory.autoSnapshot.maxPerRun', 2],
+      ['memory.autoSnapshot.maxRetained', 4],
+    ]);
+
+    expect(readMemoryAutoSnapshotSettings((key, fallback) => values.get(key) ?? fallback)).toEqual({
+      enabled: true,
+      minRssGrowthMb: 300,
+      minHeapGrowthMb: 150,
+      minHeapSharePercent: 40,
+      cooldownMinutes: 45,
+      maxPerRun: 2,
+      maxRetained: 4,
     });
   });
 });
