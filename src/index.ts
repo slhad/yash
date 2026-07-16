@@ -43,7 +43,7 @@ import {
   readPlatformStatusIconsEnabled,
 } from './utils/platformStatusIcons';
 import {
-  ensurePlatformStatusIcon,
+  ensurePlatformStatusIconSvg,
   warmPlatformStatusIcons,
 } from './utils/platformStatusIcons.server';
 import { runtimeMonitor } from './utils/runtime-monitor';
@@ -1023,8 +1023,8 @@ Bun.serve({
           return new Response('not found', { status: 404 });
         }
         try {
-          const icon = await ensurePlatformStatusIcon(platform);
-          return new Response(Bun.file(icon.svgPath), {
+          const svgPath = await ensurePlatformStatusIconSvg(platform);
+          return new Response(Bun.file(svgPath), {
             headers: {
               'Content-Type': 'image/svg+xml; charset=utf-8',
               'Cache-Control': 'public, max-age=86400',
