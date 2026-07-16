@@ -7,27 +7,33 @@
   <link rel="stylesheet" href="./src/styles.css" />
 </head>
 <body class="yash-sidebyside">
-  <header>
-    <h1>YASH — Side by Side</h1>
-    <button class="toggle-btn" id="toggle-youtube" data-platform="youtube">YouTube ✓</button>
-    <button class="toggle-btn" id="toggle-twitch"  data-platform="twitch">Twitch ✓</button>
-    <button class="toggle-btn" id="toggle-kick"    data-platform="kick">Kick ✓</button>
-    <button id="position-btn" title="Toggle message box position">msgbox: bottom ▼</button>
+  <header id="chat-header" class="chat-header">
+    <div class="header-summary" role="button" tabindex="0" aria-controls="msgbox" aria-expanded="true" aria-label="Toggle message composer">
+      <div id="latest-marker" class="latest-marker" aria-live="polite">Loading latest marker…</div>
+      <div id="platform-statuses" class="platform-statuses" aria-label="Platform stream states"></div>
+    </div>
+    <div class="header-controls" aria-label="Platform columns">
+      <button class="toggle-btn" id="toggle-youtube" data-platform="youtube"><img class="platform-icon" data-platform-icon="youtube" alt="" /><span data-platform-state="youtube" class="platform-state-dot is-offline" aria-hidden="true"></span><span class="toggle-label">YouTube</span><span class="toggle-state">✓</span></button>
+      <button class="toggle-btn" id="toggle-twitch" data-platform="twitch"><img class="platform-icon" data-platform-icon="twitch" alt="" /><span data-platform-state="twitch" class="platform-state-dot is-offline" aria-hidden="true"></span><span class="toggle-label">Twitch</span><span class="toggle-state">✓</span></button>
+      <button class="toggle-btn" id="toggle-kick" data-platform="kick"><img class="platform-icon" data-platform-icon="kick" alt="" /><span data-platform-state="kick" class="platform-state-dot is-offline" aria-hidden="true"></span><span class="toggle-label">Kick</span><span class="toggle-state">✓</span></button>
+      <button id="position-btn" title="Change message composer position">msgbox: bottom ▼</button>
+    </div>
+    <div id="activity-bar" class="activity-bar" aria-live="polite">Loading recent activity…</div>
   </header>
 
   <div id="system-feed"></div>
 
   <div id="columns">
     <div class="column" id="col-youtube">
-      <div class="col-header youtube">YouTube</div>
+      <div class="col-header youtube"><img class="platform-icon" data-platform-icon="youtube" alt="" /><span data-platform-state="youtube" class="platform-state-dot is-offline" aria-hidden="true"></span>YouTube</div>
       <div class="col-messages" id="msgs-youtube"></div>
     </div>
     <div class="column" id="col-twitch">
-      <div class="col-header twitch">Twitch</div>
+      <div class="col-header twitch"><img class="platform-icon" data-platform-icon="twitch" alt="" /><span data-platform-state="twitch" class="platform-state-dot is-offline" aria-hidden="true"></span>Twitch</div>
       <div class="col-messages" id="msgs-twitch"></div>
     </div>
     <div class="column" id="col-kick">
-      <div class="col-header kick">Kick</div>
+      <div class="col-header kick"><img class="platform-icon" data-platform-icon="kick" alt="" /><span data-platform-state="kick" class="platform-state-dot is-offline" aria-hidden="true"></span>Kick</div>
       <div class="col-messages" id="msgs-kick"></div>
     </div>
   </div>

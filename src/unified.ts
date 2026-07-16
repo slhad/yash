@@ -1,4 +1,5 @@
 import { type FfzEmoteDefinition, renderMessageWithFfzEmotes } from './utils/ffz';
+import { type ComposerPosition, setupWebChatHeader, startPagePoll } from './utils/webChatHeader';
 import { getWebAutocomplete, handleWebCommand } from './utils/webCommands';
 
 function byId<T extends HTMLElement>(id: string): T {
@@ -7,14 +8,6 @@ function byId<T extends HTMLElement>(id: string): T {
     throw new Error(`Missing element: ${id}`);
   }
   return el as T;
-}
-
-function formatElapsed(isoStart: string): string {
-  const secs = Math.floor((Date.now() - new Date(isoStart).getTime()) / 1000);
-  const h = Math.floor(secs / 3600);
-  const m = Math.floor((secs % 3600) / 60);
-  const s = secs % 60;
-  return h > 0 ? `${h}h${m}m${s}s` : `${m}m${s}s`;
 }
 
 type ChatMessage = {
@@ -27,13 +20,8 @@ type ChatMessage = {
   profileImageUrl?: string | null;
 };
 
-type StatusInfo = {
-  streamStatus?: string;
-  viewerCount?: number;
-  streamStartTime?: string | null;
-};
-
 const STORAGE_KEY = 'yash_msgbox_position';
+const VISIBLE_POSITION_STORAGE_KEY = 'yash_msgbox_visible_position';
 const POSITIONS = ['bottom', 'top', 'hide'] as const;
 const VALID_PLATFORMS = ['all', 'youtube', 'twitch', 'kick'] as const;
 const FFZ_RETRY_INTERVAL_MS = 5_000;
@@ -46,7 +34,7 @@ const platformSelect = byId<HTMLSelectElement>('platform-select');
 const messageInput = byId<HTMLTextAreaElement>('message-input');
 const sendBtn = byId<HTMLButtonElement>('send-btn');
 const autocompleteHint = byId<HTMLDivElement>('autocomplete-hint');
-const statusPlatformsEl = byId<HTMLSpanElement>('status-platforms');
+const pageController = new AbortController();
 
 const inputHistory: string[] = [];
 let historyIdx = -1;
@@ -58,11 +46,16 @@ let ffzEmotes: Record<string, FfzEmoteDefinition> = {};
 const qs = new URLSearchParams(location.search);
 const qsPosition = qs.get('position');
 const qsPlatform = qs.get('platform');
+const storedPosition = localStorage.getItem(STORAGE_KEY);
 
-let currentPosition: (typeof POSITIONS)[number] =
-  qsPosition && POSITIONS.includes(qsPosition as (typeof POSITIONS)[number])
-    ? (qsPosition as (typeof POSITIONS)[number])
-    : ((localStorage.getItem(STORAGE_KEY) || 'bottom') as (typeof POSITIONS)[number]);
+let currentPosition: ComposerPosition =
+  qsPosition && POSITIONS.includes(qsPosition as ComposerPosition)
+    ? (qsPosition as ComposerPosition)
+    : storedPosition && POSITIONS.includes(storedPosition as ComposerPosition)
+      ? (storedPosition as ComposerPosition)
+      : 'bottom';
+let previousVisiblePosition: Exclude<ComposerPosition, 'hide'> =
+  localStorage.getItem(VISIBLE_POSITION_STORAGE_KEY) === 'top' ? 'top' : 'bottom';
 
 function syncUrl(): void {
   const params = new URLSearchParams();
@@ -71,7 +64,7 @@ function syncUrl(): void {
   history.replaceState(null, '', `?${params.toString()}`);
 }
 
-function applyPosition(pos: (typeof POSITIONS)[number]): void {
+function applyPosition(pos: ComposerPosition): void {
   currentPosition = pos;
   localStorage.setItem(STORAGE_KEY, pos);
 
@@ -80,20 +73,23 @@ function applyPosition(pos: (typeof POSITIONS)[number]): void {
   if (pos === 'hide') {
     msgboxEl.style.display = 'none';
     positionBtn.textContent = 'position: hide ●';
-  } else if (pos === 'top') {
-    msgboxEl.style.display = 'flex';
-    msgboxEl.classList.add('position-top');
-    positionBtn.textContent = 'position: top ▲';
   } else {
+    previousVisiblePosition = pos;
+    localStorage.setItem(VISIBLE_POSITION_STORAGE_KEY, pos);
     msgboxEl.style.display = 'flex';
-    positionBtn.textContent = 'position: bottom ▼';
+    if (pos === 'top') msgboxEl.classList.add('position-top');
+    positionBtn.textContent = pos === 'top' ? 'position: top ▲' : 'position: bottom ▼';
   }
+  document.querySelector('.header-summary')?.setAttribute('aria-expanded', String(pos !== 'hide'));
   syncUrl();
 }
 
-function platformTag(platform: string): string {
-  const cls = ['youtube', 'twitch', 'kick'].includes(platform) ? `tag-${platform}` : 'tag-unknown';
-  return `<span class="platform-tag ${cls}">${platform}</span>`;
+function createPlatformTag(platform: string): HTMLSpanElement {
+  const tag = document.createElement('span');
+  const knownPlatform = ['youtube', 'twitch', 'kick'].includes(platform);
+  tag.className = `platform-tag ${knownPlatform ? `tag-${platform}` : 'tag-unknown'}`;
+  tag.textContent = platform;
+  return tag;
 }
 
 function createMessageText(message: string, platform: string): HTMLSpanElement {
@@ -173,7 +169,7 @@ function renderMessage(msg: ChatMessage): HTMLDivElement {
   const div = document.createElement('div');
   div.className = 'msg';
   div.dataset.platform = msg.platform;
-  div.innerHTML = platformTag(msg.platform);
+  div.appendChild(createPlatformTag(msg.platform));
 
   if (msg.profileImageUrl) {
     const avatar = document.createElement('img');
@@ -216,55 +212,27 @@ function appendMessages(msgs: ChatMessage[]): void {
   }
 }
 
-async function fetchHistory(): Promise<void> {
+async function fetchHistory(signal?: AbortSignal): Promise<void> {
   try {
-    const res = await fetch('/api/chat/history');
+    const res = await fetch('/api/chat/history', { signal });
     if (!res.ok) return;
     const msgs = (await res.json()) as ChatMessage[];
     appendMessages(msgs);
   } catch {}
 }
 
-async function fetchStatus(): Promise<void> {
-  try {
-    const res = await fetch('/api/status');
-    if (!res.ok) return;
-    const data = (await res.json()) as Record<string, StatusInfo>;
-    const parts: string[] = [];
-    for (const [name, info] of Object.entries(data)) {
-      if (!info || typeof info !== 'object') continue;
-      const { streamStatus, viewerCount, streamStartTime } = info;
-      const label = name.charAt(0).toUpperCase() + name.slice(1);
-      if (streamStatus === 'ONLINE') {
-        let detail = '';
-        if (streamStartTime) detail += formatElapsed(streamStartTime);
-        if (viewerCount != null) detail += `${detail ? ' / ' : ''}${viewerCount} viewers`;
-        parts.push(`<span class="online">${label}: ONLINE${detail ? ` (${detail})` : ''}</span>`);
-      } else {
-        parts.push(`<span class="offline">${label}: offline</span>`);
-      }
-    }
-    statusPlatformsEl.innerHTML =
-      parts.join('<span class="yash-status-separator"> | </span>') || 'no platforms';
-  } catch {}
-}
-
 function appendSystem(label: string, text: string): void {
   const div = document.createElement('div');
   div.className = 'msg';
-  div.innerHTML = `<span class="platform-tag tag-unknown"></span>`;
-  const tag = div.querySelector<HTMLSpanElement>('.platform-tag');
-  if (tag) {
-    tag.textContent = label;
-  }
+  div.appendChild(createPlatformTag(label));
   div.appendChild(createMessageText(text, 'system'));
   messagesEl.appendChild(div);
   if (isAtBottom) messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
-async function loadFfzEmotes(): Promise<void> {
+async function loadFfzEmotes(signal?: AbortSignal): Promise<void> {
   try {
-    const res = await fetch('/api/twitch/ffz-emotes');
+    const res = await fetch('/api/twitch/ffz-emotes', { signal });
     if (!res.ok) return;
     const data = (await res.json()) as { emotes?: Record<string, FfzEmoteDefinition> };
     ffzEmotes = data.emotes ?? {};
@@ -364,6 +332,12 @@ messageInput.addEventListener('input', () => {
 });
 
 applyPosition(currentPosition);
+setupWebChatHeader({
+  getComposerPosition: () => currentPosition,
+  toggleComposer: () =>
+    applyPosition(currentPosition === 'hide' ? previousVisiblePosition : 'hide'),
+  signal: pageController.signal,
+});
 
 if (qsPlatform && VALID_PLATFORMS.includes(qsPlatform as (typeof VALID_PLATFORMS)[number])) {
   platformSelect.value = qsPlatform;
@@ -372,20 +346,10 @@ if (qsPlatform && VALID_PLATFORMS.includes(qsPlatform as (typeof VALID_PLATFORMS
 syncUrl();
 platformSelect.addEventListener('change', syncUrl);
 
-void fetchHistory();
-void loadFfzEmotes();
-setInterval(() => {
-  void fetchHistory();
-}, 2000);
-setInterval(() => {
-  if (Object.keys(ffzEmotes).length > 0) return;
-  void loadFfzEmotes();
-}, FFZ_RETRY_INTERVAL_MS);
-setInterval(() => {
-  void loadFfzEmotes();
-}, FFZ_REFRESH_INTERVAL_MS);
-
-void fetchStatus();
-setInterval(() => {
-  void fetchStatus();
-}, 3000);
+startPagePoll(fetchHistory, 2_000, pageController.signal);
+startPagePoll(
+  loadFfzEmotes,
+  () => (Object.keys(ffzEmotes).length === 0 ? FFZ_RETRY_INTERVAL_MS : FFZ_REFRESH_INTERVAL_MS),
+  pageController.signal,
+);
+window.addEventListener('pagehide', () => pageController.abort(), { once: true });

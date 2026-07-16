@@ -7,14 +7,14 @@
   <link rel="stylesheet" href="./src/styles.css" />
 </head>
 <body class="yash-unified">
-  <header>
-    <h1>YASH — Unified Chat</h1>
-    <button id="position-btn" title="Toggle message box position">position: bottom ▼</button>
+  <header id="chat-header" class="chat-header">
+    <div class="header-summary" role="button" tabindex="0" aria-controls="msgbox" aria-expanded="true" aria-label="Toggle message composer">
+      <div id="latest-marker" class="latest-marker" aria-live="polite">Loading latest marker…</div>
+      <div id="platform-statuses" class="platform-statuses" aria-label="Platform stream states"></div>
+    </div>
+    <button id="position-btn" title="Change message composer position">position: bottom ▼</button>
+    <div id="activity-bar" class="activity-bar" aria-live="polite">Loading recent activity…</div>
   </header>
-
-  <div id="status-bar">
-    <span id="status-platforms">loading…</span>
-  </div>
 
   <div id="messages"></div>
 
