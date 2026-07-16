@@ -12,7 +12,10 @@ import {
   readPlatformStatusIconSizePxForPlatform,
   readPlatformStatusIconsEnabled,
 } from '../src/utils/platformStatusIcons';
-import { ensurePlatformStatusIcon } from '../src/utils/platformStatusIcons.server';
+import {
+  ensurePlatformStatusIcon,
+  ensurePlatformStatusIconSvg,
+} from '../src/utils/platformStatusIcons.server';
 import { makeRepoTempDir, removeRepoTempDir } from './helpers/testDataDir';
 
 const originalDataDir = process.env.YASH_DATA_DIR;
@@ -110,6 +113,27 @@ describe('platform status icon settings', () => {
     expect(getPlatformStatusIconApiPath('kick')).toBe(
       `/api/assets/platform-icons/kick.svg?v=${PLATFORM_STATUS_ICON_CACHE_VERSION}`,
     );
+  });
+
+  test('ensurePlatformStatusIconSvg does not require a PNG rasterizer', async () => {
+    tempDir = await makeRepoTempDir('platform-icons-svg-only');
+    process.env.YASH_DATA_DIR = tempDir;
+    process.env.YASH_RSVG_CONVERT_COMMAND = path.join(tempDir, 'missing-rsvg-convert');
+    process.env.YASH_MAGICK_COMMAND = path.join(tempDir, 'missing-magick');
+    let fetchCount = 0;
+    globalThis.fetch = (async () => {
+      fetchCount += 1;
+      return new Response('<svg viewBox="0 0 1 1"><path /></svg>', { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const svgPath = await ensurePlatformStatusIconSvg('twitch');
+
+    expect(fetchCount).toBe(1);
+    expect(svgPath).toContain(path.join('cache', 'platform-status-icons', 'twitch.svg'));
+    expect(await fs.readFile(svgPath, 'utf8')).toContain('fill="#9146ff"');
+    expect(
+      await fs.stat(path.join(path.dirname(svgPath), 'twitch.png')).catch(() => null),
+    ).toBeNull();
   });
 
   test('ensurePlatformStatusIcon downloads, recolors, caches, and rasterizes icons', async () => {

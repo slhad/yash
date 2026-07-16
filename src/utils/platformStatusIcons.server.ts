@@ -16,6 +16,11 @@ type PlatformStatusIconFiles = {
   pngPath: string;
 };
 
+type PlatformStatusIconSvgFile = {
+  svgPath: string;
+  changed: boolean;
+};
+
 const PLATFORM_STATUS_ICON_SPECS: Record<
   PlatformStatusIconPlatform,
   { remoteUrl: string; fillHex: string }
@@ -35,6 +40,10 @@ const PLATFORM_STATUS_ICON_SPECS: Record<
 };
 
 const inflightByPlatform = new Map<PlatformStatusIconPlatform, Promise<PlatformStatusIconFiles>>();
+const svgInflightByPlatform = new Map<
+  PlatformStatusIconPlatform,
+  Promise<PlatformStatusIconSvgFile>
+>();
 
 function getPlatformStatusIconCacheDir(dataDir = getDataDir()): string {
   return path.join(dataDir, 'cache', 'platform-status-icons');
@@ -135,28 +144,51 @@ async function rasterizePlatformStatusIconSvg(svgPath: string, pngPath: string):
   await fs.rename(tempPath, pngPath);
 }
 
+async function ensurePlatformStatusIconSvgImpl(
+  platform: PlatformStatusIconPlatform,
+): Promise<PlatformStatusIconSvgFile> {
+  const cacheDir = getPlatformStatusIconCacheDir();
+  const svgPath = getPlatformStatusIconSvgPath(platform);
+  await fs.mkdir(cacheDir, { recursive: true });
+  const spec = PLATFORM_STATUS_ICON_SPECS[platform];
+  if (await fileExists(svgPath)) {
+    const currentSvgText = await fs.readFile(svgPath, 'utf8');
+    const svgText = normalizePlatformStatusIconSvg(currentSvgText, spec.fillHex);
+    if (svgText !== currentSvgText) {
+      await writeTempAndRename(svgPath, svgText);
+      return { svgPath, changed: true };
+    }
+    return { svgPath, changed: false };
+  }
+
+  const svgText = await downloadPlatformStatusIconSvg(platform);
+  await writeTempAndRename(svgPath, svgText);
+  return { svgPath, changed: true };
+}
+
+function ensurePlatformStatusIconSvgFile(
+  platform: PlatformStatusIconPlatform,
+): Promise<PlatformStatusIconSvgFile> {
+  const existing = svgInflightByPlatform.get(platform);
+  if (existing) return existing;
+  const promise = ensurePlatformStatusIconSvgImpl(platform).finally(() => {
+    svgInflightByPlatform.delete(platform);
+  });
+  svgInflightByPlatform.set(platform, promise);
+  return promise;
+}
+
+export async function ensurePlatformStatusIconSvg(
+  platform: PlatformStatusIconPlatform,
+): Promise<string> {
+  return (await ensurePlatformStatusIconSvgFile(platform)).svgPath;
+}
+
 async function ensurePlatformStatusIconImpl(
   platform: PlatformStatusIconPlatform,
 ): Promise<PlatformStatusIconFiles> {
-  const cacheDir = getPlatformStatusIconCacheDir();
-  const svgPath = getPlatformStatusIconSvgPath(platform);
+  const { svgPath, changed: svgChanged } = await ensurePlatformStatusIconSvgFile(platform);
   const pngPath = getPlatformStatusIconPngPath(platform);
-  await fs.mkdir(cacheDir, { recursive: true });
-  const spec = PLATFORM_STATUS_ICON_SPECS[platform];
-  let svgChanged = false;
-  let svgText: string;
-  if (await fileExists(svgPath)) {
-    const currentSvgText = await fs.readFile(svgPath, 'utf8');
-    svgText = normalizePlatformStatusIconSvg(currentSvgText, spec.fillHex);
-    if (svgText !== currentSvgText) {
-      await writeTempAndRename(svgPath, svgText);
-      svgChanged = true;
-    }
-  } else {
-    svgText = await downloadPlatformStatusIconSvg(platform);
-    await writeTempAndRename(svgPath, svgText);
-    svgChanged = true;
-  }
   if (!(await fileExists(pngPath)) || svgChanged) {
     await rasterizePlatformStatusIconSvg(svgPath, pngPath);
   }

@@ -50,32 +50,138 @@ body.yash-sidebyside textarea {
 
 body.yash-unified header,
 body.yash-sidebyside header {
-  background: #1a1a2e;
-  border-bottom: 1px solid #2a2a4a;
+  background: linear-gradient(135deg, #1a1a2e 0%, #15152a 100%);
+  border-bottom: 1px solid #303052;
   padding: 8px 12px;
   display: flex;
   align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+  cursor: pointer;
+  outline: none;
+}
+
+body.yash-unified .header-summary:focus-visible,
+body.yash-sidebyside .header-summary:focus-visible {
+  border-radius: 4px;
+  outline: 2px solid #00c8ff;
+  outline-offset: 3px;
+}
+
+.header-summary {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  flex: 1;
+}
+
+.latest-marker {
+  color: #e9f7ff;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 180px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.latest-marker strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.marker-detail {
+  color: #71829f;
+  font-size: 11px;
+  font-weight: normal;
   flex-shrink: 0;
 }
 
-body.yash-unified header {
-  justify-content: space-between;
+.platform-statuses,
+.header-controls,
+.platform-state {
+  display: flex;
+  align-items: center;
 }
 
-body.yash-sidebyside header {
-  gap: 12px;
-  flex-wrap: wrap;
+.platform-statuses {
+  gap: 7px;
+  flex-shrink: 0;
 }
 
-body.yash-unified header h1,
-body.yash-sidebyside header h1 {
-  color: #00c8ff;
-  font-size: 15px;
-  font-weight: bold;
+.platform-state {
+  gap: 4px;
+  min-width: 28px;
+  padding: 3px 6px;
+  border: 1px solid #30304f;
+  border-radius: 999px;
+  background: #111122;
+  color: #7e8aa3;
 }
 
-body.yash-sidebyside header h1 {
-  margin-right: 4px;
+.platform-state.is-live {
+  border-color: #315840;
+  color: #c9fbd8;
+}
+
+.platform-icon {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+.platform-state-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: #4a4f5d;
+  box-shadow: 0 0 0 2px rgb(74 79 93 / 15%);
+}
+
+.platform-state-dot.is-live {
+  background: #4cff8a;
+  box-shadow: 0 0 7px rgb(76 255 138 / 75%);
+}
+
+.platform-state-detail {
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.header-controls {
+  gap: 7px;
+}
+
+.activity-bar {
+  width: 100%;
+  min-height: 16px;
+  color: #69758d;
+  font-size: 11px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.activity-item.activity-youtube {
+  color: #ff6262;
+}
+
+.activity-item.activity-twitch {
+  color: #b48aff;
+}
+
+.activity-item.activity-kick {
+  color: #79ff4e;
+}
+
+.activity-separator {
+  color: #3d4352;
+  margin: 0 8px;
 }
 
 body.yash-unified #position-btn,
@@ -97,6 +203,9 @@ body.yash-sidebyside .toggle-btn {
 }
 
 body.yash-sidebyside .toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   transition:
     background 0.15s,
     color 0.15s;
@@ -347,33 +456,10 @@ body.yash-sidebyside #send-btn:disabled {
   cursor: not-allowed;
 }
 
-body.yash-unified #status-bar {
-  background: #12122a;
-  border-bottom: 1px solid #2a2a4a;
-  padding: 4px 12px;
-  font-size: 12px;
-  color: #7a8aaa;
-  display: flex;
-  gap: 16px;
-  align-items: center;
-  flex-wrap: wrap;
-  flex-shrink: 0;
-}
-
-body.yash-unified #status-bar .platform-status {
-  color: #a0b0cc;
-}
-
-body.yash-unified #status-bar .online {
-  color: #4cff8a;
-}
-
-body.yash-unified #status-bar .offline {
-  color: #556;
-}
-
-.yash-status-separator {
-  color: #334;
+body.yash-unified #position-btn,
+body.yash-sidebyside #position-btn,
+body.yash-sidebyside .toggle-btn {
+  cursor: pointer;
 }
 
 body.yash-sidebyside #position-btn {
@@ -433,6 +519,30 @@ body.yash-sidebyside .col-header {
   font-size: 13px;
   text-align: center;
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+@media (max-width: 760px) {
+  .header-summary {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .latest-marker {
+    flex: 1;
+  }
+
+  .platform-state-detail {
+    display: none;
+  }
+
+  body.yash-sidebyside .header-controls {
+    width: 100%;
+    overflow-x: auto;
+  }
 }
 
 body.yash-sidebyside .col-header.youtube {

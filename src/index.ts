@@ -31,7 +31,7 @@ import {
   getChatHistoryStreamIds,
   mergeChatHistoryMessages,
 } from './utils/chatHistoryLoader';
-import { isDemoMode, resolvePort } from './utils/config';
+import { getDataDir, isDemoMode, resolvePort } from './utils/config';
 import { getFfzEmotePayload, type TwitchEmoteFetchContext } from './utils/ffz-fetch';
 import { getHelpCommands } from './utils/help';
 import { defaultLogger, parseLoggerLevelName, setDefaultLoggerLevel } from './utils/logger';
@@ -43,11 +43,12 @@ import {
   readPlatformStatusIconsEnabled,
 } from './utils/platformStatusIcons';
 import {
-  ensurePlatformStatusIcon,
+  ensurePlatformStatusIconSvg,
   warmPlatformStatusIcons,
 } from './utils/platformStatusIcons.server';
 import { runtimeMonitor } from './utils/runtime-monitor';
 import { buildStreamMarkerPayload } from './utils/streamMarkerRoute';
+import { MAX_WEB_ACTIVITY_FILE_BYTES, parseWebActivityEvents } from './utils/webActivityEvents';
 
 type TwitchProviderEmoteContext = TwitchEmoteFetchContext & {
   getUserLogin?: () => string | null;
@@ -764,6 +765,25 @@ Bun.serve({
     },
 
     // ------------------------------------------------------------------
+    // Recent, sanitized activity events from the current TUI session.
+    // ------------------------------------------------------------------
+    '/api/activity/recent': {
+      GET: async (req) => {
+        const url = new URL(req.url);
+        const requestedLimit = Number.parseInt(url.searchParams.get('limit') ?? '5', 10);
+        const limit = Number.isFinite(requestedLimit) ? requestedLimit : 5;
+        const activityFile = Bun.file(`${getDataDir()}/activity-events.json`);
+        const raw =
+          activityFile.size <= MAX_WEB_ACTIVITY_FILE_BYTES
+            ? await activityFile.text().catch(() => '[]')
+            : '[]';
+        return new Response(JSON.stringify({ events: parseWebActivityEvents(raw, limit) }), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      },
+    },
+
+    // ------------------------------------------------------------------
     // Cross-platform marker read — GET /api/stream/markers
     // Query params: ?platform=youtube&platform=twitch&limit=<n>
     // Returns the latest markers for each requested platform.
@@ -1003,8 +1023,8 @@ Bun.serve({
           return new Response('not found', { status: 404 });
         }
         try {
-          const icon = await ensurePlatformStatusIcon(platform);
-          return new Response(Bun.file(icon.svgPath), {
+          const svgPath = await ensurePlatformStatusIconSvg(platform);
+          return new Response(Bun.file(svgPath), {
             headers: {
               'Content-Type': 'image/svg+xml; charset=utf-8',
               'Cache-Control': 'public, max-age=86400',
@@ -1017,6 +1037,19 @@ Bun.serve({
             headers: { 'Content-Type': 'application/json' },
           });
         }
+      },
+    },
+
+    '/api/status-icons/:platform': {
+      GET: (req) => {
+        const platform = new URL(req.url).pathname.replace('/api/status-icons/', '').toLowerCase();
+        if (!isPlatformStatusIconPlatform(platform)) {
+          return new Response('not found', { status: 404 });
+        }
+        return Response.redirect(
+          new URL(`/api/assets/platform-icons/${platform}.svg`, req.url),
+          302,
+        );
       },
     },
 

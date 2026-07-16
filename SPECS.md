@@ -389,6 +389,8 @@ Pre-v1 rule: do not add migration/compatibility behavior for old user-script or 
     * YouTube: real OAuth2 Authorization Code flow — visit `GET /api/youtube/auth` to initiate, callback handled at `GET /api/youtube/callback`; TUI `/connect youtube` returns a redirect URL via `POST /api/connect/youtube`
     * Kick: real OAuth 2.1 PKCE flow — visit `GET /api/kick/auth` to initiate, callback handled at `GET /api/kick/callback`; TUI `/connect kick` returns a redirect URL via `POST /api/connect/kick`, and opens a credentials setup modal if `clientId`/`clientSecret` are missing
 - Unified chat interface with platform-specific message normalization
+- `/unified` and `/sidebyside` use a shared live header that shows the newest cross-platform stream marker, icon/dot platform state, and up to five recent current-session activity events. Header activation (click, Enter, or Space) hides/reopens the composer at its prior top/bottom position; nested platform and position controls do not trigger the header toggle. Marker, activity, status, chat, and FFZ polling is teardown-safe and non-overlapping.
+- `/sidebyside` retains per-platform column enable/disable controls and shows platform icons plus live-state dots in both controls and column headings.
 - Persistent message log: all incoming chat messages are appended to a SQLite database at `YASH_DATA_DIR/messages.db`; survives restarts; used by the chatter info modal to show per-user cross-session message history (up to 200 messages per user)
 - Stream control (start/stop/update metadata)
 - Stream markers / chapter points
@@ -411,6 +413,8 @@ Pre-v1 rule: do not add migration/compatibility behavior for old user-script or 
 | GET | `/unified` | Unified chat view (all platforms) |
 | GET | `/sidebyside` | Side-by-side chat view |
 | GET | `/api/status` | Platform + stream status for all platforms; each platform entry includes `viewerCount: number` and `streamStartTime: string\|null` |
+| GET | `/api/status-icons/:platform` | Cached SVG status icon for `youtube`, `twitch`, or `kick`, used by the chat headers with text fallback |
+| GET | `/api/activity/recent?limit=5` | Recent bounded, sanitized activity events from the current persisted TUI activity session (maximum 20) |
 | GET | `/api/chat/history` | Chat history for the current stream context when a live/override `streamId` is known (merged from persisted SQLite history plus matching in-memory messages); otherwise falls back to the current in-memory chat history. Responses may be display-enriched with cached chatter profile metadata such as `profileImageUrl` and `badges` |
 | POST | `/api/chat/send` | Send message: `{ message, platforms? }` |
 | GET | `/api/twitch/ffz-emotes` | Cached FrankerFaceZ emote map for the authenticated Twitch channel used by WebUI and TUI render-time chat substitution |

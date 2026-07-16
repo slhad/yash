@@ -1,4 +1,5 @@
 import { type FfzEmoteDefinition, renderMessageWithFfzEmotes } from './utils/ffz';
+import { type ComposerPosition, setupWebChatHeader, startPagePoll } from './utils/webChatHeader';
 import { getWebAutocomplete, handleWebCommand } from './utils/webCommands';
 
 function byId<T extends HTMLElement>(id: string): T {
@@ -27,6 +28,7 @@ const STORAGE_KEYS: Record<Platform, string> = {
   kick: 'yash_sbs_kick',
 };
 const STORAGE_KEY_POS = 'yash_sbs_msgbox_position';
+const STORAGE_KEY_VISIBLE_POS = 'yash_sbs_msgbox_visible_position';
 const POSITIONS = ['bottom', 'top', 'hide'] as const;
 const FFZ_RETRY_INTERVAL_MS = 5_000;
 const FFZ_REFRESH_INTERVAL_MS = 5 * 60_000;
@@ -59,14 +61,17 @@ const messageInput = byId<HTMLTextAreaElement>('message-input');
 const sendBtn = byId<HTMLButtonElement>('send-btn');
 const systemFeedEl = byId<HTMLDivElement>('system-feed');
 const autocompleteHint = byId<HTMLDivElement>('autocomplete-hint');
+const pageController = new AbortController();
 
 const inputHistory: string[] = [];
 let historyIdx = -1;
 let currentPosition = (
-  qsPosition && POSITIONS.includes(qsPosition as (typeof POSITIONS)[number])
+  qsPosition && POSITIONS.includes(qsPosition as ComposerPosition)
     ? qsPosition
     : localStorage.getItem(STORAGE_KEY_POS) || 'bottom'
-) as (typeof POSITIONS)[number] | string;
+) as ComposerPosition;
+let previousVisiblePosition: Exclude<ComposerPosition, 'hide'> =
+  localStorage.getItem(STORAGE_KEY_VISIBLE_POS) === 'top' ? 'top' : 'bottom';
 let ffzEmotes: Record<string, FfzEmoteDefinition> = {};
 
 function createMessageText(message: string, platform: Platform): HTMLSpanElement {
@@ -154,15 +159,12 @@ function applyToggle(platform: Platform): void {
   const col = byId<HTMLDivElement>(`col-${platform}`);
   const btn = byId<HTMLButtonElement>(`toggle-${platform}`);
   const label = { youtube: 'YouTube', twitch: 'Twitch', kick: 'Kick' }[platform];
-  if (enabled[platform]) {
-    col.classList.remove('hidden');
-    btn.textContent = `${label} ✓`;
-    btn.className = `toggle-btn active-${platform}`;
-  } else {
-    col.classList.add('hidden');
-    btn.textContent = `${label} ✗`;
-    btn.className = 'toggle-btn';
-  }
+  const state = btn.querySelector<HTMLElement>('.toggle-state');
+  col.classList.toggle('hidden', !enabled[platform]);
+  btn.className = enabled[platform] ? `toggle-btn active-${platform}` : 'toggle-btn';
+  if (state) state.textContent = enabled[platform] ? '✓' : '✗';
+  btn.setAttribute('aria-pressed', String(enabled[platform]));
+  btn.setAttribute('aria-label', `${enabled[platform] ? 'Disable' : 'Enable'} ${label} column`);
 }
 
 function appendMessages(msgs: ChatMessage[]): void {
@@ -208,30 +210,30 @@ function appendMessages(msgs: ChatMessage[]): void {
   }
 }
 
-async function fetchHistory(): Promise<void> {
+async function fetchHistory(signal?: AbortSignal): Promise<void> {
   try {
-    const res = await fetch('/api/chat/history');
+    const res = await fetch('/api/chat/history', { signal });
     if (!res.ok) return;
     const msgs = (await res.json()) as ChatMessage[];
     appendMessages(msgs);
   } catch {}
 }
 
-function applyPosition(pos: (typeof POSITIONS)[number]): void {
+function applyPosition(pos: ComposerPosition): void {
   currentPosition = pos;
   localStorage.setItem(STORAGE_KEY_POS, pos);
   msgboxEl.classList.remove('position-top');
   if (pos === 'hide') {
     msgboxEl.style.display = 'none';
     positionBtn.textContent = 'msgbox: hide ●';
-  } else if (pos === 'top') {
-    msgboxEl.style.display = 'flex';
-    msgboxEl.classList.add('position-top');
-    positionBtn.textContent = 'msgbox: top ▲';
   } else {
+    previousVisiblePosition = pos;
+    localStorage.setItem(STORAGE_KEY_VISIBLE_POS, pos);
     msgboxEl.style.display = 'flex';
-    positionBtn.textContent = 'msgbox: bottom ▼';
+    if (pos === 'top') msgboxEl.classList.add('position-top');
+    positionBtn.textContent = pos === 'top' ? 'msgbox: top ▲' : 'msgbox: bottom ▼';
   }
+  document.querySelector('.header-summary')?.setAttribute('aria-expanded', String(pos !== 'hide'));
   syncUrl();
 }
 
@@ -244,9 +246,9 @@ function appendSys(label: string, text: string): void {
   systemFeedEl.scrollTop = systemFeedEl.scrollHeight;
 }
 
-async function loadFfzEmotes(): Promise<void> {
+async function loadFfzEmotes(signal?: AbortSignal): Promise<void> {
   try {
-    const res = await fetch('/api/twitch/ffz-emotes');
+    const res = await fetch('/api/twitch/ffz-emotes', { signal });
     if (!res.ok) return;
     const data = (await res.json()) as { emotes?: Record<string, FfzEmoteDefinition> };
     ffzEmotes = data.emotes ?? {};
@@ -310,7 +312,7 @@ for (const platform of PLATFORMS) {
 }
 
 positionBtn.addEventListener('click', () => {
-  const idx = POSITIONS.indexOf(currentPosition as (typeof POSITIONS)[number]);
+  const idx = POSITIONS.indexOf(currentPosition);
   applyPosition(POSITIONS[(idx + 1) % POSITIONS.length] ?? 'bottom');
 });
 
@@ -357,21 +359,17 @@ messageInput.addEventListener('keydown', (e) => {
   }
 });
 
-applyPosition(
-  POSITIONS.includes(currentPosition as (typeof POSITIONS)[number])
-    ? (currentPosition as (typeof POSITIONS)[number])
-    : 'bottom',
+applyPosition(POSITIONS.includes(currentPosition) ? currentPosition : 'bottom');
+setupWebChatHeader({
+  getComposerPosition: () => currentPosition,
+  toggleComposer: () =>
+    applyPosition(currentPosition === 'hide' ? previousVisiblePosition : 'hide'),
+  signal: pageController.signal,
+});
+startPagePoll(fetchHistory, 2_000, pageController.signal);
+startPagePoll(
+  loadFfzEmotes,
+  () => (Object.keys(ffzEmotes).length === 0 ? FFZ_RETRY_INTERVAL_MS : FFZ_REFRESH_INTERVAL_MS),
+  pageController.signal,
 );
-
-void fetchHistory();
-void loadFfzEmotes();
-setInterval(() => {
-  void fetchHistory();
-}, 2000);
-setInterval(() => {
-  if (Object.keys(ffzEmotes).length > 0) return;
-  void loadFfzEmotes();
-}, FFZ_RETRY_INTERVAL_MS);
-setInterval(() => {
-  void loadFfzEmotes();
-}, FFZ_REFRESH_INTERVAL_MS);
+window.addEventListener('pagehide', () => pageController.abort(), { once: true });
